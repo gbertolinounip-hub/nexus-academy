@@ -6,10 +6,27 @@ import { useRouter } from "next/navigation";
 import { BrandLockup } from "@/components/common/brand-lockup";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
+function getErrorProperty(error: unknown, property: string) {
+  if (typeof error !== "object" || !error) {
+    return null;
+  }
+
+  const record = error as Record<string, unknown>;
+  const value = record[property];
+  return typeof value === "string" || typeof value === "number" ? value : null;
+}
+
 function resolveLoginErrorMessage(error: unknown) {
   if (error instanceof Error) {
     if (error.message === "User is banned") {
       return "Acesso bloqueado. Entre em contato com a coordenação.";
+    }
+
+    if (
+      error.message === "Invalid login credentials" ||
+      error.message === "Invalid authentication credentials"
+    ) {
+      return "Não foi possível autenticar com o e-mail e a senha informados.";
     }
 
     return error.message;
@@ -32,26 +49,38 @@ export function LoginForm({ noticeMessage = null }: LoginFormProps) {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage(null);
+    const formElement = event.currentTarget;
+    const formData = new FormData(formElement);
+    const submittedEmail = String(formData.get("email") ?? "").trim();
+    const submittedPassword = String(formData.get("password") ?? "");
+
+    setEmail(submittedEmail);
+    setPassword(submittedPassword);
+
+    if (!submittedEmail || !submittedPassword) {
+      setErrorMessage("Informe e-mail e senha para continuar.");
+      return;
+    }
 
     startTransition(async () => {
       try {
         const supabase = createSupabaseBrowserClient();
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password
+        const {
+          data: signInData,
+          error
+        } = await supabase.auth.signInWithPassword({
+          email: submittedEmail,
+          password: submittedPassword
         });
 
         if (error) {
           throw error;
         }
 
-        const {
-          data: { user },
-          error: userError
-        } = await supabase.auth.getUser();
+        const user = signInData.user;
 
-        if (userError || !user) {
-          throw userError ?? new Error("Não foi possível validar a sessão autenticada.");
+        if (!user) {
+          throw new Error("Não foi possível validar a sessão autenticada.");
         }
 
         const { data: currentUserData, error: currentUserError } = await supabase
@@ -80,6 +109,12 @@ export function LoginForm({ noticeMessage = null }: LoginFormProps) {
         router.replace("/redirecionar");
         router.refresh();
       } catch (error) {
+        console.error("[login] Falha ao autenticar", {
+          email: submittedEmail,
+          message: error instanceof Error ? error.message : String(error),
+          code: getErrorProperty(error, "code"),
+          status: getErrorProperty(error, "status")
+        });
         setErrorMessage(resolveLoginErrorMessage(error));
       }
     });
@@ -107,6 +142,7 @@ export function LoginForm({ noticeMessage = null }: LoginFormProps) {
           <input
             className="input"
             type="email"
+            name="email"
             placeholder="nome@ies.edu.br"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
@@ -119,6 +155,7 @@ export function LoginForm({ noticeMessage = null }: LoginFormProps) {
           <input
             className="input"
             type="password"
+            name="password"
             placeholder="********"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
