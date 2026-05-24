@@ -3,6 +3,7 @@ import type { Route } from "next";
 import { SectionCard } from "@/components/common/section-card";
 import { EvaluationForm } from "@/components/forms/evaluation-form";
 import { requireRole } from "@/lib/auth/session";
+import { formatEvaluationStatus } from "@/lib/utils/format";
 import { getEvaluationEditorPageData } from "@/services/evaluations";
 
 interface EvaluationEditorPageProps {
@@ -121,7 +122,7 @@ export default async function EvaluationEditorPage({
                       <span className="badge badge-muted">Registro legado</span>
                     ) : null}
                     <span className={`status-pill status-${entry.status}`}>
-                      {entry.status}
+                      {formatEvaluationStatus(entry.status)}
                     </span>
                   </div>
                 </div>

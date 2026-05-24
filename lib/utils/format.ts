@@ -37,8 +37,34 @@ export function formatLaunchType(value: string) {
   }
 }
 
+export function formatStudentStatusBadge(value: string) {
+  switch (value) {
+    case "critico":
+      return "Crítico";
+    case "atencao":
+      return "Atenção";
+    case "bem":
+      return "Satisfatório";
+    default:
+      return value;
+  }
+}
+
+export function formatEvaluationStatus(value: string) {
+  switch (value) {
+    case "rascunho":
+      return "Rascunho";
+    case "publicado":
+      return "Publicado";
+    case "cancelado":
+      return "Cancelado";
+    default:
+      return value;
+  }
+}
+
 export function formatLaunchIdentity(launchType: string, value: string) {
-  return `${formatLaunchType(launchType)} â€” ${formatDate(value)}`;
+  return `${formatLaunchType(launchType)} - ${formatDate(value)}`;
 }
 
 export interface LaunchIdentityDisplay {
@@ -48,12 +74,48 @@ export interface LaunchIdentityDisplay {
   source: "avaliado_em" | "referencia" | "created_at" | "unavailable";
 }
 
+const KNOWN_MOJIBAKE_REPAIRS = [
+  ["â€”", "-"],
+  ["â€“", "-"],
+  ["Â·", "·"],
+  ["Ã§", "ç"],
+  ["Ã£", "ã"],
+  ["Ã¡", "á"],
+  ["Ã ", "à"],
+  ["Ã¢", "â"],
+  ["Ã©", "é"],
+  ["Ãª", "ê"],
+  ["Ã­", "í"],
+  ["Ã³", "ó"],
+  ["Ã´", "ô"],
+  ["Ãµ", "õ"],
+  ["Ãº", "ú"],
+  ["Ã", "Á"],
+  ["Ã€", "À"],
+  ["Ã‚", "Â"],
+  ["Ã‰", "É"],
+  ["ÃŠ", "Ê"],
+  ["Ã“", "Ó"],
+  ["Ã”", "Ô"],
+  ["Ã•", "Õ"],
+  ["Ãš", "Ú"],
+  ["Ã‡", "Ç"]
+] as const;
+
+export function repairKnownMojibake(value: string) {
+  return KNOWN_MOJIBAKE_REPAIRS.reduce(
+    (normalizedValue, [source, target]) =>
+      normalizedValue.replaceAll(source, target),
+    value
+  );
+}
+
 function normalizeText(value?: string | null) {
   if (typeof value !== "string") {
     return null;
   }
 
-  const trimmedValue = value.trim();
+  const trimmedValue = repairKnownMojibake(value).trim();
   return trimmedValue ? trimmedValue : null;
 }
 
@@ -103,7 +165,7 @@ export function resolveLaunchIdentity(input: {
   }
 
   return {
-    label: `${formatLaunchType(input.launchType)} â€” data indisponível`,
+    label: `${formatLaunchType(input.launchType)} - data indisponível`,
     effectiveDateValue: null,
     isLegacyRecord: true,
     source: "unavailable"

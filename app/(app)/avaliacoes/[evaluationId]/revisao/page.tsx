@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { SectionCard } from "@/components/common/section-card";
 import { EvaluationForm } from "@/components/forms/evaluation-form";
 import { requireRole } from "@/lib/auth/session";
+import { formatEvaluationStatus } from "@/lib/utils/format";
 import { getEvaluationReviewPageData } from "@/services/evaluations";
 
 interface EvaluationReviewPageProps {
@@ -95,7 +96,7 @@ export default async function EvaluationReviewPage({
                       <span className="badge badge-muted">Registro legado</span>
                     ) : null}
                     <span className={`status-pill status-${entry.status}`}>
-                      {entry.status}
+                      {formatEvaluationStatus(entry.status)}
                     </span>
                   </div>
                 </div>

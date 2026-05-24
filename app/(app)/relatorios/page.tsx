@@ -5,7 +5,7 @@ import { SectionCard } from "@/components/common/section-card";
 import { ProgressBars } from "@/components/dashboard/progress-bars";
 import { ReportPrintButton } from "@/components/reports/report-print-button";
 import { requireRole } from "@/lib/auth/session";
-import { formatPercentage } from "@/lib/utils/format";
+import { formatPercentage, formatStudentStatusBadge } from "@/lib/utils/format";
 import { getAuthenticatedReportsPageData } from "@/services/reports";
 
 interface ReportsPageProps {
@@ -177,7 +177,7 @@ export default async function ReportsPage(props: ReportsPageProps) {
                       <span>
                         {formatPercentage(student.finalPercentage)} ·{" "}
                         <span className={`status-pill status-${student.status}`}>
-                          {student.status}
+                          {formatStudentStatusBadge(student.status)}
                         </span>
                       </span>
                     </li>
@@ -342,7 +342,7 @@ export default async function ReportsPage(props: ReportsPageProps) {
                         <td>{formatPercentage(student.finalPercentage)}</td>
                         <td>
                           <span className={`status-pill status-${student.status}`}>
-                            {student.status}
+                            {formatStudentStatusBadge(student.status)}
                           </span>
                         </td>
                         <td>

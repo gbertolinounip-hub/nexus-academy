@@ -2133,6 +2133,19 @@ textarea.input:focus {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.master-unit-detail-stacked-panels {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.master-unit-detail-stacked-panels > * {
+  min-width: 0;
+}
+
+.master-unit-detail-stacked-panels .table-wrap {
+  width: 100%;
+  max-width: 100%;
+}
+
 .master-quick-grid,
 .master-entity-grid {
   display: grid;

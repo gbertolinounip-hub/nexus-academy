@@ -257,7 +257,7 @@ export default async function MasterUnitDetailPage({
         )}
       </SectionCard>
 
-      <div className="master-dashboard-panels">
+      <div className="master-dashboard-panels master-unit-detail-stacked-panels">
         <SectionCard
           title="Semestres da unidade"
           description="Visão resumida do ciclo acadêmico cadastrado nesta operação."

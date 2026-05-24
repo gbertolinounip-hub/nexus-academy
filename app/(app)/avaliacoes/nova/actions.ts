@@ -188,7 +188,7 @@ function buildGeneratedReference(
   launchType: "parcial" | "revisao" | "fechamento",
   evaluatedAt: string
 ) {
-  return `${launchTypeLabel(launchType)} â€” ${formatDateFromInput(evaluatedAt)}`;
+  return `${launchTypeLabel(launchType)} - ${formatDateFromInput(evaluatedAt)}`;
 }
 
 function buildEvaluatedAtTimestamp(evaluatedAt: string) {
