@@ -15,6 +15,21 @@ export interface StudentRegistrationFormValues {
   assignments: StudentRegistrationAssignmentFormValue[];
 }
 
+export type ExistingStudentResolutionAction = "reactivate" | "link" | "cancel";
+
+export interface StudentRegistrationConflictInfo {
+  userId: string;
+  name: string;
+  email: string;
+  registration: string;
+  isActive: boolean;
+  hasOperationalActiveSemester: boolean;
+  selectedSemesterLinked: boolean;
+  selectedSemesterLabel: string | null;
+  canLinkCurrentSemester: boolean;
+  linkDisabledReason: string | null;
+}
+
 export interface StudentProfileFormValues {
   student_id: string;
   nome_completo: string;
@@ -46,10 +61,11 @@ export interface SemesterManagementFormValues {
 }
 
 export interface StudentRegistrationActionState {
-  status: "idle" | "success" | "error";
+  status: "idle" | "success" | "error" | "conflict";
   message: string | null;
   fieldErrors: Record<string, string>;
   formValues?: StudentRegistrationFormValues;
+  conflictInfo?: StudentRegistrationConflictInfo | null;
   submittedAt?: number;
 }
 
@@ -137,6 +153,7 @@ export const initialStudentRegistrationActionState: StudentRegistrationActionSta
   status: "idle",
   message: null,
   fieldErrors: {},
+  conflictInfo: null,
   formValues: createInitialStudentRegistrationFormValues()
 };
 

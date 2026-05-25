@@ -216,6 +216,17 @@ function filterEnrollmentsToClasses(enrollments: EnrollmentRow[], classRows: Cla
   return enrollments.filter((enrollment) => visibleClassIds.has(enrollment.turma_id));
 }
 
+function filterActiveStudentUsers(studentUsers: UserRow[]) {
+  return studentUsers.filter((studentUser) => studentUser.ativo);
+}
+
+function filterEnrollmentsToStudentIds(
+  enrollments: EnrollmentRow[],
+  studentIds: Set<string>
+) {
+  return enrollments.filter((enrollment) => studentIds.has(enrollment.aluno_id));
+}
+
 function scoreEnrollmentCandidate(input: {
   enrollment: EnrollmentRow;
   classGroup: ClassRow;
@@ -1325,8 +1336,19 @@ export async function getAuthenticatedProfessorDashboard(
   }
 
   const enrollmentRows = (enrollmentRowsData ?? []) as EnrollmentRow[];
-  const classIds = [...new Set(enrollmentRows.map((row) => row.turma_id))];
-  const studentIds = [...new Set(enrollmentRows.map((row) => row.aluno_id))];
+  const activeEnrollmentRows = enrollmentRows.filter(
+    (enrollment) => enrollment.status === "ativa"
+  );
+
+  if (!activeEnrollmentRows.length) {
+    return buildProfessorEmptyState(
+      "Nenhum aluno vinculado no momento",
+      "Os vínculos existem, mas não há matrículas ativas disponíveis para este professor."
+    );
+  }
+
+  const classIds = [...new Set(activeEnrollmentRows.map((row) => row.turma_id))];
+  const studentIds = [...new Set(activeEnrollmentRows.map((row) => row.aluno_id))];
 
   const [classRowsResult, studentRowsResult, studentUsersResult] = await Promise.all([
     classIds.length
@@ -1342,7 +1364,9 @@ export async function getAuthenticatedProfessorDashboard(
             .select("*")
             .in("id", studentIds)
             .eq("unidade_id", currentUser.unitId)
+            .eq("ativo", true)
         : supabase.from("usuarios").select("*").in("id", studentIds)
+            .eq("ativo", true)
       : Promise.resolve({ data: [], error: null })
   ]);
 
@@ -1355,7 +1379,9 @@ export async function getAuthenticatedProfessorDashboard(
 
   let classRows = (classRowsResult.data ?? []) as ClassRow[];
   const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
-  const studentUsers = (studentUsersResult.data ?? []) as UserRow[];
+  const studentUsers = filterActiveStudentUsers(
+    (studentUsersResult.data ?? []) as UserRow[]
+  );
   const semesterIds = [...new Set(classRows.map((row) => row.semestre_id))];
 
   const [semesterRowsResult, evaluationRowsResult, absenceRowsResult] = await Promise.all([
@@ -1391,7 +1417,11 @@ export async function getAuthenticatedProfessorDashboard(
     currentUser
   );
   classRows = filterClassesToSemesters(classRows, semesterRows);
-  const visibleEnrollmentRows = filterEnrollmentsToClasses(enrollmentRows, classRows);
+  const activeStudentIdSet = new Set(studentUsers.map((studentUser) => studentUser.id));
+  const visibleEnrollmentRows = filterEnrollmentsToStudentIds(
+    filterEnrollmentsToClasses(activeEnrollmentRows, classRows),
+    activeStudentIdSet
+  );
 
   if (!visibleEnrollmentRows.length || !classRows.length || !semesterRows.length) {
     return buildProfessorEmptyState(
@@ -1704,7 +1734,6 @@ export async function getAuthenticatedCoordinatorDashboard(
   const activeEnrollmentRows = enrollmentRows.filter(
     (enrollment) => enrollment.status === "ativa"
   );
-  const enrollmentIds = activeEnrollmentRows.map((enrollment) => enrollment.id);
   const studentIds = [...new Set(activeEnrollmentRows.map((row) => row.aluno_id))];
 
   const [studentRowsResult, studentUsersResult, professorLinksResult] =
@@ -1718,12 +1747,13 @@ export async function getAuthenticatedCoordinatorDashboard(
             .select("*")
             .in("id", studentIds)
             .eq("unidade_id", currentUnitId)
+            .eq("ativo", true)
         : Promise.resolve({ data: [], error: null }),
-      enrollmentIds.length
+      activeEnrollmentRows.length
         ? supabase
             .from("vinculos_professor_aluno")
             .select("*")
-            .in("matricula_turma_id", enrollmentIds)
+            .in("matricula_turma_id", activeEnrollmentRows.map((enrollment) => enrollment.id))
             .eq("ativo", true)
         : Promise.resolve({ data: [], error: null })
     ]);
@@ -1740,8 +1770,27 @@ export async function getAuthenticatedCoordinatorDashboard(
   }
 
   const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
-  const studentUsers = (studentUsersResult.data ?? []) as UserRow[];
-  const professorLinks = (professorLinksResult.data ?? []) as ProfessorLinkRow[];
+  const studentUsers = filterActiveStudentUsers(
+    (studentUsersResult.data ?? []) as UserRow[]
+  );
+  const activeStudentIdSet = new Set(studentUsers.map((studentUser) => studentUser.id));
+  const visibleEnrollmentRows = filterEnrollmentsToStudentIds(
+    activeEnrollmentRows,
+    activeStudentIdSet
+  );
+
+  if (!visibleEnrollmentRows.length) {
+    return buildCoordinatorEmptyState(
+      "Nenhum aluno ativo no semestre atual",
+      "Os vínculos do semestre existem, mas não há alunos com acesso ativo disponíveis na operação corrente."
+    );
+  }
+
+  const enrollmentIds = visibleEnrollmentRows.map((enrollment) => enrollment.id);
+  const visibleEnrollmentIdSet = new Set(enrollmentIds);
+  const professorLinks = ((professorLinksResult.data ?? []) as ProfessorLinkRow[]).filter(
+    (link) => visibleEnrollmentIdSet.has(link.matricula_turma_id)
+  );
   const professorIds = [...new Set(professorLinks.map((link) => link.professor_id))];
 
   const [
@@ -1835,7 +1884,7 @@ export async function getAuthenticatedCoordinatorDashboard(
   const blockMap = new Map(blockRows.map((block) => [block.id, block]));
   const professorUserMap = new Map(professorUsers.map((row) => [row.id, row]));
 
-  const linkedStudentDashboards = activeEnrollmentRows
+  const linkedStudentDashboards = visibleEnrollmentRows
     .map((enrollment) => {
       const studentRow = studentRowMap.get(enrollment.aluno_id);
       const studentUser = studentUserMap.get(enrollment.aluno_id);

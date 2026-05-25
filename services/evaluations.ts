@@ -235,6 +235,17 @@ function filterEnrollmentsToClasses(enrollments: EnrollmentRow[], classRows: Cla
   return enrollments.filter((enrollment) => visibleClassIds.has(enrollment.turma_id));
 }
 
+function filterActiveStudentUsers(studentUsers: UserRow[]) {
+  return studentUsers.filter((studentUser) => studentUser.ativo);
+}
+
+function filterEnrollmentsToStudentIds(
+  enrollments: EnrollmentRow[],
+  studentIds: Set<string>
+) {
+  return enrollments.filter((enrollment) => studentIds.has(enrollment.aluno_id));
+}
+
 function safeSortableTimestamp(value?: string | null) {
   return typeof value === "string" ? value : "";
 }
@@ -720,7 +731,8 @@ async function loadProfessorEvaluationContext(
           .select("*")
           .in("id", studentIds)
           .eq("unidade_id", currentUser.unitId)
-      : supabase.from("usuarios").select("*").in("id", studentIds),
+          .eq("ativo", true)
+      : supabase.from("usuarios").select("*").in("id", studentIds).eq("ativo", true),
     supabase.from("turmas").select("*").in("id", classIds)
   ]);
 
@@ -736,7 +748,9 @@ async function loadProfessorEvaluationContext(
   }
 
   const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
-  const studentUsers = (studentUsersResult.data ?? []) as UserRow[];
+  const studentUsers = filterActiveStudentUsers(
+    (studentUsersResult.data ?? []) as UserRow[]
+  );
   let classRows = (classRowsResult.data ?? []) as ClassRow[];
   const semesterIds = [...new Set(classRows.map((row) => row.semestre_id))];
 
@@ -760,7 +774,11 @@ async function loadProfessorEvaluationContext(
     currentUser
   );
   classRows = filterClassesToSemesters(classRows, semesterRows);
-  const visibleEnrollmentRows = filterEnrollmentsToClasses(enrollmentRows, classRows);
+  const activeStudentIdSet = new Set(studentUsers.map((studentUser) => studentUser.id));
+  const visibleEnrollmentRows = filterEnrollmentsToStudentIds(
+    filterEnrollmentsToClasses(enrollmentRows, classRows),
+    activeStudentIdSet
+  );
 
   if (!visibleEnrollmentRows.length || !classRows.length || !semesterRows.length) {
     return {

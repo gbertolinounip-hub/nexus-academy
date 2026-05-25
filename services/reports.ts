@@ -456,6 +456,26 @@ function filterEnrollmentsToClasses(enrollments: EnrollmentRow[], classRows: Cla
   return enrollments.filter((enrollment) => visibleClassIds.has(enrollment.turma_id));
 }
 
+function filterActiveStudentUsers(studentUsers: UserRow[]) {
+  return studentUsers.filter((studentUser) => studentUser.ativo);
+}
+
+function filterEnrollmentsToStudentIds(
+  enrollments: EnrollmentRow[],
+  studentIds: Set<string>
+) {
+  return enrollments.filter((enrollment) => studentIds.has(enrollment.aluno_id));
+}
+
+function getTodayInSaoPaulo() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
+}
+
 async function resolveReportScope(
   currentUser: SessionUser
 ): Promise<{ scope: ReportScope | null; emptyState: ReportEmptyState | null }> {
@@ -493,10 +513,13 @@ async function resolveReportScope(
   }
 
   const supabase = await createSupabaseServerClient();
+  const today = getTodayInSaoPaulo();
   const { data: professorLinksData, error: professorLinksError } = await supabase
     .from("vinculos_professor_aluno")
     .select("*")
-    .eq("professor_id", currentUser.id);
+    .eq("professor_id", currentUser.id)
+    .eq("ativo", true)
+    .or(`data_fim.is.null,data_fim.gte.${today}`);
 
   if (professorLinksError) {
     return {
@@ -606,7 +629,7 @@ async function loadAcademicBundle(
       ? supabase.from("alunos").select("*").in("usuario_id", studentIds)
       : Promise.resolve({ data: [], error: null as null }),
     studentIds.length
-      ? supabase.from("usuarios").select("*").in("id", studentIds)
+      ? supabase.from("usuarios").select("*").in("id", studentIds).eq("ativo", true)
       : Promise.resolve({ data: [], error: null as null }),
     enrollmentIds.length
       ? supabase
@@ -645,11 +668,29 @@ async function loadAcademicBundle(
   const areas = (areaRowsResult.data ?? []) as AreaRow[];
   const areaById = new Map(areas.map((area) => [area.id, area]));
   const blockIds = [...new Set(areas.map((area) => area.bloco_id))];
-  const professorLinks = (professorLinksResult.data ?? []) as ProfessorLinkRow[];
+  const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
+  const studentUsers = filterActiveStudentUsers(
+    (studentUsersResult.data ?? []) as UserRow[]
+  );
+  const activeStudentIdSet = new Set(studentUsers.map((studentUser) => studentUser.id));
+  const visibleEnrollments = filterEnrollmentsToStudentIds(
+    enrollments,
+    activeStudentIdSet
+  );
+  const visibleEnrollmentIdSet = new Set(
+    visibleEnrollments.map((enrollment) => enrollment.id)
+  );
+  const professorLinks = ((professorLinksResult.data ?? []) as ProfessorLinkRow[]).filter(
+    (link) => visibleEnrollmentIdSet.has(link.matricula_turma_id)
+  );
   const professorIds = [...new Set(professorLinks.map((link) => link.professor_id))];
-  const evaluations = (evaluationRowsResult.data ?? []) as EvaluationRow[];
+  const evaluations = ((evaluationRowsResult.data ?? []) as EvaluationRow[]).filter(
+    (evaluation) => visibleEnrollmentIdSet.has(evaluation.matricula_turma_id)
+  );
   const evaluationIds = [...new Set(evaluations.map((evaluation) => evaluation.id))];
-  const absences = (absenceRowsResult.data ?? []) as AbsenceRow[];
+  const absences = ((absenceRowsResult.data ?? []) as AbsenceRow[]).filter(
+    (absence) => visibleEnrollmentIdSet.has(absence.matricula_turma_id)
+  );
 
   const [blockRowsResult, professorUsersResult, evaluationItemsResult] =
     await Promise.all([
@@ -692,8 +733,6 @@ async function loadAcademicBundle(
 
   const blocks = (blockRowsResult.data ?? []) as BlockRow[];
   const blockById = new Map(blocks.map((block) => [block.id, block]));
-  const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
-  const studentUsers = (studentUsersResult.data ?? []) as UserRow[];
   const professorUsers = (professorUsersResult.data ?? []) as UserRow[];
   const criterionRows = (criteriaResult.data ?? []) as CriterionRow[];
   const studentById = new Map(studentRows.map((student) => [student.usuario_id, student]));
@@ -732,7 +771,7 @@ async function loadAcademicBundle(
   const dashboardsByEnrollmentId = new Map<string, StudentDashboardData>();
   const summariesByEnrollmentId = new Map<string, ProfessorStudentSummary>();
 
-  for (const enrollment of enrollments) {
+  for (const enrollment of visibleEnrollments) {
     const classGroup = classById.get(enrollment.turma_id);
     const semester = classGroup ? semesterById.get(classGroup.semestre_id) : undefined;
     const studentRow = studentById.get(enrollment.aluno_id);
@@ -772,7 +811,7 @@ async function loadAcademicBundle(
   }
 
   return {
-    enrollments,
+    enrollments: visibleEnrollments,
     classes,
     semesters,
     areas,
@@ -1132,6 +1171,18 @@ export async function getAuthenticatedReportsPageData(
     }
 
     const bundle = await loadAcademicBundle(enrollmentRows, classRows, [selectedSemester]);
+
+    if (!bundle.enrollments.length) {
+      return buildReportsEmptyState(
+        "Nenhum aluno ativo disponível para este semestre",
+        "Os vínculos do semestre foram encontrados, mas não há alunos ativos disponíveis para compor os relatórios correntes."
+      );
+    }
+
+    const visibleClassIds = new Set(
+      bundle.enrollments.map((enrollment) => enrollment.turma_id)
+    );
+    classRows = classRows.filter((classGroup) => visibleClassIds.has(classGroup.id));
     return {
       reports: buildReportsHubData({
         scope,
@@ -1192,6 +1243,18 @@ export async function getAuthenticatedReportsPageData(
   );
 
   const bundle = await loadAcademicBundle(enrollmentRows, classRows, [selectedSemester]);
+
+  if (!bundle.enrollments.length) {
+    return buildReportsEmptyState(
+      "Nenhum aluno ativo disponível para este supervisor",
+      "Os vínculos acadêmicos existem, mas não há alunos ativos disponíveis na operação corrente deste supervisor."
+    );
+  }
+
+  const activeStudentClassIds = new Set(
+    bundle.enrollments.map((enrollment) => enrollment.turma_id)
+  );
+  classRows = classRows.filter((classGroup) => activeStudentClassIds.has(classGroup.id));
   return {
     reports: buildReportsHubData({
       scope,
@@ -1594,6 +1657,14 @@ export async function getAuthenticatedStudentFinalReport(
     selectedClasses,
     [selectedSemester]
   );
+
+  if (!bundle.enrollments.length) {
+    return buildStudentReportEmptyState(
+      "Aluno indisponível na operação corrente",
+      "Este aluno não possui vínculo operacional ativo acessível neste contexto de relatório."
+    );
+  }
+
   const studentRollup =
     scope.role === "professor"
       ? buildProfessorStudentAreaReportRowsForSemester(selectedSemester, bundle).find(
@@ -1833,6 +1904,16 @@ export async function getAuthenticatedClassFinalReport(
   }
 
   const bundle = await loadAcademicBundle(enrollmentRows, [classGroup], semesterRows);
+
+  if (!bundle.enrollments.length) {
+    return buildClassReportEmptyState(
+      "Nenhum aluno ativo encontrado no escopo da turma",
+      scope.role === "coordenador"
+        ? "Esta turma não possui alunos ativos suficientes para o relatório corrente."
+        : "Esta turma não possui alunos ativos vinculados a este supervisor no contexto atual."
+    );
+  }
+
   const semester = visibleSemesterRows[0];
   const areaName = fallbackAreaName(classGroup, bundle.areaById);
   const blockName = fallbackBlockName(classGroup, bundle.areaById, bundle.blockById);

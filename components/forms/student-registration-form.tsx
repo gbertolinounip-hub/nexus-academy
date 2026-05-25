@@ -59,15 +59,21 @@ export function StudentRegistrationForm({
   const [draft, setDraft] = useState<StudentRegistrationFormValues>(() =>
     buildInitialDraft(semesters)
   );
+  const [isConflictDismissed, setIsConflictDismissed] = useState(false);
 
   const allAreas = useMemo(() => areaBlocks.flatMap((block) => block.areas), [areaBlocks]);
+  const conflictInfo = safeState.status === "conflict" ? safeState.conflictInfo ?? null : null;
+  const shouldShowConflictResolution = Boolean(conflictInfo && !isConflictDismissed);
 
   useEffect(() => {
     setDraft(buildInitialDraft(semesters));
   }, [semesters]);
 
   useEffect(() => {
-    if (safeState.status !== "error" || !safeState.formValues) {
+    if (
+      (safeState.status !== "error" && safeState.status !== "conflict") ||
+      !safeState.formValues
+    ) {
       return;
     }
 
@@ -84,6 +90,10 @@ export function StudentRegistrationForm({
 
     setDraft(buildInitialDraft(semesters));
   }, [safeState.status, safeState.submittedAt, semesters]);
+
+  useEffect(() => {
+    setIsConflictDismissed(false);
+  }, [safeState.status, safeState.submittedAt]);
 
   function updateDraft(
     field: Exclude<keyof StudentRegistrationFormValues, "assignments">,
@@ -171,6 +181,11 @@ export function StudentRegistrationForm({
         name="assignments_payload"
         value={JSON.stringify(draft.assignments)}
       />
+      <input
+        type="hidden"
+        name="existing_student_user_id"
+        value={conflictInfo?.userId ?? ""}
+      />
 
       {safeState.message ? (
         <div
@@ -181,6 +196,95 @@ export function StudentRegistrationForm({
           }
         >
           {safeState.message}
+        </div>
+      ) : null}
+
+      {shouldShowConflictResolution && conflictInfo ? (
+        <div className="management-block-card student-registration-resolution-card">
+          <div className="management-block-header">
+            <div>
+              <h3>Cadastro-base já encontrado</h3>
+              <p className="field-help">
+                O e-mail informado já pertence a um aluno desta unidade. Escolha
+                como deseja reaproveitar o histórico sem duplicar a pessoa.
+              </p>
+            </div>
+          </div>
+
+          <div className="report-mini-grid student-registration-resolution-grid">
+            <div className="report-mini-card">
+              <span>Aluno localizado</span>
+              <strong>{conflictInfo.name}</strong>
+            </div>
+            <div className="report-mini-card">
+              <span>RA atual</span>
+              <strong>{conflictInfo.registration}</strong>
+            </div>
+            <div className="report-mini-card">
+              <span>Status operacional</span>
+              <strong>{conflictInfo.isActive ? "Ativo" : "Arquivado"}</strong>
+            </div>
+            <div className="report-mini-card">
+              <span>Acesso acadêmico</span>
+              <strong>
+                {conflictInfo.hasOperationalActiveSemester
+                  ? "Há vínculo ativo"
+                  : "Sem vínculo ativo"}
+              </strong>
+            </div>
+            <div className="report-mini-card">
+              <span>Semestre selecionado</span>
+              <strong>{conflictInfo.selectedSemesterLabel ?? "Não informado"}</strong>
+            </div>
+          </div>
+
+          <div className="stack student-registration-resolution-copy">
+            <p className="field-help">
+              <strong>Reativar cadastro existente</strong> atualiza os dados-base,
+              redefine a senha informada e reavalia o acesso operacional do aluno.
+            </p>
+            <p className="field-help">
+              <strong>Vincular ao semestre atual</strong> reaproveita a mesma
+              pessoa e cria ou reativa somente os vínculos do semestre e das áreas
+              informadas, sem duplicar matrícula.
+            </p>
+            {conflictInfo.selectedSemesterLinked ? (
+              <p className="field-help">
+                Este aluno já possui vínculo no semestre selecionado. A operação
+                vai reaproveitar esse histórico e evitar duplicações indevidas.
+              </p>
+            ) : null}
+            {!conflictInfo.canLinkCurrentSemester && conflictInfo.linkDisabledReason ? (
+              <p className="field-help">{conflictInfo.linkDisabledReason}</p>
+            ) : null}
+          </div>
+
+          <div className="actions-row">
+            <button
+              className="button"
+              type="submit"
+              name="existing_student_resolution"
+              value="reactivate"
+            >
+              Reativar cadastro existente
+            </button>
+            <button
+              className="button button-secondary"
+              type="submit"
+              name="existing_student_resolution"
+              value="link"
+              disabled={!conflictInfo.canLinkCurrentSemester}
+            >
+              Vincular ao semestre atual
+            </button>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => setIsConflictDismissed(true)}
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
       ) : null}
 

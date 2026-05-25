@@ -748,6 +748,18 @@ select {
   align-self: end;
 }
 
+.student-registration-resolution-card {
+  gap: 1rem;
+}
+
+.student-registration-resolution-grid {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.student-registration-resolution-copy {
+  gap: 0.45rem;
+}
+
 .audit-closed-semester-stack {
   display: grid;
   gap: 1rem;
