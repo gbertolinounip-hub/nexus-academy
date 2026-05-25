@@ -1,7 +1,7 @@
 ﻿import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 import type { AuditEntry, SessionUser } from "@/types/domain";
-import type { PostgrestError } from "@supabase/supabase-js";
+import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 
 type AuditHistoryRow = Database["public"]["Tables"]["historico_alteracoes"]["Row"];
 type UserRow = Database["public"]["Tables"]["usuarios"]["Row"];
@@ -14,11 +14,14 @@ type EnrollmentRow = Database["public"]["Tables"]["matriculas_turma"]["Row"];
 type ProfessorLinkRow = Database["public"]["Tables"]["vinculos_professor_aluno"]["Row"];
 type EvaluationRow = Database["public"]["Tables"]["avaliacoes"]["Row"];
 type CriterionRow = Database["public"]["Tables"]["criterios_avaliacao"]["Row"];
+type SupabaseDatabaseClient = SupabaseClient<Database>;
 
 type JsonRecord = Record<string, unknown>;
 
 interface AuditPageLoadResult {
   entries: AuditEntry[];
+  areaOptions: UnitAuditAreaOption[];
+  filters: UnitAuditFilterState;
   closedSemesters: Array<{
     id: string;
     code: string;
@@ -81,6 +84,27 @@ interface AuditContext {
   evaluations: Map<string, EvaluationRow>;
   evaluationSnapshots: Map<string, JsonRecord>;
   criteria: Map<string, CriterionRow>;
+  areas: Map<string, UnitAuditAreaOption>;
+}
+
+export interface UnitAuditFilterState {
+  startDate: string;
+  endDate: string;
+  areaId: string;
+}
+
+export interface UnitAuditAreaOption {
+  id: string;
+  name: string;
+  blockName: string;
+}
+
+export interface UnitAuditFeed {
+  entries: AuditEntry[];
+  areaOptions: UnitAuditAreaOption[];
+  filters: UnitAuditFilterState;
+  semesterRows: SemesterRow[];
+  classRows: ClassRow[];
 }
 
 function buildAuditEmptyState(
@@ -89,6 +113,12 @@ function buildAuditEmptyState(
 ): AuditPageLoadResult {
   return {
     entries: [],
+    areaOptions: [],
+    filters: {
+      startDate: "",
+      endDate: "",
+      areaId: ""
+    },
     closedSemesters: [],
     selectedSemesterId: null,
     selectedClosedSemester: null,
@@ -130,15 +160,65 @@ function isAuditUnitScopeMissingColumnError(error: PostgrestError | null) {
   );
 }
 
+function normalizeQueryValue(value?: string | string[] | null) {
+  if (Array.isArray(value)) {
+    return value[0] ?? "";
+  }
+
+  return value ?? "";
+}
+
+function normalizeDateFilterValue(value?: string | string[] | null) {
+  const normalizedValue = normalizeQueryValue(value).trim();
+
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalizedValue) ? normalizedValue : "";
+}
+
+function addDays(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+
+  return date.toISOString().slice(0, 10);
+}
+
+function buildUnitAuditFilterState(input?: {
+  startDate?: string | string[] | null;
+  endDate?: string | string[] | null;
+  areaId?: string | string[] | null;
+}): UnitAuditFilterState {
+  return {
+    startDate: normalizeDateFilterValue(input?.startDate),
+    endDate: normalizeDateFilterValue(input?.endDate),
+    areaId: normalizeQueryValue(input?.areaId).trim()
+  };
+}
+
 async function loadAuditRowsForUnit(input: {
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  supabase: SupabaseDatabaseClient;
   unitId: string;
   limit: number;
+  filters: UnitAuditFilterState;
 }) {
-  const unitScopedResult = await input.supabase
+  let unitScopedQuery = input.supabase
     .from("historico_alteracoes")
     .select("*")
-    .eq("unidade_id", input.unitId)
+    .eq("unidade_id", input.unitId);
+
+  if (input.filters.startDate) {
+    unitScopedQuery = unitScopedQuery.gte(
+      "created_at",
+      `${input.filters.startDate}T00:00:00-03:00`
+    );
+  }
+
+  if (input.filters.endDate) {
+    unitScopedQuery = unitScopedQuery.lt(
+      "created_at",
+      `${addDays(input.filters.endDate, 1)}T00:00:00-03:00`
+    );
+  }
+
+  const unitScopedResult = await unitScopedQuery
     .order("created_at", { ascending: false })
     .limit(input.limit);
 
@@ -160,9 +240,23 @@ async function loadAuditRowsForUnit(input: {
     };
   }
 
-  const fallbackResult = await input.supabase
-    .from("historico_alteracoes")
-    .select("*")
+  let fallbackQuery = input.supabase.from("historico_alteracoes").select("*");
+
+  if (input.filters.startDate) {
+    fallbackQuery = fallbackQuery.gte(
+      "created_at",
+      `${input.filters.startDate}T00:00:00-03:00`
+    );
+  }
+
+  if (input.filters.endDate) {
+    fallbackQuery = fallbackQuery.lt(
+      "created_at",
+      `${addDays(input.filters.endDate, 1)}T00:00:00-03:00`
+    );
+  }
+
+  const fallbackResult = await fallbackQuery
     .order("created_at", { ascending: false })
     .limit(Math.max(input.limit * 4, 400));
 
@@ -380,6 +474,42 @@ function resolveEntrySemesterId(
   const classGroup = enrollment ? context.classes.get(enrollment.turma_id) : null;
 
   return classGroup?.semestre_id;
+}
+
+function resolveEntryClass(
+  entry: AuditHistoryRow,
+  payload: JsonRecord,
+  context: AuditContext
+) {
+  if (entry.tabela === "turmas") {
+    const classId = getString(payload, "id") ?? entry.registro_id ?? undefined;
+    return classId ? context.classes.get(classId) : undefined;
+  }
+
+  if (entry.tabela === "matriculas_turma") {
+    const enrollmentId = getString(payload, "id") ?? entry.registro_id ?? undefined;
+    const enrollment = enrollmentId ? context.enrollments.get(enrollmentId) : undefined;
+    return enrollment ? context.classes.get(enrollment.turma_id) : undefined;
+  }
+
+  const enrollmentId = resolveEnrollmentId(entry, payload, context);
+  const enrollment = enrollmentId ? context.enrollments.get(enrollmentId) : undefined;
+
+  return enrollment ? context.classes.get(enrollment.turma_id) : undefined;
+}
+
+function resolveEntryArea(
+  entry: AuditHistoryRow,
+  payload: JsonRecord,
+  context: AuditContext
+) {
+  const classGroup = resolveEntryClass(entry, payload, context);
+
+  if (!classGroup?.area_estagio_id) {
+    return null;
+  }
+
+  return context.areas.get(classGroup.area_estagio_id) ?? null;
 }
 
 function resolveStudentName(enrollmentId: string | undefined, context: AuditContext) {
@@ -740,37 +870,131 @@ function buildSummary(entry: AuditHistoryRow, payload: JsonRecord, context: Audi
   return `Evento em ${entry.tabela}: ${buildFieldDiffSummary(before, after)}.`;
 }
 
-export async function getAuthenticatedAuditEntries(
-  currentUser: SessionUser,
-  requestedSemesterId?: string | null
-): Promise<AuditPageLoadResult> {
-  if (!currentUser.unitId) {
-    return buildAuditEmptyState(
-      "Unidade operacional não identificada",
-      "O coordenador autenticado precisa estar vinculado a uma unidade para acessar a auditoria."
+export async function loadUnitAuditFeed(input: {
+  supabase: SupabaseDatabaseClient;
+  unitId: string;
+  limit?: number;
+  filters?: {
+    startDate?: string | string[] | null;
+    endDate?: string | string[] | null;
+    areaId?: string | string[] | null;
+  };
+}): Promise<UnitAuditFeed> {
+  const filters = buildUnitAuditFilterState(input.filters);
+  const limit = input.limit ?? 200;
+  const semesterRowsResult = await input.supabase
+    .from("semestres")
+    .select("*")
+    .eq("unidade_id", input.unitId)
+    .order("data_inicio", { ascending: false });
+
+  if (semesterRowsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Não foi possível carregar os semestres da unidade para a auditoria.",
+        semesterRowsResult.error
+      )
     );
   }
 
-  const supabase = await createSupabaseServerClient();
-  const [auditRowsLoadResult, semesterRowsResult] = await Promise.all([
-    loadAuditRowsForUnit({
-      supabase,
-      unitId: currentUser.unitId,
-      limit: 200
-    }),
-    supabase
-      .from("semestres")
-      .select("*")
-      .eq("unidade_id", currentUser.unitId)
-      .order("data_inicio", { ascending: false })
-  ]);
+  const semesterRows = (semesterRowsResult.data ?? []) as SemesterRow[];
+  const visibleSemesterIds = new Set(semesterRows.map((semester) => semester.id));
+  const classRowsResult = semesterRows.length
+    ? await input.supabase
+        .from("turmas")
+        .select("*")
+        .in(
+          "semestre_id",
+          semesterRows.map((semester) => semester.id)
+        )
+    : { data: [], error: null };
 
-  if (auditRowsLoadResult.error || semesterRowsResult.error) {
-    return buildAuditEmptyState(
-      "Não foi possível carregar o histórico de auditoria",
+  if (classRowsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Não foi possível carregar as turmas da unidade para a auditoria.",
+        classRowsResult.error
+      )
+    );
+  }
+
+  const classRows = (classRowsResult.data ?? []) as ClassRow[];
+  const areaIds = [
+    ...new Set(classRows.map((classGroup) => classGroup.area_estagio_id).filter(Boolean))
+  ] as string[];
+  const areaRowsResult = areaIds.length
+    ? await input.supabase
+        .from("areas_estagio")
+        .select("id, nome, bloco_id")
+        .in("id", areaIds)
+    : { data: [], error: null };
+
+  if (areaRowsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Não foi possível carregar as áreas de estágio da unidade para a auditoria.",
+        areaRowsResult.error
+      )
+    );
+  }
+
+  const areaRows = (areaRowsResult.data ?? []) as Array<
+    Pick<AreaRow, "id" | "nome" | "bloco_id">
+  >;
+  const blockIds = [...new Set(areaRows.map((area) => area.bloco_id))];
+  const blockRowsResult = blockIds.length
+    ? await input.supabase
+        .from("blocos_estagio")
+        .select("id, nome")
+        .in("id", blockIds)
+    : { data: [], error: null };
+
+  if (blockRowsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Não foi possível carregar os blocos das áreas de estágio da unidade.",
+        blockRowsResult.error
+      )
+    );
+  }
+
+  const blockNameMap = new Map(
+    (((blockRowsResult.data ?? []) as Array<Pick<BlockRow, "id" | "nome">>)).map(
+      (block) => [block.id, block.nome]
+    )
+  );
+  const areaMap = new Map(
+    areaRows.map((area) => [
+      area.id,
+      {
+        id: area.id,
+        name: area.nome,
+        blockName: blockNameMap.get(area.bloco_id) ?? "Bloco não identificado"
+      } satisfies UnitAuditAreaOption
+    ])
+  );
+  const areaOptions = [...areaMap.values()].sort((left, right) => {
+    const nameDifference = left.name.localeCompare(right.name, "pt-BR");
+
+    if (nameDifference !== 0) {
+      return nameDifference;
+    }
+
+    return left.blockName.localeCompare(right.blockName, "pt-BR");
+  });
+
+  const auditRowsLoadResult = await loadAuditRowsForUnit({
+    supabase: input.supabase,
+    unitId: input.unitId,
+    limit,
+    filters
+  });
+
+  if (auditRowsLoadResult.error) {
+    throw new Error(
       formatSupabaseErrorMessage(
         "Houve um problema ao consultar os eventos reais de public.historico_alteracoes.",
-        auditRowsLoadResult.error ?? semesterRowsResult.error
+        auditRowsLoadResult.error
       )
     );
   }
@@ -780,49 +1004,20 @@ export async function getAuthenticatedAuditEntries(
   }
 
   const auditRows = auditRowsLoadResult.rows;
-  const semesterRows = (semesterRowsResult.data ?? []) as SemesterRow[];
-  const visibleSemesterIds = new Set(semesterRows.map((semester) => semester.id));
-  const closedSemesters = semesterRows
-    .filter((semester) => semester.status === "encerrado")
-    .map((semester) => ({
-      id: semester.id,
-      code: semester.codigo,
-      name: semester.nome
-    }));
-  const selectedSemesterId = closedSemesters.some(
-    (semester) => semester.id === requestedSemesterId
-  )
-    ? requestedSemesterId ?? null
-    : null;
-  const selectedSemester = selectedSemesterId
-    ? semesterRows.find((semester) => semester.id === selectedSemesterId) ?? null
-    : null;
 
   if (!auditRows.length) {
-    const selectedClosedSemester = selectedSemester
-      ? await buildClosedSemesterAuditView({
-          semester: selectedSemester,
-          fallbackAuditRows: []
-        })
-      : null;
-
     return {
       entries: [],
-      closedSemesters,
-      selectedSemesterId,
-      selectedClosedSemester,
-      emptyState: {
-        title: "Nenhum evento auditavel encontrado",
-        description:
-          "Ainda não ha registros em public.historico_alteracoes para exibir nesta tela."
-      }
+      areaOptions,
+      filters,
+      semesterRows,
+      classRows
     };
   }
 
   const actorIds = [
     ...new Set(auditRows.map((entry) => entry.usuario_id).filter(Boolean))
   ] as string[];
-
   const evaluationSnapshots = new Map<string, JsonRecord>();
   const evaluationIds = new Set<string>();
   const enrollmentIds = new Set<string>();
@@ -835,6 +1030,14 @@ export async function getAuthenticatedAuditEntries(
     if (entry.tabela === "avaliacoes" && entry.registro_id) {
       evaluationSnapshots.set(entry.registro_id, payload);
       evaluationIds.add(entry.registro_id);
+    }
+
+    if (entry.tabela === "matriculas_turma") {
+      const directEnrollmentId = getString(payload, "id") ?? entry.registro_id ?? undefined;
+
+      if (directEnrollmentId) {
+        enrollmentIds.add(directEnrollmentId);
+      }
     }
 
     const directEnrollmentId = resolveEnrollmentId(
@@ -850,7 +1053,8 @@ export async function getAuthenticatedAuditEntries(
         enrollments: new Map(),
         evaluations: new Map(),
         evaluationSnapshots,
-        criteria: new Map()
+        criteria: new Map(),
+        areas: new Map()
       }
     );
 
@@ -877,22 +1081,20 @@ export async function getAuthenticatedAuditEntries(
     }
   }
 
-  const [actorUsersResult, evaluationRowsResult, criterionRowsResult] =
-    await Promise.all([
-      actorIds.length
-        ? supabase.from("usuarios").select("*").in("id", actorIds)
-        : Promise.resolve({ data: [], error: null }),
-      evaluationIds.size
-        ? supabase.from("avaliacoes").select("*").in("id", [...evaluationIds])
-        : Promise.resolve({ data: [], error: null }),
-      criterionIds.size
-        ? supabase.from("criterios_avaliacao").select("*").in("id", [...criterionIds])
-        : Promise.resolve({ data: [], error: null })
-    ]);
+  const [actorUsersResult, evaluationRowsResult, criterionRowsResult] = await Promise.all([
+    actorIds.length
+      ? input.supabase.from("usuarios").select("*").in("id", actorIds)
+      : Promise.resolve({ data: [], error: null }),
+    evaluationIds.size
+      ? input.supabase.from("avaliacoes").select("*").in("id", [...evaluationIds])
+      : Promise.resolve({ data: [], error: null }),
+    criterionIds.size
+      ? input.supabase.from("criterios_avaliacao").select("*").in("id", [...criterionIds])
+      : Promise.resolve({ data: [], error: null })
+  ]);
 
   if (actorUsersResult.error || evaluationRowsResult.error || criterionRowsResult.error) {
-    return buildAuditEmptyState(
-      "Não foi possível enriquecer o histórico",
+    throw new Error(
       "Os eventos foram encontrados, mas usuários, avaliações ou critérios relacionados não puderam ser consultados."
     );
   }
@@ -906,48 +1108,52 @@ export async function getAuthenticatedAuditEntries(
 
   const [enrollmentRowsResult, professorUsersResult] = await Promise.all([
     enrollmentIds.size
-      ? supabase.from("matriculas_turma").select("*").in("id", [...enrollmentIds])
+      ? input.supabase.from("matriculas_turma").select("*").in("id", [...enrollmentIds])
       : Promise.resolve({ data: [], error: null }),
     professorIds.size
-      ? supabase.from("usuarios").select("*").in("id", [...professorIds])
+      ? input.supabase.from("usuarios").select("*").in("id", [...professorIds])
       : Promise.resolve({ data: [], error: null })
   ]);
 
   if (enrollmentRowsResult.error || professorUsersResult.error) {
-    return buildAuditEmptyState(
-      "Não foi possível carregar matrículas ou professores relacionados",
+    throw new Error(
       "Os eventos foram encontrados, mas faltou contexto de matrículas ou usuários docentes para a exibição."
     );
   }
 
   const enrollmentRows = (enrollmentRowsResult.data ?? []) as EnrollmentRow[];
-  const classIds = [...new Set(enrollmentRows.map((enrollment) => enrollment.turma_id))];
-  const classRowsResult = classIds.length
-    ? await supabase.from("turmas").select("*").in("id", classIds)
+  const additionalClassIds = [
+    ...new Set(enrollmentRows.map((enrollment) => enrollment.turma_id))
+  ].filter((classId) => !classRows.some((classGroup) => classGroup.id === classId));
+  const additionalClassRowsResult = additionalClassIds.length
+    ? await input.supabase.from("turmas").select("*").in("id", additionalClassIds)
     : { data: [], error: null };
 
-  if (classRowsResult.error) {
-    return buildAuditEmptyState(
-      "Não foi possível carregar as turmas relacionadas",
-      "Os eventos foram encontrados, mas o contexto das turmas não pôde ser consultado."
+  if (additionalClassRowsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Os eventos foram encontrados, mas o contexto das turmas não pôde ser consultado.",
+        additionalClassRowsResult.error
+      )
     );
   }
 
-  const classRows = (classRowsResult.data ?? []) as ClassRow[];
+  const allClassRows = [
+    ...classRows,
+    ...((additionalClassRowsResult.data ?? []) as ClassRow[])
+  ];
   const studentIds = [...new Set(enrollmentRows.map((enrollment) => enrollment.aluno_id))];
-
   const [studentRowsResult, studentUsersResult] = await Promise.all([
     studentIds.length
-      ? supabase.from("alunos").select("*").in("usuario_id", studentIds)
+      ? input.supabase.from("alunos").select("*").in("usuario_id", studentIds)
       : Promise.resolve({ data: [], error: null }),
     studentIds.length
-      ? supabase.from("usuarios").select("*").in("id", studentIds)
+      ? input.supabase.from("usuarios").select("*").in("id", studentIds)
       : Promise.resolve({ data: [], error: null })
   ]);
 
   if (studentRowsResult.error || studentUsersResult.error) {
-    return buildAuditEmptyState(
-      "Não foi possível carregar os alunos relacionados",
+    throw new Error(
       "Os eventos foram encontrados, mas os dados de aluno vinculados às matrículas não puderam ser consultados."
     );
   }
@@ -960,7 +1166,7 @@ export async function getAuthenticatedAuditEntries(
       ((professorUsersResult.data ?? []) as UserRow[]).map((user) => [user.id, user])
     ),
     semesters: new Map(semesterRows.map((semester) => [semester.id, semester])),
-    classes: new Map(classRows.map((classGroup) => [classGroup.id, classGroup])),
+    classes: new Map(allClassRows.map((classGroup) => [classGroup.id, classGroup])),
     studentRows: new Map(
       ((studentRowsResult.data ?? []) as StudentRow[]).map((student) => [
         student.usuario_id,
@@ -978,49 +1184,155 @@ export async function getAuthenticatedAuditEntries(
         criterion.id,
         criterion
       ])
-    )
+    ),
+    areas: areaMap
   };
 
-  const mappedEntries = auditRows.map((entry) => {
-    const payload = pickAuditPayload(entry);
-    const actor = entry.usuario_id ? context.actorUsers.get(entry.usuario_id) : null;
-    const semesterId = resolveEntrySemesterId(entry, payload, context);
-    const semester = semesterId ? context.semesters.get(semesterId) : null;
+  const entries = auditRows
+    .map((entry) => {
+      const payload = pickAuditPayload(entry);
+      const actor = entry.usuario_id ? context.actorUsers.get(entry.usuario_id) : null;
+      const semesterId = resolveEntrySemesterId(entry, payload, context);
+      const semester = semesterId ? context.semesters.get(semesterId) : null;
+      const area = resolveEntryArea(entry, payload, context);
+
+      return {
+        id: String(entry.id),
+        tableName: entry.tabela,
+        action: entry.acao,
+        actorId: entry.usuario_id ?? "sistema",
+        actorName: actor?.nome_completo ?? "Sistema",
+        happenedAt: entry.created_at,
+        recordLabel: buildRecordLabel(entry, payload, context),
+        summary: buildSummary(entry, payload, context),
+        semesterId,
+        semesterCode: semester?.codigo,
+        areaId: area?.id ?? null,
+        areaName: area?.name ?? null,
+        blockName: area?.blockName ?? null
+      } satisfies AuditEntry;
+    })
+    .filter((entry) => {
+      if (!auditRowsLoadResult.scopedByUnit) {
+        if (entry.semesterId && !visibleSemesterIds.has(entry.semesterId)) {
+          return false;
+        }
+
+        if (!entry.semesterId) {
+          return false;
+        }
+      }
+
+      if (filters.areaId && entry.areaId !== filters.areaId) {
+        return false;
+      }
+
+      return true;
+    });
+
+  return {
+    entries,
+    areaOptions,
+    filters,
+    semesterRows,
+    classRows
+  };
+}
+
+export async function getAuthenticatedAuditEntries(
+  currentUser: SessionUser,
+  requestedSemesterId?: string | null,
+  requestedFilters?: {
+    startDate?: string | string[] | null;
+    endDate?: string | string[] | null;
+    areaId?: string | string[] | null;
+  }
+): Promise<AuditPageLoadResult> {
+  if (!currentUser.unitId) {
+    return buildAuditEmptyState(
+      "Unidade operacional não identificada",
+      "O coordenador autenticado precisa estar vinculado a uma unidade para acessar a auditoria."
+    );
+  }
+
+  const supabase = await createSupabaseServerClient();
+  let auditFeed: UnitAuditFeed;
+
+  try {
+    auditFeed = await loadUnitAuditFeed({
+      supabase,
+      unitId: currentUser.unitId,
+      limit: 200,
+      filters: requestedFilters
+    });
+  } catch (error) {
+    return buildAuditEmptyState(
+      "Não foi possível carregar o histórico de auditoria",
+      error instanceof Error
+        ? error.message
+        : "Houve um problema ao consultar os eventos reais de public.historico_alteracoes."
+    );
+  }
+
+  const semesterRows = auditFeed.semesterRows;
+  const visibleSemesterIds = new Set(semesterRows.map((semester) => semester.id));
+  const closedSemesters = semesterRows
+    .filter((semester) => semester.status === "encerrado")
+    .map((semester) => ({
+      id: semester.id,
+      code: semester.codigo,
+      name: semester.nome
+    }));
+  const selectedSemesterId = closedSemesters.some(
+    (semester) => semester.id === requestedSemesterId
+  )
+    ? requestedSemesterId ?? null
+    : null;
+  const selectedSemester = selectedSemesterId
+    ? semesterRows.find((semester) => semester.id === selectedSemesterId) ?? null
+    : null;
+
+  if (!auditFeed.entries.length) {
+    const selectedClosedSemester = selectedSemester
+      ? await buildClosedSemesterAuditView({
+          semester: selectedSemester,
+          fallbackAuditRows: []
+        })
+      : null;
 
     return {
-      id: String(entry.id),
-      tableName: entry.tabela,
-      action: entry.acao,
-      actorId: entry.usuario_id ?? "sistema",
-      actorName: actor?.nome_completo ?? "Sistema",
-      happenedAt: entry.created_at,
-      recordLabel: buildRecordLabel(entry, payload, context),
-      summary: buildSummary(entry, payload, context),
-      semesterId,
-      semesterCode: semester?.codigo
-    } satisfies AuditEntry;
-  });
+      entries: [],
+      areaOptions: auditFeed.areaOptions,
+      filters: auditFeed.filters,
+      closedSemesters,
+      selectedSemesterId,
+      selectedClosedSemester,
+      emptyState: {
+        title: "Nenhum evento auditavel encontrado",
+        description:
+          "Ainda não ha registros em public.historico_alteracoes para exibir nesta tela."
+      }
+    };
+  }
+  const selectedClosedSemester = selectedSemester
+    ? await buildClosedSemesterAuditView({
+        semester: selectedSemester,
+        fallbackAuditRows: []
+      })
+    : null;
 
-  const entries = mappedEntries.filter((entry) => {
+  const entries = auditFeed.entries.filter((entry) => {
     if (selectedSemesterId && entry.semesterId !== selectedSemesterId) {
       return false;
     }
 
-    if (auditRowsLoadResult.scopedByUnit) {
-      return true;
-    }
-
-    return entry.semesterId ? visibleSemesterIds.has(entry.semesterId) : false;
+    return entry.semesterId ? visibleSemesterIds.has(entry.semesterId) : true;
   });
-  const selectedClosedSemester = selectedSemester
-    ? await buildClosedSemesterAuditView({
-        semester: selectedSemester,
-        fallbackAuditRows: auditRows
-      })
-    : null;
 
   return {
     entries,
+    areaOptions: auditFeed.areaOptions,
+    filters: auditFeed.filters,
     closedSemesters,
     selectedSemesterId,
     selectedClosedSemester,

@@ -114,6 +114,9 @@ export interface AuditEntry {
   summary: string;
   semesterId?: string;
   semesterCode?: string;
+  areaId?: string | null;
+  areaName?: string | null;
+  blockName?: string | null;
 }
 
 export interface StudentCriterionSnapshot {

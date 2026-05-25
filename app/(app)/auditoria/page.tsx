@@ -8,6 +8,9 @@ import { getAuthenticatedAuditEntries } from "@/services/audit";
 export default async function AuditPage(props: {
   searchParams?: Promise<{
     semestre?: string | string[];
+    inicio?: string | string[];
+    fim?: string | string[];
+    area?: string | string[];
   }>;
 }) {
   const currentUser = await requireRole(["coordenador"]);
@@ -17,11 +20,17 @@ export default async function AuditPage(props: {
     : searchParams.semestre;
   const {
     entries,
+    areaOptions,
+    filters,
     emptyState,
     closedSemesters,
     selectedSemesterId,
     selectedClosedSemester
-  } = await getAuthenticatedAuditEntries(currentUser, requestedSemesterId);
+  } = await getAuthenticatedAuditEntries(currentUser, requestedSemesterId, {
+    startDate: searchParams.inicio,
+    endDate: searchParams.fim,
+    areaId: searchParams.area
+  });
 
   return (
     <div className="stack audit-page">
@@ -66,6 +75,55 @@ export default async function AuditPage(props: {
               </Link>
             ))}
           </div>
+        ) : null}
+
+        {!selectedClosedSemester ? (
+          <form method="get" className="unit-audit-filter-form">
+            <label className="field">
+              <span>Data inicial</span>
+              <input
+                type="date"
+                name="inicio"
+                className="input"
+                defaultValue={filters.startDate}
+              />
+            </label>
+
+            <label className="field">
+              <span>Data final</span>
+              <input
+                type="date"
+                name="fim"
+                className="input"
+                defaultValue={filters.endDate}
+              />
+            </label>
+
+            <label className="field">
+              <span>Área de estágio</span>
+              <select
+                name="area"
+                className="input"
+                defaultValue={filters.areaId}
+              >
+                <option value="">Todas as áreas</option>
+                {areaOptions.map((area) => (
+                  <option key={area.id} value={area.id}>
+                    {area.name} · {area.blockName}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="actions-row unit-audit-filter-actions">
+              <button type="submit" className="button button-secondary">
+                Aplicar filtros
+              </button>
+              <Link href="/auditoria" className="button button-secondary">
+                Limpar
+              </Link>
+            </div>
+          </form>
         ) : null}
 
         {selectedClosedSemester ? (

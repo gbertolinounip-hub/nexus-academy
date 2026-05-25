@@ -20,6 +20,11 @@ interface MasterUnitDetailPageProps {
   params: Promise<{
     unitId: string;
   }>;
+  searchParams?: Promise<{
+    inicio?: string | string[];
+    fim?: string | string[];
+    area?: string | string[];
+  }>;
 }
 
 function formatLocation(city: string | null, state: string | null) {
@@ -42,11 +47,17 @@ function semesterStatusLabel(status: "planejado" | "ativo" | "encerrado") {
 }
 
 export default async function MasterUnitDetailPage({
-  params
+  params,
+  searchParams
 }: MasterUnitDetailPageProps) {
   await requireRole(["coordenador_master"]);
   const { unitId } = await params;
-  const unitDetail = await getMasterUnitDetailPageData(unitId);
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const unitDetail = await getMasterUnitDetailPageData(unitId, {
+    startDate: resolvedSearchParams.inicio,
+    endDate: resolvedSearchParams.fim,
+    areaId: resolvedSearchParams.area
+  });
 
   if (!unitDetail) {
     notFound();
@@ -299,6 +310,56 @@ export default async function MasterUnitDetailPage({
           title="Auditoria recente da unidade"
           description="Movimentações mais recentes registradas para esta unidade."
         >
+          <form method="get" className="unit-audit-filter-form">
+            <label className="field">
+              <span>Data inicial</span>
+              <input
+                type="date"
+                name="inicio"
+                className="input"
+                defaultValue={unitDetail.auditFilters.startDate}
+              />
+            </label>
+
+            <label className="field">
+              <span>Data final</span>
+              <input
+                type="date"
+                name="fim"
+                className="input"
+                defaultValue={unitDetail.auditFilters.endDate}
+              />
+            </label>
+
+            <label className="field">
+              <span>Área de estágio</span>
+              <select
+                name="area"
+                className="input"
+                defaultValue={unitDetail.auditFilters.areaId}
+              >
+                <option value="">Todas as áreas</option>
+                {unitDetail.auditAreas.map((area) => (
+                  <option key={area.id} value={area.id}>
+                    {area.name} · {area.blockName}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="actions-row unit-audit-filter-actions">
+              <button type="submit" className="button button-secondary">
+                Aplicar filtros
+              </button>
+              <Link
+                href={`/master/unidades/${unitDetail.unit.id}` as Route}
+                className="button button-secondary"
+              >
+                Limpar
+              </Link>
+            </div>
+          </form>
+
           {unitDetail.recentAuditEntries.length ? (
             <AuditTable entries={unitDetail.recentAuditEntries} />
           ) : (

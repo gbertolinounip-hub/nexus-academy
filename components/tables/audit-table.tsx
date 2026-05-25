@@ -118,6 +118,16 @@ function FragmentRow(props: {
                   <span className="audit-table-details-label">Registro</span>
                   <strong>{entry.recordLabel}</strong>
                 </div>
+                <div className="audit-table-details-item">
+                  <span className="audit-table-details-label">Área vinculada</span>
+                  <strong>
+                    {entry.areaName
+                      ? `${entry.areaName}${
+                          entry.blockName ? ` · ${entry.blockName}` : ""
+                        }`
+                      : "Sem área vinculada"}
+                  </strong>
+                </div>
                 {entry.semesterCode ? (
                   <div className="audit-table-details-item">
                     <span className="audit-table-details-label">Semestre relacionado</span>

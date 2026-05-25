@@ -735,6 +735,19 @@ select {
   text-transform: uppercase;
 }
 
+.unit-audit-filter-form {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+.unit-audit-filter-actions {
+  justify-content: flex-start;
+  align-self: end;
+}
+
 .audit-closed-semester-stack {
   display: grid;
   gap: 1rem;
