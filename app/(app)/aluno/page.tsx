@@ -1,7 +1,7 @@
-﻿import Link from "next/link";
 import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
 import { ProgressBars } from "@/components/dashboard/progress-bars";
+import { StudentOverviewAreaCards } from "@/components/dashboard/student-overview-area-cards";
 import { CriteriaTable } from "@/components/tables/criteria-table";
 import { requireRole } from "@/lib/auth/session";
 import { getAuthenticatedStudentDashboardPageData } from "@/services/dashboard";
@@ -244,55 +244,10 @@ export default async function StudentDashboardPage(props: {
             title="Áreas do semestre"
             description="Cada card resume uma área de estágio. Use o botão para abrir a visão detalhada daquela matrícula."
           >
-            <div className="student-overview-grid">
-              {pageData.overview.areaSummaries.map((area) => (
-                <article
-                  key={area.enrollmentId}
-                  className="student-overview-card"
-                >
-                  <div className="student-overview-card-header">
-                    <div>
-                      <h3>{area.areaName}</h3>
-                      <p>
-                        {area.blockName ? `${area.blockName} · ` : ""}
-                        {area.className}
-                      </p>
-                    </div>
-                    <Link
-                      href={`/aluno?matricula=${area.enrollmentId}`}
-                      className="button button-secondary button-small"
-                    >
-                      Abrir área
-                    </Link>
-                  </div>
-
-                  <div className="student-overview-card-metrics">
-                    <span>Média: {formatPercentage(area.finalPercentage)}</span>
-                    <span>
-                      Subtotal: {formatPercentage(area.subtotalPercentage)}
-                    </span>
-                    <span>
-                      Desconto: {formatPercentage(area.absencePenaltyPercentage)}
-                    </span>
-                    <span>
-                      Conclusão: {formatPercentage(area.completionRate)}
-                    </span>
-                  </div>
-
-                  <p className="student-overview-card-copy">
-                    Supervisores:{" "}
-                    {area.professorNames.length
-                      ? area.professorNames.join(", ")
-                      : "ainda não vinculados"}
-                  </p>
-                  <p className="student-overview-card-copy">
-                    Lançamentos publicados: {area.publishedLaunchCount} · Horas
-                    não justificadas:{" "}
-                    {area.unjustifiedAbsenceHours.toFixed(2).replace(".", ",")}h
-                  </p>
-                </article>
-              ))}
-            </div>
+            <StudentOverviewAreaCards
+              currentUserId={currentUser.id}
+              areas={pageData.overview.areaSummaries}
+            />
           </SectionCard>
         </>
       ) : selectedAreaDashboard ? (
@@ -301,8 +256,3 @@ export default async function StudentDashboardPage(props: {
     </div>
   );
 }
-
-
-
-
-

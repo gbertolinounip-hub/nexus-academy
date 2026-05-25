@@ -2,18 +2,22 @@
 
 import Link from "next/link";
 import type { Route } from "next";
+import { useEffect } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type {
   NavigationItem,
   SecondaryNavigationItem
 } from "@/lib/auth/navigation";
+import { markStudentAreaAsRead } from "@/lib/student-area-updates";
 
 interface SidebarNavProps {
+  currentUserId: string;
   links: NavigationItem[];
   secondaryNavigationItems?: SecondaryNavigationItem[];
 }
 
 export function SidebarNav({
+  currentUserId,
   links,
   secondaryNavigationItems = []
 }: SidebarNavProps) {
@@ -25,6 +29,41 @@ export function SidebarNav({
       .sort((left, right) => right.href.length - left.href.length)
       .find((link) => pathname === link.href || pathname.startsWith(`${link.href}/`))
       ?.href ?? null;
+
+  useEffect(() => {
+    if (pathname !== "/aluno" || !activeEnrollmentId) {
+      return;
+    }
+
+    const activeArea = secondaryNavigationItems.find(
+      (item) => item.enrollmentId === activeEnrollmentId
+    );
+
+    if (!activeArea?.recentUpdateAt) {
+      return;
+    }
+
+    markStudentAreaAsRead({
+      currentUserId,
+      enrollmentId: activeEnrollmentId,
+      recentUpdateAt: activeArea.recentUpdateAt
+    });
+  }, [activeEnrollmentId, currentUserId, pathname, secondaryNavigationItems]);
+
+  function handleStudentAreaRead(
+    enrollmentId: string | undefined,
+    recentUpdateAt: string | null | undefined
+  ) {
+    if (!enrollmentId || !recentUpdateAt) {
+      return;
+    }
+
+    markStudentAreaAsRead({
+      currentUserId,
+      enrollmentId,
+      recentUpdateAt
+    });
+  }
 
   return (
     <nav className="sidebar-nav">
@@ -57,6 +96,9 @@ export function SidebarNav({
                         isSubActive
                           ? "sidebar-sublink sidebar-sublink-active"
                           : "sidebar-sublink"
+                      }
+                      onClick={() =>
+                        handleStudentAreaRead(item.enrollmentId, item.recentUpdateAt)
                       }
                       href={href as Route}
                     >

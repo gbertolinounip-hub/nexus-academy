@@ -13,6 +13,7 @@ export interface SecondaryNavigationItem {
   label: string;
   description?: string;
   enrollmentId?: string;
+  recentUpdateAt?: string | null;
 }
 
 export const navigationItems: NavigationItem[] = [

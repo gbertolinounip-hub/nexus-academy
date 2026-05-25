@@ -62,6 +62,7 @@ interface StudentDashboardAreaNavItem {
   className: string;
   professorNames: string[];
   isSelected: boolean;
+  recentUpdateAt: string | null;
 }
 
 interface StudentSemesterAreaSummary {
@@ -76,6 +77,7 @@ interface StudentSemesterAreaSummary {
   completionRate: number;
   publishedLaunchCount: number;
   unjustifiedAbsenceHours: number;
+  recentUpdateAt: string | null;
 }
 
 interface StudentDashboardPageData {
@@ -214,6 +216,44 @@ function filterClassesToSemesters(classRows: ClassRow[], semesters: SemesterRow[
 function filterEnrollmentsToClasses(enrollments: EnrollmentRow[], classRows: ClassRow[]) {
   const visibleClassIds = new Set(classRows.map((classGroup) => classGroup.id));
   return enrollments.filter((enrollment) => visibleClassIds.has(enrollment.turma_id));
+}
+
+function selectMostRecentTimestamp(values: Array<string | null | undefined>) {
+  const validValues = values.filter(
+    (value): value is string => typeof value === "string" && value.length > 0
+  );
+
+  if (!validValues.length) {
+    return null;
+  }
+
+  return [...validValues].sort((left, right) => left.localeCompare(right)).at(-1) ?? null;
+}
+
+function getStudentAreaRecentUpdateAt(input: {
+  enrollment: EnrollmentRow;
+  classGroup: ClassRow;
+  professorLinks: ProfessorLinkRow[];
+  evaluationRows: EvaluationRow[];
+  evaluationItemRows: EvaluationItemRow[];
+  absenceRows: AbsenceRow[];
+}) {
+  return selectMostRecentTimestamp([
+    input.enrollment.updated_at,
+    input.classGroup.updated_at,
+    ...input.professorLinks.flatMap((link) => [link.updated_at, link.created_at]),
+    ...input.evaluationRows.flatMap((evaluation) => [
+      evaluation.updated_at,
+      evaluation.created_at,
+      evaluation.avaliado_em
+    ]),
+    ...input.evaluationItemRows.flatMap((item) => [item.updated_at, item.created_at]),
+    ...input.absenceRows.flatMap((absence) => [
+      absence.updated_at,
+      absence.created_at,
+      absence.data_ausencia
+    ])
+  ]);
 }
 
 function filterActiveStudentUsers(studentUsers: UserRow[]) {
@@ -1026,6 +1066,7 @@ export async function getAuthenticatedStudentDashboardPageData(
   const blockById = new Map(blockRows.map((block) => [block.id, block]));
   const professorUserMap = new Map(linkedProfessorUsers.map((user) => [user.id, user]));
   const dashboardsByEnrollmentId = new Map<string, StudentDashboardData>();
+  const recentUpdateAtByEnrollmentId = new Map<string, string | null>();
   const areaSummaries: StudentSemesterAreaSummary[] = [];
 
   for (const enrollment of currentSemesterEnrollments) {
@@ -1047,6 +1088,12 @@ export async function getAuthenticatedStudentDashboardPageData(
     const enrollmentEvaluationIds = new Set(
       enrollmentEvaluations.map((evaluation) => evaluation.id)
     );
+    const enrollmentEvaluationItems = evaluationItemRows.filter((item) =>
+      enrollmentEvaluationIds.has(item.avaliacao_id)
+    );
+    const enrollmentAbsences = absenceRows.filter(
+      (absence) => absence.matricula_turma_id === enrollment.id
+    );
     const enrollmentDashboard = buildStudentDashboardFromRows({
       currentUserName: currentUser.name,
       studentUser: {
@@ -1066,16 +1113,23 @@ export async function getAuthenticatedStudentDashboardPageData(
       professorLinks: enrollmentProfessorLinks,
       linkedProfessorUsers: enrollmentProfessorUsers,
       evaluationRows: enrollmentEvaluations,
-      evaluationItemRows: evaluationItemRows.filter((item) =>
-        enrollmentEvaluationIds.has(item.avaliacao_id)
-      ),
+      evaluationItemRows: enrollmentEvaluationItems,
       criterionRows,
-      absenceRows: absenceRows.filter(
-        (absence) => absence.matricula_turma_id === enrollment.id
-      )
+      absenceRows: enrollmentAbsences
     });
 
     dashboardsByEnrollmentId.set(enrollment.id, enrollmentDashboard);
+    recentUpdateAtByEnrollmentId.set(
+      enrollment.id,
+      getStudentAreaRecentUpdateAt({
+        enrollment,
+        classGroup,
+        professorLinks: enrollmentProfessorLinks,
+        evaluationRows: enrollmentEvaluations,
+        evaluationItemRows: enrollmentEvaluationItems,
+        absenceRows: enrollmentAbsences
+      })
+    );
 
     const classArea = resolveClassAreaSummary(classGroup, areaById, blockById);
     areaSummaries.push({
@@ -1091,7 +1145,8 @@ export async function getAuthenticatedStudentDashboardPageData(
       publishedLaunchCount: enrollmentEvaluations.length,
       unjustifiedAbsenceHours: enrollmentDashboard.absences
         .filter((absence) => !absence.justified)
-        .reduce((sum, absence) => sum + absence.hours, 0)
+        .reduce((sum, absence) => sum + absence.hours, 0),
+      recentUpdateAt: recentUpdateAtByEnrollmentId.get(enrollment.id) ?? null
     });
   }
 
@@ -1113,7 +1168,9 @@ export async function getAuthenticatedStudentDashboardPageData(
     blockName: areaSummary.blockName,
     className: areaSummary.className,
     professorNames: areaSummary.professorNames,
-    isSelected: areaSummary.enrollmentId === requestedEnrollmentId
+    isSelected: areaSummary.enrollmentId === requestedEnrollmentId,
+    recentUpdateAt:
+      recentUpdateAtByEnrollmentId.get(areaSummary.enrollmentId) ?? null
   }));
   const averageFinalPercentage = areaSummaries.length
     ? areaSummaries.reduce((sum, areaSummary) => sum + areaSummary.finalPercentage, 0) /

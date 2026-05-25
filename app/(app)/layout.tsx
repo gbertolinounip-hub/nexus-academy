@@ -15,6 +15,7 @@ export default async function AppLayout({
           key: area.enrollmentId,
           label: area.areaName,
           enrollmentId: area.enrollmentId,
+          recentUpdateAt: area.recentUpdateAt,
           description: area.blockName
             ? `${area.blockName} · ${
                 area.professorNames.length
@@ -43,6 +44,7 @@ export default async function AppLayout({
             ]
           : []
       }
+      currentUserId={currentUser.id}
     >
       {children}
     </DashboardShell>

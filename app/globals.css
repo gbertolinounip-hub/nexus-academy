@@ -361,6 +361,20 @@ select {
   padding-top: 0.8rem;
 }
 
+.sidebar-footer-actions {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.sidebar-footer-actions .button,
+.sidebar-footer-actions > .form-stack {
+  width: 100%;
+}
+
+.sidebar-footer-actions .form-stack {
+  gap: 0.45rem;
+}
+
 .sidebar-user {
   display: grid;
   gap: 0.2rem;
@@ -1970,6 +1984,13 @@ textarea.input:focus {
   min-width: 0;
 }
 
+.student-overview-card-actions {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: end;
+  flex: 0 0 auto;
+}
+
 .student-overview-card-header p {
   margin-top: 0.3rem;
 }
@@ -1993,6 +2014,63 @@ textarea.input:focus {
 
 .student-overview-card-copy {
   line-height: 1.55;
+}
+
+.student-area-update-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  border-radius: 999px;
+  padding: 0.32rem 0.66rem;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--brand);
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 10px 20px rgba(var(--brand-rgb), 0.08);
+  animation: student-area-update-enter 2.8s ease-out 1;
+}
+
+.student-area-update-notice::before {
+  content: "";
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent), var(--highlight));
+  box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.3);
+  animation: student-area-update-dot-pulse 2.8s ease-out 1;
+}
+
+@keyframes student-area-update-enter {
+  0% {
+    transform: translateY(2px) scale(0.97);
+    opacity: 0.58;
+  }
+
+  30% {
+    transform: translateY(0) scale(1.02);
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes student-area-update-dot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.3);
+  }
+
+  45% {
+    box-shadow: 0 0 0 8px rgba(var(--accent-rgb), 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0);
+  }
 }
 
 .student-dashboard {
@@ -2169,6 +2247,14 @@ textarea.input:focus {
 .master-unit-detail-stacked-panels .table-wrap {
   width: 100%;
   max-width: 100%;
+}
+
+.account-security-page .hero-card h1 {
+  font-size: clamp(1.9rem, 3vw, 2.7rem);
+}
+
+.account-security-card .form-stack {
+  max-width: 34rem;
 }
 
 .master-quick-grid,
@@ -2683,6 +2769,10 @@ textarea.input:focus {
     justify-content: flex-start;
   }
 
+  .student-area-update-notice {
+    font-size: 0.7rem;
+  }
+
   .professor-dashboard .student-table {
     min-width: 640px;
   }
@@ -2784,6 +2874,10 @@ textarea.input:focus {
 
   .student-dashboard .timeline-item-header {
     gap: 0.45rem;
+  }
+
+  .student-dashboard .student-overview-card-actions {
+    justify-items: stretch;
   }
 
   .student-dashboard .timeline-metrics,
