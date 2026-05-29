@@ -6,6 +6,7 @@ export interface NavigationItem {
   href: Route;
   label: string;
   allowedRoles: ProfileCode[];
+  badgeCount?: number;
 }
 
 export interface SecondaryNavigationItem {
@@ -19,6 +20,16 @@ export interface SecondaryNavigationItem {
 export const navigationItems: NavigationItem[] = [
   { href: "/aluno" as Route, label: "Aluno", allowedRoles: ["aluno"] },
   { href: "/professor" as Route, label: "Professor", allowedRoles: ["professor"] },
+  {
+    href: "/clinica-supervisionada" as Route,
+    label: "Clínica Supervisionada",
+    allowedRoles: ["aluno", "professor"]
+  },
+  {
+    href: "/pacientes" as Route,
+    label: "Pacientes",
+    allowedRoles: ["professor", "coordenador"]
+  },
   {
     href: "/master" as Route,
     label: "Master",
@@ -45,8 +56,18 @@ export const navigationItems: NavigationItem[] = [
     allowedRoles: ["coordenador_master"]
   },
   {
+    href: "/master/clinica-supervisionada" as Route,
+    label: "Gestão clínica",
+    allowedRoles: ["coordenador_master"]
+  },
+  {
     href: "/coordenador" as Route,
     label: "Coordenador",
+    allowedRoles: ["coordenador"]
+  },
+  {
+    href: "/coordenador/clinica-supervisionada" as Route,
+    label: "Gestão clínica",
     allowedRoles: ["coordenador"]
   },
   {

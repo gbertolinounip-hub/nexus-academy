@@ -496,6 +496,210 @@ create index if not exists idx_ausencias_matricula_turma_id on public.ausencias 
 create index if not exists idx_ausencias_data_ausencia on public.ausencias (data_ausencia);
 create index if not exists idx_ausencias_justificada on public.ausencias (justificada);
 
+create table if not exists public.pacientes_clinica (
+  id uuid primary key default gen_random_uuid(),
+  unidade_id uuid references public.unidades (id) on delete restrict,
+  identificador varchar(40) not null,
+  nome text not null,
+  data_nascimento date,
+  cpf varchar(20),
+  contato text,
+  acompanhante text,
+  ativo boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists idx_pacientes_clinica_unidade_identificador_uk
+  on public.pacientes_clinica (unidade_id, identificador);
+
+create unique index if not exists idx_pacientes_clinica_unidade_cpf_uk
+  on public.pacientes_clinica (unidade_id, cpf)
+  where cpf is not null and trim(cpf) <> '';
+
+create index if not exists idx_pacientes_clinica_unidade_id
+  on public.pacientes_clinica (unidade_id, ativo);
+
+create table if not exists public.casos_clinicos (
+  id uuid primary key default gen_random_uuid(),
+  unidade_id uuid references public.unidades (id) on delete restrict,
+  paciente_id uuid not null references public.pacientes_clinica (id) on delete restrict,
+  matricula_turma_id uuid not null references public.matriculas_turma (id) on delete restrict,
+  professor_id uuid not null references public.professores (usuario_id) on delete restrict,
+  semestre_id uuid not null references public.semestres (id) on delete restrict,
+  turma_id uuid not null references public.turmas (id) on delete restrict,
+  area_estagio_id uuid references public.areas_estagio (id) on delete restrict,
+  dia_semana text not null,
+  horario_atendimento time not null,
+  status text not null default 'atribuido',
+  ativo boolean not null default true,
+  data_inicio date not null default current_date,
+  data_fim date,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint casos_clinicos_status_check
+    check (status in ('atribuido', 'ativo', 'encerrado', 'alta')),
+  constraint casos_clinicos_dia_semana_check
+    check (dia_semana in ('segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado')),
+  constraint casos_clinicos_periodo_check
+    check (data_fim is null or data_fim >= data_inicio)
+);
+
+create unique index if not exists idx_casos_clinicos_unico_ativo
+  on public.casos_clinicos (paciente_id, matricula_turma_id, semestre_id)
+  where ativo = true;
+
+create index if not exists idx_casos_clinicos_unidade_id
+  on public.casos_clinicos (unidade_id, status, ativo);
+
+create index if not exists idx_casos_clinicos_professor_id
+  on public.casos_clinicos (professor_id, status, ativo);
+
+create index if not exists idx_casos_clinicos_matricula_turma_id
+  on public.casos_clinicos (matricula_turma_id, status, ativo);
+
+create table if not exists public.casos_clinicos_horarios (
+  id uuid primary key default gen_random_uuid(),
+  caso_clinico_id uuid not null references public.casos_clinicos (id) on delete cascade,
+  dia_semana text not null,
+  horario_atendimento time not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint casos_clinicos_horarios_dia_semana_check
+    check (dia_semana in ('segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado'))
+);
+
+create unique index if not exists idx_casos_clinicos_horarios_unico
+  on public.casos_clinicos_horarios (caso_clinico_id, dia_semana, horario_atendimento);
+
+create index if not exists idx_casos_clinicos_horarios_caso_id
+  on public.casos_clinicos_horarios (caso_clinico_id, dia_semana, horario_atendimento);
+
+insert into public.casos_clinicos_horarios (
+  caso_clinico_id,
+  dia_semana,
+  horario_atendimento
+)
+select
+  c.id,
+  c.dia_semana,
+  c.horario_atendimento
+from public.casos_clinicos c
+where not exists (
+  select 1
+  from public.casos_clinicos_horarios h
+  where h.caso_clinico_id = c.id
+);
+
+create table if not exists public.registros_clinicos (
+  id uuid primary key default gen_random_uuid(),
+  unidade_id uuid references public.unidades (id) on delete restrict,
+  caso_clinico_id uuid not null references public.casos_clinicos (id) on delete cascade,
+  tipo text not null,
+  status text not null default 'rascunho',
+  conteudo_json jsonb not null default '{}'::jsonb,
+  parecer_supervisor text,
+  autor_id uuid not null references public.usuarios (id) on delete restrict,
+  revisado_por uuid references public.usuarios (id) on delete restrict,
+  enviado_em timestamptz,
+  revisado_em timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint registros_clinicos_tipo_check
+    check (tipo in ('avaliacao', 'plano_tratamento', 'evolucao')),
+  constraint registros_clinicos_status_check
+    check (status in ('rascunho', 'enviado', 'aprovado', 'ajustes_solicitados'))
+);
+
+drop index if exists public.idx_registros_clinicos_caso_tipo_uk;
+
+create unique index if not exists idx_registros_clinicos_avaliacao_uk
+  on public.registros_clinicos (caso_clinico_id)
+  where tipo = 'avaliacao';
+
+create unique index if not exists idx_registros_clinicos_plano_tratamento_uk
+  on public.registros_clinicos (caso_clinico_id)
+  where tipo = 'plano_tratamento';
+
+create unique index if not exists idx_registros_clinicos_evolucao_data_uk
+  on public.registros_clinicos (
+    caso_clinico_id,
+    ((conteudo_json ->> 'sessionDate'))
+  )
+  where tipo = 'evolucao'
+    and coalesce(conteudo_json ->> 'sessionDate', '') <> '';
+
+create index if not exists idx_registros_clinicos_unidade_status
+  on public.registros_clinicos (unidade_id, status);
+
+create index if not exists idx_registros_clinicos_autor_id
+  on public.registros_clinicos (autor_id, updated_at desc);
+
+create table if not exists public.notificacoes_clinicas (
+  id uuid primary key default gen_random_uuid(),
+  unidade_id uuid references public.unidades (id) on delete restrict,
+  usuario_id uuid not null references public.usuarios (id) on delete cascade,
+  caso_clinico_id uuid not null references public.casos_clinicos (id) on delete cascade,
+  registro_clinico_id uuid references public.registros_clinicos (id) on delete cascade,
+  tipo text not null,
+  titulo text not null,
+  mensagem text not null,
+  lida boolean not null default false,
+  lida_em timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint notificacoes_clinicas_tipo_check
+    check (
+      tipo in (
+        'avaliacao_enviada_supervisao',
+        'avaliacao_ajustes_solicitados',
+        'avaliacao_aprovada',
+        'plano_tratamento_enviado_supervisao',
+        'plano_tratamento_ajustes_solicitados',
+        'plano_tratamento_aprovado',
+        'evolucao_enviada_supervisao',
+        'evolucao_ajustes_solicitados',
+        'evolucao_aprovada'
+      )
+    )
+);
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'notificacoes_clinicas_tipo_check'
+      and conrelid = 'public.notificacoes_clinicas'::regclass
+  ) then
+    alter table public.notificacoes_clinicas
+      drop constraint notificacoes_clinicas_tipo_check;
+  end if;
+
+  alter table public.notificacoes_clinicas
+    add constraint notificacoes_clinicas_tipo_check
+    check (
+      tipo in (
+        'avaliacao_enviada_supervisao',
+        'avaliacao_ajustes_solicitados',
+        'avaliacao_aprovada',
+        'plano_tratamento_enviado_supervisao',
+        'plano_tratamento_ajustes_solicitados',
+        'plano_tratamento_aprovado',
+        'evolucao_enviada_supervisao',
+        'evolucao_ajustes_solicitados',
+        'evolucao_aprovada'
+      )
+    );
+end;
+$$;
+
+create index if not exists idx_notificacoes_clinicas_usuario_lida
+  on public.notificacoes_clinicas (usuario_id, lida, created_at desc);
+
+create index if not exists idx_notificacoes_clinicas_caso
+  on public.notificacoes_clinicas (caso_clinico_id, created_at desc);
+
 create table if not exists public.historico_alteracoes (
   id bigserial primary key,
   tabela text not null,
@@ -608,6 +812,195 @@ begin
   end if;
 
   return null;
+end;
+$$;
+
+create or replace function public.sync_notificacoes_clinicas_avaliacao()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_professor_id uuid;
+  v_student_id uuid;
+  v_student_name text;
+  v_patient_name text;
+  v_notification_type text;
+  v_title text;
+  v_message text;
+begin
+  if new.tipo not in ('avaliacao', 'plano_tratamento', 'evolucao') then
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' and old.status is not distinct from new.status then
+    return new;
+  end if;
+
+  select
+    c.professor_id,
+    mt.aluno_id,
+    u.nome_completo,
+    p.nome
+  into
+    v_professor_id,
+    v_student_id,
+    v_student_name,
+    v_patient_name
+  from public.casos_clinicos c
+  join public.matriculas_turma mt on mt.id = c.matricula_turma_id
+  join public.usuarios u on u.id = mt.aluno_id
+  join public.pacientes_clinica p on p.id = c.paciente_id
+  where c.id = new.caso_clinico_id
+  limit 1;
+
+  if v_professor_id is null or v_student_id is null then
+    return new;
+  end if;
+
+  if new.status = 'enviado' and private.current_profile_code() = 'aluno' then
+    if new.tipo = 'avaliacao' then
+      v_notification_type := 'avaliacao_enviada_supervisao';
+      v_title := 'Avaliacao enviada para supervisao';
+      v_message :=
+        coalesce(v_student_name, 'O aluno')
+        || ' enviou a avaliacao de '
+        || coalesce(v_patient_name, 'um paciente')
+        || '.';
+    elsif new.tipo = 'plano_tratamento' then
+      v_notification_type := 'plano_tratamento_enviado_supervisao';
+      v_title := 'Plano de tratamento enviado para supervisao';
+      v_message :=
+        coalesce(v_student_name, 'O aluno')
+        || ' enviou o plano de tratamento de '
+        || coalesce(v_patient_name, 'um paciente')
+        || '.';
+    else
+      v_notification_type := 'evolucao_enviada_supervisao';
+      v_title := 'Evolucao enviada para supervisao';
+      v_message :=
+        coalesce(v_student_name, 'O aluno')
+        || ' enviou a evolucao de '
+        || coalesce(v_patient_name, 'um paciente')
+        || '.';
+    end if;
+
+    insert into public.notificacoes_clinicas (
+      unidade_id,
+      usuario_id,
+      caso_clinico_id,
+      registro_clinico_id,
+      tipo,
+      titulo,
+      mensagem
+    )
+    values (
+      new.unidade_id,
+      v_professor_id,
+      new.caso_clinico_id,
+      new.id,
+      v_notification_type,
+      v_title,
+      v_message
+    );
+
+    return new;
+  end if;
+
+  if
+    new.status = 'ajustes_solicitados'
+    and private.current_profile_code() = 'professor'
+  then
+    if new.tipo = 'avaliacao' then
+      v_notification_type := 'avaliacao_ajustes_solicitados';
+      v_title := 'Ajustes solicitados na avaliacao';
+      v_message :=
+        'O supervisor registrou parecer e solicitou ajustes na avaliacao de '
+        || coalesce(v_patient_name, 'seu paciente')
+        || '.';
+    elsif new.tipo = 'plano_tratamento' then
+      v_notification_type := 'plano_tratamento_ajustes_solicitados';
+      v_title := 'Ajustes solicitados no plano de tratamento';
+      v_message :=
+        'O supervisor registrou parecer e solicitou ajustes no plano de tratamento de '
+        || coalesce(v_patient_name, 'seu paciente')
+        || '.';
+    else
+      v_notification_type := 'evolucao_ajustes_solicitados';
+      v_title := 'Ajustes solicitados na evolucao';
+      v_message :=
+        'O supervisor registrou parecer e solicitou ajustes na evolucao de '
+        || coalesce(v_patient_name, 'seu paciente')
+        || '.';
+    end if;
+
+    insert into public.notificacoes_clinicas (
+      unidade_id,
+      usuario_id,
+      caso_clinico_id,
+      registro_clinico_id,
+      tipo,
+      titulo,
+      mensagem
+    )
+    values (
+      new.unidade_id,
+      v_student_id,
+      new.caso_clinico_id,
+      new.id,
+      v_notification_type,
+      v_title,
+      v_message
+    );
+
+    return new;
+  end if;
+
+  if new.status = 'aprovado' and private.current_profile_code() = 'professor' then
+    if new.tipo = 'avaliacao' then
+      v_notification_type := 'avaliacao_aprovada';
+      v_title := 'Avaliacao aprovada';
+      v_message :=
+        'O supervisor aprovou a avaliacao de '
+        || coalesce(v_patient_name, 'seu paciente')
+        || '.';
+    elsif new.tipo = 'plano_tratamento' then
+      v_notification_type := 'plano_tratamento_aprovado';
+      v_title := 'Plano de tratamento aprovado';
+      v_message :=
+        'O supervisor aprovou o plano de tratamento de '
+        || coalesce(v_patient_name, 'seu paciente')
+        || '.';
+    else
+      v_notification_type := 'evolucao_aprovada';
+      v_title := 'Evolucao aprovada';
+      v_message :=
+        'O supervisor aprovou a evolucao de '
+        || coalesce(v_patient_name, 'seu paciente')
+        || '.';
+    end if;
+
+    insert into public.notificacoes_clinicas (
+      unidade_id,
+      usuario_id,
+      caso_clinico_id,
+      registro_clinico_id,
+      tipo,
+      titulo,
+      mensagem
+    )
+    values (
+      new.unidade_id,
+      v_student_id,
+      new.caso_clinico_id,
+      new.id,
+      v_notification_type,
+      v_title,
+      v_message
+    );
+  end if;
+
+  return new;
 end;
 $$;
 
@@ -807,6 +1200,80 @@ as $$
       )
       or private.is_professor_linked_to_matricula(p_matricula_turma_id)
     );
+$$;
+
+create or replace function private.can_assign_clinical_case(
+  p_unidade_id uuid,
+  p_matricula_turma_id uuid,
+  p_professor_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    private.current_user_is_active()
+    and (
+      (
+        private.is_unit_coordinator()
+        and private.can_access_unit(p_unidade_id)
+      )
+      or (
+        private.current_profile_code() = 'professor'
+        and p_professor_id = (select auth.uid())
+        and private.can_access_unit(p_unidade_id)
+        and private.can_manage_grades(p_matricula_turma_id)
+      )
+    );
+$$;
+
+create or replace function private.can_view_clinical_case(p_caso_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    private.current_user_is_active()
+    and exists (
+      select 1
+      from public.casos_clinicos c
+      join public.matriculas_turma m on m.id = c.matricula_turma_id
+      where c.id = p_caso_id
+        and (
+          private.can_admin_unit(c.unidade_id)
+          or (
+            private.current_profile_code() = 'professor'
+            and c.professor_id = (select auth.uid())
+          )
+          or (
+            private.current_profile_code() = 'aluno'
+            and m.aluno_id = (select auth.uid())
+          )
+        )
+    );
+$$;
+
+create or replace function private.can_manage_clinical_case(p_caso_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.casos_clinicos c
+    where c.id = p_caso_id
+      and private.can_assign_clinical_case(
+        c.unidade_id,
+        c.matricula_turma_id,
+        c.professor_id
+      )
+  );
 $$;
 
 create or replace function private.can_view_professor(p_professor_id uuid)
@@ -1470,6 +1937,36 @@ create trigger trg_ausencias_touch_updated_at
 before update on public.ausencias
 for each row execute function public.touch_updated_at();
 
+drop trigger if exists trg_pacientes_clinica_touch_updated_at on public.pacientes_clinica;
+create trigger trg_pacientes_clinica_touch_updated_at
+before update on public.pacientes_clinica
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists trg_casos_clinicos_touch_updated_at on public.casos_clinicos;
+create trigger trg_casos_clinicos_touch_updated_at
+before update on public.casos_clinicos
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists trg_casos_clinicos_horarios_touch_updated_at on public.casos_clinicos_horarios;
+create trigger trg_casos_clinicos_horarios_touch_updated_at
+before update on public.casos_clinicos_horarios
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists trg_registros_clinicos_touch_updated_at on public.registros_clinicos;
+create trigger trg_registros_clinicos_touch_updated_at
+before update on public.registros_clinicos
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists trg_registros_clinicos_notificacoes on public.registros_clinicos;
+create trigger trg_registros_clinicos_notificacoes
+after insert or update on public.registros_clinicos
+for each row execute function public.sync_notificacoes_clinicas_avaliacao();
+
+drop trigger if exists trg_notificacoes_clinicas_touch_updated_at on public.notificacoes_clinicas;
+create trigger trg_notificacoes_clinicas_touch_updated_at
+before update on public.notificacoes_clinicas
+for each row execute function public.touch_updated_at();
+
 drop trigger if exists trg_avaliacoes_audit on public.avaliacoes;
 create trigger trg_avaliacoes_audit
 after insert or update or delete on public.avaliacoes
@@ -1528,4 +2025,29 @@ for each row execute function public.audit_changes();
 drop trigger if exists trg_professor_areas_estagio_audit on public.professor_areas_estagio;
 create trigger trg_professor_areas_estagio_audit
 after insert or update or delete on public.professor_areas_estagio
+for each row execute function public.audit_changes();
+
+drop trigger if exists trg_pacientes_clinica_audit on public.pacientes_clinica;
+create trigger trg_pacientes_clinica_audit
+after insert or update or delete on public.pacientes_clinica
+for each row execute function public.audit_changes();
+
+drop trigger if exists trg_casos_clinicos_audit on public.casos_clinicos;
+create trigger trg_casos_clinicos_audit
+after insert or update or delete on public.casos_clinicos
+for each row execute function public.audit_changes();
+
+drop trigger if exists trg_casos_clinicos_horarios_audit on public.casos_clinicos_horarios;
+create trigger trg_casos_clinicos_horarios_audit
+after insert or update or delete on public.casos_clinicos_horarios
+for each row execute function public.audit_changes();
+
+drop trigger if exists trg_registros_clinicos_audit on public.registros_clinicos;
+create trigger trg_registros_clinicos_audit
+after insert or update or delete on public.registros_clinicos
+for each row execute function public.audit_changes();
+
+drop trigger if exists trg_notificacoes_clinicas_audit on public.notificacoes_clinicas;
+create trigger trg_notificacoes_clinicas_audit
+after insert or update or delete on public.notificacoes_clinicas
 for each row execute function public.audit_changes();

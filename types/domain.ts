@@ -220,3 +220,227 @@ export interface CoordinatorDashboardData {
   criticalStudents: ProfessorStudentSummary[];
   recentAuditEntries: AuditEntry[];
 }
+
+export type ClinicalCaseStatus = "atribuido" | "ativo" | "encerrado" | "alta";
+export type ClinicalRecordType = "avaliacao" | "plano_tratamento" | "evolucao";
+export type ClinicalRecordStatus =
+  | "rascunho"
+  | "enviado"
+  | "aprovado"
+  | "ajustes_solicitados";
+export type ClinicalInstitutionalViewerRole =
+  | "coordenador"
+  | "coordenador_master";
+export type ClinicalInstitutionalPatientStatus =
+  | "com_caso_ativo"
+  | "alta"
+  | "com_historico"
+  | "cadastro_base";
+
+export type ClinicalNotificationType =
+  | "avaliacao_enviada_supervisao"
+  | "avaliacao_ajustes_solicitados"
+  | "avaliacao_aprovada"
+  | "plano_tratamento_enviado_supervisao"
+  | "plano_tratamento_ajustes_solicitados"
+  | "plano_tratamento_aprovado"
+  | "evolucao_enviada_supervisao"
+  | "evolucao_ajustes_solicitados"
+  | "evolucao_aprovada";
+
+export type ClinicalWeekday =
+  | "segunda"
+  | "terca"
+  | "quarta"
+  | "quinta"
+  | "sexta"
+  | "sabado";
+
+export interface ClinicalCaseScheduleSlot {
+  id: string;
+  weekday: ClinicalWeekday;
+  appointmentTime: string;
+}
+
+export interface ClinicalEvaluationContent {
+  evaluationDate: string;
+  chiefComplaint: string;
+  currentIllnessHistory: string;
+  relevantHistory: string;
+  medicationsAndNotes: string;
+  inspectionNotes: string;
+  painNotes: string;
+  rangeOfMotion: string;
+  muscleStrength: string;
+  functionalityLimitations: string;
+  otherFindings: string;
+  clinicalDiagnosis: string;
+  initialObjectives: string;
+  finalObservations: string;
+}
+
+export interface ClinicalEvaluationRecord {
+  id: string;
+  unitId: string | null;
+  caseId: string;
+  type: "avaliacao";
+  status: ClinicalRecordStatus;
+  authorId: string;
+  supervisorFeedback: string | null;
+  reviewedById: string | null;
+  submittedAt: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  content: ClinicalEvaluationContent;
+}
+
+export interface ClinicalTreatmentPlanContent {
+  planDate: string;
+  objectives: string;
+  conducts: string;
+  observations: string;
+}
+
+export interface ClinicalTreatmentPlanRecord {
+  id: string;
+  unitId: string | null;
+  caseId: string;
+  type: "plano_tratamento";
+  status: ClinicalRecordStatus;
+  authorId: string;
+  supervisorFeedback: string | null;
+  reviewedById: string | null;
+  submittedAt: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  content: ClinicalTreatmentPlanContent;
+}
+
+export interface ClinicalEvolutionContent {
+  sessionDate: string;
+  progressAndConduct: string;
+  observations: string;
+}
+
+export interface ClinicalEvolutionRecord {
+  id: string;
+  unitId: string | null;
+  caseId: string;
+  type: "evolucao";
+  status: ClinicalRecordStatus;
+  authorId: string;
+  supervisorFeedback: string | null;
+  reviewedById: string | null;
+  submittedAt: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  content: ClinicalEvolutionContent;
+}
+
+export interface ClinicalNotificationSummary {
+  id: string;
+  unitId: string | null;
+  userId: string;
+  caseId: string;
+  recordId: string | null;
+  type: ClinicalNotificationType;
+  recordType: ClinicalRecordType;
+  title: string;
+  message: string;
+  read: boolean;
+  readAt: string | null;
+  createdAt: string;
+  patientName: string;
+  studentName: string;
+  actionLabel: string;
+}
+
+export interface ClinicalNotificationCenter {
+  unreadCount: number;
+  pendingItems: ClinicalNotificationSummary[];
+  historyItems: ClinicalNotificationSummary[];
+}
+
+export type ClinicalCaseSection =
+  | "visao-geral"
+  | "avaliacao"
+  | "plano-tratamento"
+  | "evolucao";
+
+export interface ClinicalStudentOption {
+  enrollmentId: string;
+  studentId: string;
+  studentName: string;
+  registration: string;
+  className: string;
+  semesterCode: string;
+  areaName: string;
+  professorName?: string | null;
+  label: string;
+}
+
+export interface ClinicalPatientSummary {
+  id: string;
+  identifier: string;
+  name: string;
+  birthDate: string | null;
+  cpf: string | null;
+  contact: string | null;
+  companion: string | null;
+  active: boolean;
+}
+
+export interface ClinicalInstitutionalPatientListItem {
+  patient: ClinicalPatientSummary;
+  currentStatus: ClinicalInstitutionalPatientStatus;
+  currentStatusLabel: string;
+  activeCaseId: string | null;
+  latestCaseId: string | null;
+  latestCaseStatus: ClinicalCaseStatus | null;
+  latestSemesterCode: string | null;
+  latestAreaName: string | null;
+  latestProfessorName: string | null;
+  latestStudentName: string | null;
+  lastUpdatedAt: string | null;
+  historyCount: number;
+}
+
+export interface ClinicalCaseSummary {
+  id: string;
+  unitId: string | null;
+  unitName: string;
+  patient: ClinicalPatientSummary;
+  enrollmentId: string;
+  studentId: string;
+  studentName: string;
+  registration: string;
+  classId: string;
+  className: string;
+  semesterId: string;
+  semesterCode: string;
+  areaId: string | null;
+  areaName: string;
+  professorId: string;
+  professorName: string;
+  schedules: ClinicalCaseScheduleSlot[];
+  weekday: ClinicalWeekday;
+  appointmentTime: string;
+  status: ClinicalCaseStatus;
+  notificationType?: ClinicalNotificationType | null;
+  notificationLabel?: string | null;
+  notificationUnreadCount: number;
+  active: boolean;
+  startedAt: string;
+  endedAt: string | null;
+  updatedAt: string;
+}
+
+export interface ClinicalPatientHistoryCaseItem {
+  caseItem: ClinicalCaseSummary;
+  latestEvaluationStatus: ClinicalRecordStatus | null;
+  latestTreatmentPlanStatus: ClinicalRecordStatus | null;
+  latestEvolutionStatus: ClinicalRecordStatus | null;
+}

@@ -63,6 +63,72 @@ export function formatEvaluationStatus(value: string) {
   }
 }
 
+export function formatClinicalCaseStatus(value: string) {
+  switch (value) {
+    case "atribuido":
+      return "Atribuído";
+    case "ativo":
+      return "Ativo";
+    case "alta":
+      return "Alta";
+    case "encerrado":
+      return "Encerrado";
+    default:
+      return value;
+  }
+}
+
+export function formatClinicalRecordStatus(value: string) {
+  switch (value) {
+    case "rascunho":
+      return "Rascunho";
+    case "enviado":
+      return "Enviado";
+    case "aprovado":
+      return "Aprovado";
+    case "ajustes_solicitados":
+      return "Ajustes solicitados";
+    default:
+      return value;
+  }
+}
+
+export function formatClinicalRecordType(value: string) {
+  switch (value) {
+    case "avaliacao":
+      return "Avaliação";
+    case "plano_tratamento":
+      return "Plano de tratamento";
+    case "evolucao":
+      return "Evolução";
+    default:
+      return value;
+  }
+}
+
+export function formatClinicalWeekday(value: string) {
+  switch (value) {
+    case "segunda":
+      return "Segunda-feira";
+    case "terca":
+      return "Terça-feira";
+    case "quarta":
+      return "Quarta-feira";
+    case "quinta":
+      return "Quinta-feira";
+    case "sexta":
+      return "Sexta-feira";
+    case "sabado":
+      return "Sábado";
+    default:
+      return value;
+  }
+}
+
+export function formatClinicalScheduleLabel(weekday: string, appointmentTime: string) {
+  return `${formatClinicalWeekday(weekday)} às ${appointmentTime}`;
+}
+
 export function formatLaunchIdentity(launchType: string, value: string) {
   return `${formatLaunchType(launchType)} - ${formatDate(value)}`;
 }

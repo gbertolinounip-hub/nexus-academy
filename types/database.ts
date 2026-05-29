@@ -680,6 +680,288 @@ export interface Database {
         };
         Relationships: [];
       };
+      pacientes_clinica: {
+        Row: {
+          id: string;
+          unidade_id: string | null;
+          identificador: string;
+          nome: string;
+          data_nascimento: string | null;
+          cpf: string | null;
+          contato: string | null;
+          acompanhante: string | null;
+          ativo: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          unidade_id?: string | null;
+          identificador: string;
+          nome: string;
+          data_nascimento?: string | null;
+          cpf?: string | null;
+          contato?: string | null;
+          acompanhante?: string | null;
+          ativo?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          unidade_id?: string | null;
+          identificador?: string;
+          nome?: string;
+          data_nascimento?: string | null;
+          cpf?: string | null;
+          contato?: string | null;
+          acompanhante?: string | null;
+          ativo?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      casos_clinicos: {
+        Row: {
+          id: string;
+          unidade_id: string | null;
+          paciente_id: string;
+          matricula_turma_id: string;
+          professor_id: string;
+          semestre_id: string;
+          turma_id: string;
+          area_estagio_id: string | null;
+          dia_semana:
+            | "segunda"
+            | "terca"
+            | "quarta"
+            | "quinta"
+            | "sexta"
+            | "sabado";
+          horario_atendimento: string;
+          status: "atribuido" | "ativo" | "encerrado" | "alta";
+          ativo: boolean;
+          data_inicio: string;
+          data_fim: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          unidade_id?: string | null;
+          paciente_id: string;
+          matricula_turma_id: string;
+          professor_id: string;
+          semestre_id: string;
+          turma_id: string;
+          area_estagio_id?: string | null;
+          dia_semana:
+            | "segunda"
+            | "terca"
+            | "quarta"
+            | "quinta"
+            | "sexta"
+            | "sabado";
+          horario_atendimento: string;
+          status?: "atribuido" | "ativo" | "encerrado" | "alta";
+          ativo?: boolean;
+          data_inicio?: string;
+          data_fim?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          unidade_id?: string | null;
+          paciente_id?: string;
+          matricula_turma_id?: string;
+          professor_id?: string;
+          semestre_id?: string;
+          turma_id?: string;
+          area_estagio_id?: string | null;
+          dia_semana?:
+            | "segunda"
+            | "terca"
+            | "quarta"
+            | "quinta"
+            | "sexta"
+            | "sabado";
+          horario_atendimento?: string;
+          status?: "atribuido" | "ativo" | "encerrado" | "alta";
+          ativo?: boolean;
+          data_inicio?: string;
+          data_fim?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      casos_clinicos_horarios: {
+        Row: {
+          id: string;
+          caso_clinico_id: string;
+          dia_semana:
+            | "segunda"
+            | "terca"
+            | "quarta"
+            | "quinta"
+            | "sexta"
+            | "sabado";
+          horario_atendimento: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          caso_clinico_id: string;
+          dia_semana:
+            | "segunda"
+            | "terca"
+            | "quarta"
+            | "quinta"
+            | "sexta"
+            | "sabado";
+          horario_atendimento: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          caso_clinico_id?: string;
+          dia_semana?:
+            | "segunda"
+            | "terca"
+            | "quarta"
+            | "quinta"
+            | "sexta"
+            | "sabado";
+          horario_atendimento?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      registros_clinicos: {
+        Row: {
+          id: string;
+          unidade_id: string | null;
+          caso_clinico_id: string;
+          tipo: "avaliacao" | "plano_tratamento" | "evolucao";
+          status: "rascunho" | "enviado" | "aprovado" | "ajustes_solicitados";
+          conteudo_json: Record<string, unknown>;
+          parecer_supervisor: string | null;
+          autor_id: string;
+          revisado_por: string | null;
+          enviado_em: string | null;
+          revisado_em: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          unidade_id?: string | null;
+          caso_clinico_id: string;
+          tipo: "avaliacao" | "plano_tratamento" | "evolucao";
+          status?: "rascunho" | "enviado" | "aprovado" | "ajustes_solicitados";
+          conteudo_json?: Record<string, unknown>;
+          parecer_supervisor?: string | null;
+          autor_id: string;
+          revisado_por?: string | null;
+          enviado_em?: string | null;
+          revisado_em?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          unidade_id?: string | null;
+          caso_clinico_id?: string;
+          tipo?: "avaliacao" | "plano_tratamento" | "evolucao";
+          status?: "rascunho" | "enviado" | "aprovado" | "ajustes_solicitados";
+          conteudo_json?: Record<string, unknown>;
+          parecer_supervisor?: string | null;
+          autor_id?: string;
+          revisado_por?: string | null;
+          enviado_em?: string | null;
+          revisado_em?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      notificacoes_clinicas: {
+        Row: {
+          id: string;
+          unidade_id: string | null;
+          usuario_id: string;
+          caso_clinico_id: string;
+          registro_clinico_id: string | null;
+          tipo:
+            | "avaliacao_enviada_supervisao"
+            | "avaliacao_ajustes_solicitados"
+            | "avaliacao_aprovada"
+            | "plano_tratamento_enviado_supervisao"
+            | "plano_tratamento_ajustes_solicitados"
+            | "plano_tratamento_aprovado"
+            | "evolucao_enviada_supervisao"
+            | "evolucao_ajustes_solicitados"
+            | "evolucao_aprovada";
+          titulo: string;
+          mensagem: string;
+          lida: boolean;
+          lida_em: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          unidade_id?: string | null;
+          usuario_id: string;
+          caso_clinico_id: string;
+          registro_clinico_id?: string | null;
+          tipo:
+            | "avaliacao_enviada_supervisao"
+            | "avaliacao_ajustes_solicitados"
+            | "avaliacao_aprovada"
+            | "plano_tratamento_enviado_supervisao"
+            | "plano_tratamento_ajustes_solicitados"
+            | "plano_tratamento_aprovado"
+            | "evolucao_enviada_supervisao"
+            | "evolucao_ajustes_solicitados"
+            | "evolucao_aprovada";
+          titulo: string;
+          mensagem: string;
+          lida?: boolean;
+          lida_em?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          unidade_id?: string | null;
+          usuario_id?: string;
+          caso_clinico_id?: string;
+          registro_clinico_id?: string | null;
+          tipo?:
+            | "avaliacao_enviada_supervisao"
+            | "avaliacao_ajustes_solicitados"
+            | "avaliacao_aprovada"
+            | "plano_tratamento_enviado_supervisao"
+            | "plano_tratamento_ajustes_solicitados"
+            | "plano_tratamento_aprovado"
+            | "evolucao_enviada_supervisao"
+            | "evolucao_ajustes_solicitados"
+            | "evolucao_aprovada";
+          titulo?: string;
+          mensagem?: string;
+          lida?: boolean;
+          lida_em?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       historico_alteracoes: {
         Row: {
           id: number;

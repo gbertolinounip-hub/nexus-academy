@@ -17,6 +17,11 @@ alter table public.criterios_avaliacao enable row level security;
 alter table public.avaliacoes enable row level security;
 alter table public.itens_avaliados enable row level security;
 alter table public.ausencias enable row level security;
+alter table public.pacientes_clinica enable row level security;
+alter table public.casos_clinicos enable row level security;
+alter table public.casos_clinicos_horarios enable row level security;
+alter table public.registros_clinicos enable row level security;
+alter table public.notificacoes_clinicas enable row level security;
 alter table public.historico_alteracoes enable row level security;
 
 alter table public.perfis force row level security;
@@ -38,6 +43,11 @@ alter table public.criterios_avaliacao force row level security;
 alter table public.avaliacoes force row level security;
 alter table public.itens_avaliados force row level security;
 alter table public.ausencias force row level security;
+alter table public.pacientes_clinica force row level security;
+alter table public.casos_clinicos force row level security;
+alter table public.casos_clinicos_horarios force row level security;
+alter table public.registros_clinicos force row level security;
+alter table public.notificacoes_clinicas force row level security;
 alter table public.historico_alteracoes force row level security;
 
 drop policy if exists perfis_read_policy on public.perfis;
@@ -565,6 +575,296 @@ for update
 to authenticated
 using (private.can_manage_grades(matricula_turma_id))
 with check (private.can_manage_grades(matricula_turma_id));
+
+drop policy if exists pacientes_clinica_select_policy on public.pacientes_clinica;
+create policy pacientes_clinica_select_policy
+on public.pacientes_clinica
+for select
+to authenticated
+using (
+  private.can_admin_unit(unidade_id)
+  or exists (
+    select 1
+    from public.casos_clinicos c
+    where c.paciente_id = pacientes_clinica.id
+      and private.can_view_clinical_case(c.id)
+  )
+);
+
+drop policy if exists pacientes_clinica_insert_policy on public.pacientes_clinica;
+create policy pacientes_clinica_insert_policy
+on public.pacientes_clinica
+for insert
+to authenticated
+with check (
+  private.current_user_is_active()
+  and (
+    private.can_operate_unit(unidade_id)
+    or (
+      private.current_profile_code() = 'professor'
+      and private.can_access_unit(unidade_id)
+    )
+  )
+);
+
+drop policy if exists pacientes_clinica_update_policy on public.pacientes_clinica;
+create policy pacientes_clinica_update_policy
+on public.pacientes_clinica
+for update
+to authenticated
+using (
+  private.can_operate_unit(unidade_id)
+  or exists (
+    select 1
+    from public.casos_clinicos c
+    where c.paciente_id = pacientes_clinica.id
+      and private.can_manage_clinical_case(c.id)
+  )
+)
+with check (
+  private.can_operate_unit(unidade_id)
+  or exists (
+    select 1
+    from public.casos_clinicos c
+    where c.paciente_id = pacientes_clinica.id
+      and private.can_manage_clinical_case(c.id)
+  )
+);
+
+drop policy if exists pacientes_clinica_delete_policy on public.pacientes_clinica;
+create policy pacientes_clinica_delete_policy
+on public.pacientes_clinica
+for delete
+to authenticated
+using (private.can_operate_unit(unidade_id));
+
+drop policy if exists casos_clinicos_select_policy on public.casos_clinicos;
+create policy casos_clinicos_select_policy
+on public.casos_clinicos
+for select
+to authenticated
+using (
+  private.can_admin_unit(unidade_id)
+  or (
+    private.current_profile_code() = 'professor'
+    and professor_id = (select auth.uid())
+  )
+  or exists (
+    select 1
+    from public.matriculas_turma m
+    where m.id = casos_clinicos.matricula_turma_id
+      and m.aluno_id = (select auth.uid())
+  )
+);
+
+drop policy if exists casos_clinicos_insert_policy on public.casos_clinicos;
+create policy casos_clinicos_insert_policy
+on public.casos_clinicos
+for insert
+to authenticated
+with check (
+  private.can_assign_clinical_case(
+    unidade_id,
+    matricula_turma_id,
+    professor_id
+  )
+);
+
+drop policy if exists casos_clinicos_update_policy on public.casos_clinicos;
+create policy casos_clinicos_update_policy
+on public.casos_clinicos
+for update
+to authenticated
+using (
+  private.can_assign_clinical_case(
+    unidade_id,
+    matricula_turma_id,
+    professor_id
+  )
+)
+with check (
+  private.can_assign_clinical_case(
+    unidade_id,
+    matricula_turma_id,
+    professor_id
+  )
+);
+
+drop policy if exists casos_clinicos_delete_policy on public.casos_clinicos;
+create policy casos_clinicos_delete_policy
+on public.casos_clinicos
+for delete
+to authenticated
+using (
+  private.can_assign_clinical_case(
+    unidade_id,
+    matricula_turma_id,
+    professor_id
+  )
+);
+
+drop policy if exists casos_clinicos_horarios_select_policy on public.casos_clinicos_horarios;
+create policy casos_clinicos_horarios_select_policy
+on public.casos_clinicos_horarios
+for select
+to authenticated
+using (private.can_view_clinical_case(caso_clinico_id));
+
+drop policy if exists casos_clinicos_horarios_insert_policy on public.casos_clinicos_horarios;
+create policy casos_clinicos_horarios_insert_policy
+on public.casos_clinicos_horarios
+for insert
+to authenticated
+with check (private.can_manage_clinical_case(caso_clinico_id));
+
+drop policy if exists casos_clinicos_horarios_update_policy on public.casos_clinicos_horarios;
+create policy casos_clinicos_horarios_update_policy
+on public.casos_clinicos_horarios
+for update
+to authenticated
+using (private.can_manage_clinical_case(caso_clinico_id))
+with check (private.can_manage_clinical_case(caso_clinico_id));
+
+drop policy if exists casos_clinicos_horarios_delete_policy on public.casos_clinicos_horarios;
+create policy casos_clinicos_horarios_delete_policy
+on public.casos_clinicos_horarios
+for delete
+to authenticated
+using (private.can_manage_clinical_case(caso_clinico_id));
+
+drop policy if exists registros_clinicos_select_policy on public.registros_clinicos;
+create policy registros_clinicos_select_policy
+on public.registros_clinicos
+for select
+to authenticated
+using (private.can_view_clinical_case(caso_clinico_id));
+
+drop policy if exists registros_clinicos_insert_policy on public.registros_clinicos;
+create policy registros_clinicos_insert_policy
+on public.registros_clinicos
+for insert
+to authenticated
+with check (
+  tipo in ('avaliacao', 'plano_tratamento', 'evolucao')
+  and autor_id = (select auth.uid())
+  and private.current_profile_code() = 'aluno'
+  and private.can_view_clinical_case(caso_clinico_id)
+);
+
+drop policy if exists registros_clinicos_update_policy on public.registros_clinicos;
+create policy registros_clinicos_update_policy
+on public.registros_clinicos
+for update
+to authenticated
+using (
+  private.can_view_clinical_case(caso_clinico_id)
+  and (
+    autor_id = (select auth.uid())
+    or (
+      private.current_profile_code() = 'professor'
+      and exists (
+        select 1
+        from public.casos_clinicos c
+        where c.id = registros_clinicos.caso_clinico_id
+          and c.professor_id = (select auth.uid())
+      )
+    )
+  )
+)
+with check (
+  private.can_view_clinical_case(caso_clinico_id)
+  and (
+    autor_id = (select auth.uid())
+    or (
+      private.current_profile_code() = 'professor'
+      and exists (
+        select 1
+        from public.casos_clinicos c
+        where c.id = registros_clinicos.caso_clinico_id
+          and c.professor_id = (select auth.uid())
+      )
+    )
+  )
+);
+
+drop policy if exists registros_clinicos_delete_policy on public.registros_clinicos;
+create policy registros_clinicos_delete_policy
+on public.registros_clinicos
+for delete
+to authenticated
+using (private.can_manage_clinical_case(caso_clinico_id));
+
+drop policy if exists notificacoes_clinicas_select_policy on public.notificacoes_clinicas;
+create policy notificacoes_clinicas_select_policy
+on public.notificacoes_clinicas
+for select
+to authenticated
+using (
+  usuario_id = (select auth.uid())
+  and private.can_view_clinical_case(caso_clinico_id)
+);
+
+drop policy if exists notificacoes_clinicas_insert_policy on public.notificacoes_clinicas;
+create policy notificacoes_clinicas_insert_policy
+on public.notificacoes_clinicas
+for insert
+to authenticated
+with check (
+  private.current_user_is_active()
+  and (
+    (
+      private.current_profile_code() = 'aluno'
+      and tipo in (
+        'avaliacao_enviada_supervisao',
+        'plano_tratamento_enviado_supervisao',
+        'evolucao_enviada_supervisao'
+      )
+      and exists (
+        select 1
+        from public.casos_clinicos c
+        join public.matriculas_turma m on m.id = c.matricula_turma_id
+        where c.id = notificacoes_clinicas.caso_clinico_id
+          and c.unidade_id = notificacoes_clinicas.unidade_id
+          and m.aluno_id = (select auth.uid())
+          and c.professor_id = notificacoes_clinicas.usuario_id
+      )
+    )
+    or (
+      private.current_profile_code() = 'professor'
+      and tipo in (
+        'avaliacao_ajustes_solicitados',
+        'avaliacao_aprovada',
+        'plano_tratamento_ajustes_solicitados',
+        'plano_tratamento_aprovado',
+        'evolucao_ajustes_solicitados',
+        'evolucao_aprovada'
+      )
+      and exists (
+        select 1
+        from public.casos_clinicos c
+        join public.matriculas_turma m on m.id = c.matricula_turma_id
+        where c.id = notificacoes_clinicas.caso_clinico_id
+          and c.unidade_id = notificacoes_clinicas.unidade_id
+          and c.professor_id = (select auth.uid())
+          and m.aluno_id = notificacoes_clinicas.usuario_id
+      )
+    )
+  )
+);
+
+drop policy if exists notificacoes_clinicas_update_policy on public.notificacoes_clinicas;
+create policy notificacoes_clinicas_update_policy
+on public.notificacoes_clinicas
+for update
+to authenticated
+using (
+  usuario_id = (select auth.uid())
+  and private.can_view_clinical_case(caso_clinico_id)
+)
+with check (
+  usuario_id = (select auth.uid())
+  and private.can_view_clinical_case(caso_clinico_id)
+);
 
 drop policy if exists historico_alteracoes_read_policy on public.historico_alteracoes;
 create policy historico_alteracoes_read_policy
