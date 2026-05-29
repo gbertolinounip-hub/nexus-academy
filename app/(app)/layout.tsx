@@ -2,16 +2,23 @@
 import { getNavigationForRole } from "@/lib/auth/navigation";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getAuthenticatedStudentDashboardPageData } from "@/services/dashboard";
+import { getClinicalUnreadNotificationCount } from "@/services/clinical-supervision";
 
 export default async function AppLayout({
   children
 }: Readonly<{ children: React.ReactNode }>) {
   const currentUser = await requireAuthenticatedUser();
+  const studentDashboardLoad =
+    currentUser.role === "aluno"
+      ? await getAuthenticatedStudentDashboardPageData(currentUser)
+      : null;
+  const clinicalUnreadNotificationCount =
+    currentUser.role === "aluno" || currentUser.role === "professor"
+      ? await getClinicalUnreadNotificationCount(currentUser)
+      : 0;
   const studentSecondaryNavigationItems =
     currentUser.role === "aluno"
-      ? (
-          await getAuthenticatedStudentDashboardPageData(currentUser)
-        ).pageData?.navigation.areas.map((area) => ({
+      ? studentDashboardLoad?.pageData?.navigation.areas.map((area) => ({
           key: area.enrollmentId,
           label: area.areaName,
           enrollmentId: area.enrollmentId,
@@ -27,11 +34,22 @@ export default async function AppLayout({
               : "Supervisor ainda não vinculado"
         })) ?? []
       : [];
+  const navigationItems = getNavigationForRole(currentUser.role).map((item) =>
+    String(item.href) === "/clinica-supervisionada"
+      ? {
+          ...item,
+          badgeCount:
+            clinicalUnreadNotificationCount > 0
+              ? clinicalUnreadNotificationCount
+              : undefined
+        }
+      : item
+  );
 
   return (
     <DashboardShell
       currentUser={currentUser}
-      navigationItems={getNavigationForRole(currentUser.role)}
+      navigationItems={navigationItems}
       secondaryNavigationItems={
         currentUser.role === "aluno"
           ? [

@@ -24,6 +24,15 @@ export function SidebarNav({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const activeEnrollmentId = searchParams.get("matricula");
+  const hasStudentOverviewLink = links.some((link) => link.href === ("/aluno" as Route));
+  const studentClinicalLink = links.find(
+    (link) =>
+      hasStudentOverviewLink &&
+      link.href === ("/clinica-supervisionada" as Route)
+  );
+  const visibleLinks = studentClinicalLink
+    ? links.filter((link) => link.href !== studentClinicalLink.href)
+    : links;
   const activeLinkHref =
     [...links]
       .sort((left, right) => right.href.length - left.href.length)
@@ -65,17 +74,31 @@ export function SidebarNav({
     });
   }
 
+  function renderNavigationLabel(label: string, badgeCount?: number) {
+    return (
+      <span className="sidebar-link-content">
+        <span>{label}</span>
+        {badgeCount && badgeCount > 0 ? (
+          <span className="sidebar-link-badge">
+            {badgeCount > 99 ? "99+" : badgeCount}
+          </span>
+        ) : null}
+      </span>
+    );
+  }
+
   return (
     <nav className="sidebar-nav">
-      {links.map((link) => {
+      {visibleLinks.map((link) => {
         const isActive = activeLinkHref === link.href;
         const showSecondaryNavigation =
-          link.href === "/aluno" && secondaryNavigationItems.length > 0;
+          link.href === "/aluno" &&
+          (secondaryNavigationItems.length > 0 || Boolean(studentClinicalLink));
 
         return (
           <div key={link.href} className="sidebar-nav-item">
             <Link className={isActive ? "sidebar-link active" : "sidebar-link"} href={link.href}>
-              {link.label}
+              {renderNavigationLabel(link.label, link.badgeCount)}
             </Link>
 
             {showSecondaryNavigation ? (
@@ -107,6 +130,24 @@ export function SidebarNav({
                     </Link>
                   );
                 })}
+
+                {studentClinicalLink ? (
+                  <Link
+                    className={
+                      activeLinkHref === studentClinicalLink.href
+                        ? "sidebar-sublink sidebar-sublink-active"
+                        : "sidebar-sublink"
+                    }
+                    href={studentClinicalLink.href}
+                  >
+                    <strong>
+                      {renderNavigationLabel(
+                        studentClinicalLink.label,
+                        studentClinicalLink.badgeCount
+                      )}
+                    </strong>
+                  </Link>
+                ) : null}
               </div>
             ) : null}
           </div>

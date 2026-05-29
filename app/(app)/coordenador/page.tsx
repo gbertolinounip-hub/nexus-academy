@@ -1,5 +1,6 @@
 ﻿import Link from "next/link";
 import { MetricCard } from "@/components/common/metric-card";
+import type { Route } from "next";
 import { SectionCard } from "@/components/common/section-card";
 import { ProgressBars } from "@/components/dashboard/progress-bars";
 import { ConfirmActionForm } from "@/components/forms/confirm-action-form";
@@ -92,6 +93,12 @@ export default async function CoordinatorDashboardPage({
         <div className="actions-row">
           <Link href="/gestao/alunos" className="button button-secondary">
             Gestão acadêmica
+          </Link>
+          <Link
+            href={"/coordenador/clinica-supervisionada" as Route}
+            className="button button-secondary"
+          >
+            Gestão clínica
           </Link>
           {dashboard.semesterStatus === "ativo" ? (
             <ConfirmActionForm
