@@ -101,6 +101,53 @@ export interface SemesterManagementActionState {
   submittedAt?: number;
 }
 
+export type StudentImportPreviewRowStatus =
+  | "valida"
+  | "duplicada"
+  | "invalida"
+  | "importada"
+  | "falha";
+
+export interface StudentImportPreviewRow {
+  rowNumber: number;
+  nome_completo: string;
+  ra: string;
+  celular: string;
+  email: string;
+  status: StudentImportPreviewRowStatus;
+  issues: string[];
+  temporaryPasswordMasked: string;
+}
+
+export interface StudentImportSummary {
+  totalRows: number;
+  validRows: number;
+  duplicateRows: number;
+  invalidRows: number;
+  importedRows: number;
+  failedRows: number;
+}
+
+export interface StudentImportPayloadRow {
+  rowNumber: number;
+  nome_completo: string;
+  ra: string;
+  celular: string;
+  email: string;
+}
+
+export interface StudentImportActionState {
+  status: "idle" | "preview" | "success" | "error";
+  message: string | null;
+  fieldErrors: Record<string, string>;
+  fileName: string | null;
+  fileTypeLabel: string | null;
+  rows: StudentImportPreviewRow[];
+  importableRows: StudentImportPayloadRow[];
+  summary: StudentImportSummary;
+  submittedAt?: number;
+}
+
 export function createEmptyStudentAssignment(
   rowId = "assignment-initial"
 ): StudentRegistrationAssignmentFormValue {
@@ -194,5 +241,23 @@ export const initialSemesterManagementActionState: SemesterManagementActionState
     data_inicio: "",
     data_fim: "",
     status: "planejado"
+  }
+};
+
+export const initialStudentImportActionState: StudentImportActionState = {
+  status: "idle",
+  message: null,
+  fieldErrors: {},
+  fileName: null,
+  fileTypeLabel: null,
+  rows: [],
+  importableRows: [],
+  summary: {
+    totalRows: 0,
+    validRows: 0,
+    duplicateRows: 0,
+    invalidRows: 0,
+    importedRows: 0,
+    failedRows: 0
   }
 };

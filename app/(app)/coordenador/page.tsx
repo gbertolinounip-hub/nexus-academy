@@ -148,8 +148,9 @@ export default async function CoordinatorDashboardPage({
         />
       </div>
 
-      <div className="split-grid">
+      <div className="split-grid coordinator-dashboard-top-grid">
         <SectionCard
+          className="coordinator-dashboard-equal-card coordinator-dashboard-groups-card"
           title="Blocos avaliativos por área"
           description={
             selectedArea
@@ -158,7 +159,7 @@ export default async function CoordinatorDashboardPage({
           }
         >
           {selectedArea ? (
-            <>
+            <div className="coordinator-dashboard-groups-content">
               <div className="report-chip-list coordinator-dashboard-filter-list">
                 {dashboard.areaGroupAverages.map((area) => (
                   <Link
@@ -182,7 +183,7 @@ export default async function CoordinatorDashboardPage({
                   max: group.weightPercentage
                 }))}
               />
-            </>
+            </div>
           ) : (
             <p className="empty-message">
               Ainda não há áreas com alunos ativos suficientes para consolidar
@@ -192,6 +193,7 @@ export default async function CoordinatorDashboardPage({
         </SectionCard>
 
         <SectionCard
+          className="coordinator-dashboard-equal-card coordinator-dashboard-priority-card"
           title="Casos prioritários"
           description="Alunos que merecem acompanhamento mais próximo."
           actions={
@@ -200,16 +202,18 @@ export default async function CoordinatorDashboardPage({
             </Link>
           }
         >
-          <ul className="detail-list">
-            {dashboard.criticalStudents.map((student) => (
-              <li className="detail-item" key={student.enrollmentId}>
-                <span>{student.studentName}</span>
-                <span>
-                  {formatPercentage(student.finalPercentage)} · {statusLabel(student.status)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="coordinator-dashboard-priority-scroll">
+            <ul className="detail-list coordinator-dashboard-priority-list">
+              {dashboard.criticalStudents.map((student) => (
+                <li className="detail-item" key={student.enrollmentId}>
+                  <span>{student.studentName}</span>
+                  <span>
+                    {formatPercentage(student.finalPercentage)} · {statusLabel(student.status)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </SectionCard>
       </div>
 

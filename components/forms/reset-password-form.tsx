@@ -7,6 +7,12 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type RecoveryState = "checking" | "ready" | "blocked" | "invalid";
 
+function normalizeUserMetadata(metadata: unknown) {
+  return metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>)
+    : {};
+}
+
 async function resolveRecoveryState() {
   const supabase = createSupabaseBrowserClient();
   const {
@@ -136,8 +142,16 @@ export function ResetPasswordForm({ flow }: ResetPasswordFormProps) {
         }
 
         const supabase = createSupabaseBrowserClient();
+        const {
+          data: { user }
+        } = await supabase.auth.getUser();
         const { error } = await supabase.auth.updateUser({
-          password
+          password,
+          data: {
+            ...normalizeUserMetadata(user?.user_metadata),
+            password_change_required: false,
+            temporary_password: false
+          }
         });
 
         if (error) {

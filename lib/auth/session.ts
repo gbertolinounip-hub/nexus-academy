@@ -37,6 +37,16 @@ interface UnitRow {
   slug: string;
 }
 
+function readBooleanMetadataFlag(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== "object" || !(key in metadata)) {
+    return false;
+  }
+
+  const value = (metadata as Record<string, unknown>)[key];
+
+  return value === true || value === "true" || value === 1;
+}
+
 function readAuthSubject(claims: unknown) {
   if (!claims || typeof claims !== "object" || !("sub" in claims)) {
     return null;
@@ -72,6 +82,12 @@ async function resolveAuthState(): Promise<AuthState> {
       user: null
     };
   }
+
+  const { data: authUserData } = await supabase.auth.getUser();
+  const passwordChangeRecommended = readBooleanMetadataFlag(
+    authUserData.user?.user_metadata,
+    "password_change_required"
+  );
 
   const { data: userRowData, error: userError } = await supabase
     .from("usuarios")
@@ -140,7 +156,8 @@ async function resolveAuthState(): Promise<AuthState> {
       role,
       unitId: userRow.unidade_id,
       unitName: unitRow?.nome ?? null,
-      unitSlug: unitRow?.slug ?? null
+      unitSlug: unitRow?.slug ?? null,
+      passwordChangeRecommended
     }
   };
 }

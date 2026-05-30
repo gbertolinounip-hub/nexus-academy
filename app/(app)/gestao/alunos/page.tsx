@@ -50,6 +50,11 @@ export default async function AcademicManagementPage(props: {
           áreas dinamicamente por semestre e mantenha a supervisão organizada por
           bloco e área de estágio.
         </p>
+        <div className="actions-row">
+          <Link href="/gestao/alunos/importar" className="button button-secondary">
+            Importar alunos
+          </Link>
+        </div>
         {notice ? (
           <p
             className={`form-notice ${

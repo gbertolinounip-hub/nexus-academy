@@ -238,21 +238,17 @@ function getStudentAreaRecentUpdateAt(input: {
   evaluationItemRows: EvaluationItemRow[];
   absenceRows: AbsenceRow[];
 }) {
+  if (!input.evaluationRows.length) {
+    return null;
+  }
+
   return selectMostRecentTimestamp([
-    input.enrollment.updated_at,
-    input.classGroup.updated_at,
-    ...input.professorLinks.flatMap((link) => [link.updated_at, link.created_at]),
     ...input.evaluationRows.flatMap((evaluation) => [
       evaluation.updated_at,
       evaluation.created_at,
       evaluation.avaliado_em
     ]),
-    ...input.evaluationItemRows.flatMap((item) => [item.updated_at, item.created_at]),
-    ...input.absenceRows.flatMap((absence) => [
-      absence.updated_at,
-      absence.created_at,
-      absence.data_ausencia
-    ])
+    ...input.evaluationItemRows.flatMap((item) => [item.updated_at, item.created_at])
   ]);
 }
 

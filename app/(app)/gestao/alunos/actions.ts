@@ -2439,18 +2439,6 @@ async function updateUserActivation(input: {
   const supabase = await createSupabaseServerClient();
   await loadUserProfileCode(input);
 
-  if (input.expectedProfileCode === "aluno" && input.nextActive) {
-    const hasOperationalSemester = await studentHasOperationalActiveSemester(
-      input.userId
-    );
-
-    if (!hasOperationalSemester) {
-      throw new Error(
-        "Este aluno não possui matrícula ativa em semestre operacional. Vincule o aluno a um semestre ativo ou ative o próximo semestre antes de reativar o acesso."
-      );
-    }
-  }
-
   const userUpdatePayload: UserUpdate = {
     ativo: input.nextActive
   };

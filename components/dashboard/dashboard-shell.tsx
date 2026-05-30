@@ -79,7 +79,37 @@ export function DashboardShell({
         </div>
       </aside>
 
-      <main className="page">{children}</main>
+      <main className="page">
+        {currentUser.role === "aluno" && currentUser.passwordChangeRecommended ? (
+          <section className="student-password-notice" aria-label="Aviso de segurança">
+            <div className="student-password-notice-icon" aria-hidden="true">
+              !
+            </div>
+
+            <div className="student-password-notice-copy">
+              <div className="student-password-notice-meta">
+                <span className="student-password-notice-tag">
+                  Atenção de segurança
+                </span>
+                <p className="eyebrow">Segurança da conta</p>
+              </div>
+              <h2>Bem-vindo ao Nexus Academy!</h2>
+              <p>
+                Seu acesso foi criado com uma senha padrão. Recomendamos alterar sua
+                senha agora para manter sua conta mais segura.
+              </p>
+            </div>
+
+            <div className="student-password-notice-actions">
+              <Link href={"/conta/seguranca" as Route} className="button">
+                Alterar senha
+              </Link>
+            </div>
+          </section>
+        ) : null}
+
+        {children}
+      </main>
     </div>
   );
 }

@@ -12,6 +12,7 @@ export interface SessionUser {
   unitId?: string | null;
   unitName?: string | null;
   unitSlug?: string | null;
+  passwordChangeRecommended?: boolean;
 }
 
 export interface SemesterSummary {

@@ -7,6 +7,12 @@ import {
   createSupabaseEphemeralBrowserClient
 } from "@/lib/supabase/client";
 
+function normalizeUserMetadata(metadata: unknown) {
+  return metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>)
+    : {};
+}
+
 function resolveCurrentPasswordErrorMessage(error: unknown) {
   if (error instanceof Error) {
     if (
@@ -91,8 +97,16 @@ export function ChangePasswordForm({ email }: ChangePasswordFormProps) {
         }
 
         const supabase = createSupabaseBrowserClient();
+        const {
+          data: { user }
+        } = await supabase.auth.getUser();
         const { error: updateError } = await supabase.auth.updateUser({
-          password: newPassword
+          password: newPassword,
+          data: {
+            ...normalizeUserMetadata(user?.user_metadata),
+            password_change_required: false,
+            temporary_password: false
+          }
         });
 
         if (updateError) {
