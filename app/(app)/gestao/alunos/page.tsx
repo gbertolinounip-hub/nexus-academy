@@ -41,7 +41,7 @@ export default async function AcademicManagementPage(props: {
       : "/gestao/alunos";
 
   return (
-    <div className="stack">
+    <div className="stack management-catalog-page">
       <section className="hero-card">
         <p className="eyebrow">Gestão acadêmica</p>
         <h1>Cadastros e vínculos de estágio</h1>
@@ -165,10 +165,11 @@ export default async function AcademicManagementPage(props: {
             </div>
           </SectionCard>
 
-          <div className="split-grid">
+          <div className="split-grid management-registration-grid">
         <SectionCard
           title="Cadastrar aluno de estágio"
           description="Crie acesso do aluno. Os vínculos de estágio podem ser criados agora ou depois, na tela de gerenciamento do aluno."
+          className="management-registration-card"
         >
               <StudentRegistrationForm
                 semesters={pageData.semesters}
@@ -180,6 +181,7 @@ export default async function AcademicManagementPage(props: {
         <SectionCard
           title="Cadastrar professor / supervisor"
           description="Crie o acesso do supervisor e vincule as áreas em que ele pode atuar."
+          className="management-registration-card management-professors-card"
         >
               <ProfessorRegistrationForm areaBlocks={pageData.areaBlocks} />
             </SectionCard>
@@ -188,6 +190,7 @@ export default async function AcademicManagementPage(props: {
           <SectionCard
             title="Áreas de estágio"
             description="Estrutura oficial por bloco, usada nos cadastros, vínculos e relatórios."
+            className="management-areas-card"
           >
             <div className="management-block-grid">
               {pageData.areaBlocks.map((block) => (
@@ -235,7 +238,7 @@ export default async function AcademicManagementPage(props: {
           }
         >
             {visibleStudents.length ? (
-              <div className="table-wrap">
+              <div className="table-wrap management-students-table-wrap">
                 <table className="table management-students-table">
                   <thead>
                     <tr>
@@ -368,7 +371,7 @@ export default async function AcademicManagementPage(props: {
             description="Lista os supervisores cadastrados e as áreas em que eles podem atuar."
           >
             {pageData.professors.length ? (
-              <div className="table-wrap">
+              <div className="table-wrap management-professors-table-wrap">
                 <table className="table">
                   <thead>
                     <tr>

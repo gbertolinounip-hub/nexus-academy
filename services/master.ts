@@ -71,22 +71,25 @@ export interface MasterCoordinatorsPageData {
   filters: {
     unitId: string;
     status: "ativos" | "inativos" | "todos";
+    query: string;
   };
   totalCoordinators: number;
   activeCoordinators: number;
-  entries: Array<{
-    coordinatorId: string;
-    unitId: string;
-    unitName: string;
-    unitSlug: string;
-    unitIsActive: boolean;
-    name: string;
-    email: string;
-    roleTitle: string;
-    isActive: boolean;
-    isResponsible: boolean;
-    createdAt: string;
-  }>;
+  entries: MasterCoordinatorDirectoryEntry[];
+}
+
+export interface MasterCoordinatorDirectoryEntry {
+  coordinatorId: string;
+  unitId: string;
+  unitName: string;
+  unitSlug: string;
+  unitIsActive: boolean;
+  name: string;
+  email: string;
+  roleTitle: string;
+  isActive: boolean;
+  isResponsible: boolean;
+  createdAt: string;
 }
 
 export interface MasterUsersPageData {
@@ -244,6 +247,33 @@ function normalizeFilterValue(
   }
 
   return value ?? "";
+}
+
+function normalizeSearchText(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR")
+    .trim();
+}
+
+function matchesCoordinatorSearch(
+  entry: MasterCoordinatorDirectoryEntry,
+  query: string
+) {
+  const normalizedQuery = normalizeSearchText(query);
+
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  return [
+    entry.name,
+    entry.email,
+    entry.unitName,
+    entry.unitSlug,
+    entry.roleTitle
+  ].some((value) => normalizeSearchText(value).includes(normalizedQuery));
 }
 
 function sortCoordinatorRows(
@@ -487,11 +517,13 @@ export async function getMasterUnitsPageData() {
 export async function getMasterCoordinatorsPageData(input?: {
   unitId?: string | string[];
   status?: string | string[];
+  query?: string | string[];
 }): Promise<MasterCoordinatorsPageData> {
   const baseData = await loadMasterBaseData();
   const units = buildUnitOptions(baseData.units);
   const requestedUnitId = normalizeFilterValue(input?.unitId);
   const requestedStatus = normalizeFilterValue(input?.status);
+  const requestedQuery = normalizeFilterValue(input?.query).trim();
   const statusFilter: MasterCoordinatorsPageData["filters"]["status"] =
     requestedStatus === "ativos" || requestedStatus === "inativos"
       ? requestedStatus
@@ -547,7 +579,7 @@ export async function getMasterCoordinatorsPageData(input?: {
       return false;
     }
 
-    return true;
+    return matchesCoordinatorSearch(entry, requestedQuery);
   });
 
   filteredEntries.sort((left, right) => {
@@ -568,7 +600,8 @@ export async function getMasterCoordinatorsPageData(input?: {
     units,
     filters: {
       unitId: requestedUnitId,
-      status: statusFilter
+      status: statusFilter,
+      query: requestedQuery
     },
     totalCoordinators: entries.length,
     activeCoordinators: entries.filter((entry) => entry.isActive).length,
@@ -1066,4 +1099,3 @@ export async function getMasterGlobalAuditPageData(input?: {
     }))
   };
 }
-

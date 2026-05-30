@@ -1330,7 +1330,7 @@ function buildReportsHubData(input: {
           .reduce((sum, absence) => sum + numberValue(absence.horas), 0)
       )
     },
-    blockSummaries: buildBlockSummaries(areaSummaries),
+    blockSummaries: buildBlockSummaries(input.classRows, input.bundle, areaSummaries),
     areaSummaries,
     classReports,
     studentReports,
@@ -1415,25 +1415,69 @@ function buildAreaSummaries(classRows: ClassRow[], bundle: AcademicBundle) {
     }) as HubAreaSummary[];
 }
 
-function buildBlockSummaries(areaSummaries: HubAreaSummary[]) {
-  const blockMap = new Map<number | null, HubAreaSummary[]>();
+function buildBlockSummaries(
+  classRows: ClassRow[],
+  bundle: AcademicBundle,
+  areaSummaries: HubAreaSummary[]
+) {
+  const areaSummariesByBlockId = new Map<number | null, HubAreaSummary[]>();
+  const classIdsByBlockId = new Map<number | null, string[]>();
+  const blockNameById = new Map<number | null, string>();
 
   areaSummaries.forEach((areaSummary) => {
-    const currentAreas = blockMap.get(areaSummary.blockId) ?? [];
+    const currentAreas = areaSummariesByBlockId.get(areaSummary.blockId) ?? [];
     currentAreas.push(areaSummary);
-    blockMap.set(areaSummary.blockId, currentAreas);
+    areaSummariesByBlockId.set(areaSummary.blockId, currentAreas);
+
+    if (!blockNameById.has(areaSummary.blockId)) {
+      blockNameById.set(areaSummary.blockId, areaSummary.blockName);
+    }
   });
 
-  return [...blockMap.entries()]
-    .map(([blockId, areas]) => ({
-      blockId,
-      blockName: areas[0]?.blockName ?? "Bloco não identificado",
-      areaCount: areas.length,
-      studentCount: areas.reduce((sum, area) => sum + area.studentCount, 0),
-      averageFinalPercentage: average(
-        areas.map((area) => area.averageFinalPercentage)
-      )
-    }))
+  classRows.forEach((classGroup) => {
+    const blockId = classGroup.area_estagio_id
+      ? (bundle.areaById.get(classGroup.area_estagio_id)?.bloco_id ?? null)
+      : null;
+    const currentClassIds = classIdsByBlockId.get(blockId) ?? [];
+    currentClassIds.push(classGroup.id);
+    classIdsByBlockId.set(blockId, currentClassIds);
+
+    if (!blockNameById.has(blockId)) {
+      blockNameById.set(
+        blockId,
+        fallbackBlockName(classGroup, bundle.areaById, bundle.blockById)
+      );
+    }
+  });
+
+  const blockIds = new Set<number | null>([
+    ...areaSummariesByBlockId.keys(),
+    ...classIdsByBlockId.keys()
+  ]);
+
+  return [...blockIds]
+    .map((blockId) => {
+      const areas = areaSummariesByBlockId.get(blockId) ?? [];
+      const relevantClassIds = new Set(classIdsByBlockId.get(blockId) ?? []);
+      const relevantEnrollments = bundle.enrollments.filter((enrollment) =>
+        relevantClassIds.has(enrollment.turma_id)
+      );
+      const dashboards = relevantEnrollments
+        .map((enrollment) => bundle.dashboardsByEnrollmentId.get(enrollment.id))
+        .filter(Boolean) as StudentDashboardData[];
+
+      return {
+        blockId,
+        blockName: blockNameById.get(blockId) ?? "Bloco não identificado",
+        areaCount: areas.length,
+        studentCount: new Set(
+          relevantEnrollments.map((enrollment) => enrollment.aluno_id)
+        ).size,
+        averageFinalPercentage: average(
+          dashboards.map((dashboard) => dashboard.finalPercentage)
+        )
+      };
+    })
     .sort((left, right) => left.blockName.localeCompare(right.blockName, "pt-BR"));
 }
 

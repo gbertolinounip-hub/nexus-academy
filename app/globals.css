@@ -447,6 +447,8 @@ select {
   background: var(--panel);
   backdrop-filter: blur(18px);
   box-shadow: var(--shadow);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .hero-card {
@@ -557,6 +559,10 @@ select {
   gap: 1rem;
 }
 
+.split-grid > * {
+  min-width: 0;
+}
+
 .bar-list,
 .timeline,
 .detail-list,
@@ -623,6 +629,8 @@ select {
 
 .table-wrap {
   overflow: auto;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
   border-radius: 18px;
   border: 1px solid var(--line);
@@ -1191,6 +1199,7 @@ select {
 .field {
   display: grid;
   gap: 0.45rem;
+  min-width: 0;
 }
 
 .field span {
@@ -1205,6 +1214,7 @@ select {
 
 .input {
   width: 100%;
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 0.85rem 0.95rem;
@@ -1322,6 +1332,10 @@ textarea.input:focus {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.form-grid > * {
+  min-width: 0;
+}
+
 .criteria-form-group {
   padding: 1rem;
   border-radius: 20px;
@@ -1371,6 +1385,10 @@ textarea.input:focus {
   display: flex;
   flex-wrap: wrap;
   gap: 0.8rem;
+}
+
+.actions-row > * {
+  min-width: 0;
 }
 
 .revision-chain {
@@ -1426,11 +1444,23 @@ textarea.input:focus {
 }
 
 .detail-item {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 1rem;
+  align-items: start;
   padding: 0.8rem 0;
   border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.detail-item > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.detail-item > :last-child {
+  text-align: right;
 }
 
 .empty-message {
@@ -1442,6 +1472,7 @@ textarea.input:focus {
 .management-block-grid {
   display: grid;
   gap: 1rem;
+  min-width: 0;
 }
 
 .management-block-grid {
@@ -1455,6 +1486,7 @@ textarea.input:focus {
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.58);
   padding: 1rem;
+  min-width: 0;
 }
 
 .management-slot-header,
@@ -1464,20 +1496,28 @@ textarea.input:focus {
   gap: 0.8rem;
   align-items: flex-start;
   margin-bottom: 0.9rem;
+  min-width: 0;
 }
 
 .management-slot-header h3,
 .management-block-header h3 {
   margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
-.management-slot-header > div {
+.management-slot-header > div,
+.management-block-header > div {
   display: grid;
   gap: 0.25rem;
+  min-width: 0;
 }
 
-.management-slot-header .field-help {
+.management-slot-header .field-help,
+.management-block-header .field-help {
   margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .management-checkbox-grid {
@@ -1513,6 +1553,14 @@ textarea.input:focus {
 .management-assignment-item {
   display: grid;
   gap: 0.18rem;
+  min-width: 0;
+}
+
+.management-assignment-item strong,
+.management-assignment-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .management-assignment-item span {
@@ -1895,6 +1943,39 @@ textarea.input:focus {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
+.management-catalog-page,
+.management-registration-grid,
+.management-registration-grid > *,
+.management-registration-card,
+.management-areas-card,
+.management-students-card,
+.management-students-card .table-wrap,
+.management-professors-table-wrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.management-registration-grid {
+  align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+}
+
+.management-registration-card,
+.management-areas-card,
+.management-professors-card {
+  overflow: hidden;
+}
+
+.management-students-card,
+.management-professors-card {
+  overflow: hidden;
+}
+
+.management-areas-card .management-block-grid,
+.management-professors-card .management-checkbox-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+}
+
 .management-students-card .card-header {
   flex-wrap: wrap;
   gap: 0.85rem;
@@ -1922,8 +2003,15 @@ textarea.input:focus {
   white-space: nowrap;
 }
 
+.management-students-table-wrap,
+.management-professors-table-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
 .management-students-table {
-  min-width: 760px;
+  min-width: 980px;
   table-layout: fixed;
 }
 
@@ -1932,7 +2020,7 @@ textarea.input:focus {
 }
 
 .management-students-table .management-students-table-col-ra {
-  width: 9%;
+  width: 10%;
 }
 
 .management-students-table .management-students-table-col-contact {
@@ -1940,7 +2028,7 @@ textarea.input:focus {
 }
 
 .management-students-table .management-students-table-col-status {
-  width: 9%;
+  width: 8%;
   white-space: nowrap;
 }
 
@@ -1959,8 +2047,52 @@ textarea.input:focus {
   word-break: break-word;
 }
 
+.management-students-table td.management-students-table-col-contact,
+.management-students-table td.management-students-table-col-assignments,
+.management-students-table td.management-students-table-col-actions {
+  min-width: 0;
+}
+
 .management-students-table td.management-students-table-col-actions .actions-row {
   gap: 0.55rem;
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.management-students-table td.management-students-table-col-actions .actions-row > * {
+  min-width: 0;
+}
+
+.management-students-table td.management-students-table-col-actions .button {
+  white-space: normal;
+  text-align: center;
+}
+
+.management-professors-table-wrap .table {
+  min-width: 860px;
+}
+
+.management-professors-table-wrap td:last-child .actions-row {
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.management-professors-table-wrap td:last-child .actions-row > * {
+  min-width: 0;
+}
+
+.management-professors-table-wrap td:last-child .button {
+  white-space: normal;
+}
+
+.management-professors-table-wrap .management-tag-list {
+  align-items: flex-start;
+}
+
+.management-professors-table-wrap .badge {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .management-history-card {
@@ -2485,6 +2617,98 @@ textarea.input:focus {
   display: grid;
   gap: 0.9rem;
   min-width: 0;
+}
+
+.master-coordinator-directory {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.master-coordinator-table-wrap {
+  width: 100%;
+  max-width: 100%;
+}
+
+.master-coordinator-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.master-coordinator-table th:last-child,
+.master-coordinator-table td:last-child {
+  width: 19rem;
+}
+
+.master-coordinator-cell-identity strong,
+.master-coordinator-cell-unit strong {
+  display: block;
+}
+
+.master-coordinator-cell-identity,
+.master-coordinator-cell-unit,
+.master-coordinator-cell-actions {
+  min-width: 0;
+}
+
+.master-coordinator-status-group {
+  justify-content: flex-start;
+}
+
+.master-coordinator-actions {
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.master-coordinator-actions .button {
+  white-space: normal;
+}
+
+.master-coordinator-inline-disclosure {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.master-coordinator-edit-row td {
+  padding-top: 0.35rem;
+  padding-bottom: 0.95rem;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.master-coordinator-mobile-list {
+  display: none;
+  gap: 0.85rem;
+}
+
+.master-coordinator-mobile-card {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.master-coordinator-mobile-meta {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.master-coordinator-mobile-meta div {
+  min-width: 0;
+}
+
+.master-coordinator-mobile-meta dt {
+  margin: 0 0 0.18rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.master-coordinator-mobile-meta dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .master-filter-form {
@@ -3900,7 +4124,7 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
   }
 
   .management-students-table {
-    min-width: 700px;
+    min-width: 920px;
   }
 
   .management-students-table .management-students-table-col-contact {
@@ -3917,6 +4141,10 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
 
   .management-students-table .management-students-table-col-actions {
     width: 25%;
+  }
+
+  .management-professors-table-wrap .table {
+    min-width: 780px;
   }
 
   .professor-dashboard .metrics-grid {
@@ -3938,6 +4166,19 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
   .master-dashboard-panels,
   .master-unit-overview-grid {
     grid-template-columns: 1fr;
+  }
+
+  .master-coordinator-table th:last-child,
+  .master-coordinator-table td:last-child {
+    width: 16rem;
+  }
+
+  .master-coordinator-table-wrap {
+    display: none;
+  }
+
+  .master-coordinator-mobile-list {
+    display: grid;
   }
 
   .master-audit-filter-form {
@@ -4151,6 +4392,30 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
   .class-final-report .class-final-report-identity-item.is-wide,
   .class-final-report .class-final-report-identity-item.is-full {
     grid-column: auto;
+  }
+
+  .management-slot-header,
+  .management-block-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .management-slot-header .button,
+  .management-block-header .button {
+    width: 100%;
+  }
+
+  .detail-item {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+
+  .detail-item > :last-child {
+    text-align: left;
+  }
+
+  .master-coordinator-mobile-meta {
+    grid-template-columns: 1fr;
   }
 }
 
