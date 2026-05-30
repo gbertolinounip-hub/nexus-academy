@@ -1,15 +1,3 @@
-﻿import { spawn } from "node:child_process";
-import {
-  access,
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  symlink,
-  writeFile
-} from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import path from "node:path";
 import type {
   ClassFinalReportData,
   ReportsHubData,
@@ -41,6 +29,12 @@ interface WorkbookSheetDefinition {
 interface WorkbookDefinition {
   sheets: WorkbookSheetDefinition[];
 }
+
+type WorkbookRowCell = {
+  value: ExportCell;
+  styleId?: string;
+  mergeAcross?: number;
+};
 
 function escapeCsvCell(value: ExportCell) {
   const text =
@@ -74,88 +68,214 @@ function sanitizeFileName(name: string) {
     .toLowerCase();
 }
 
-async function buildWorkbookBytes(definition: WorkbookDefinition) {
-  await ensureArtifactToolLink();
-  const tempDir = await mkdtemp(path.join(tmpdir(), "report-export-"));
-  const inputPath = path.join(tempDir, "workbook-definition.json");
-  const outputPath = path.join(tempDir, "report.xlsx");
-  const scriptPath = path.join(
-    process.cwd(),
-    "scripts",
-    "report-workbook-builder.mjs"
-  );
-
-  await writeFile(inputPath, JSON.stringify(definition), "utf8");
-
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(process.execPath, [scriptPath, inputPath, outputPath], {
-        cwd: process.cwd(),
-        stdio: ["ignore", "pipe", "pipe"]
-      });
-      let stderr = "";
-
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString();
-      });
-
-      child.on("error", reject);
-      child.on("close", (code) => {
-        if (code === 0) {
-          resolve();
-          return;
-        }
-
-        reject(
-          new Error(
-            stderr.trim() || `Workbook builder encerrado com código ${code}.`
-          )
-        );
-      });
-    });
-
-    return readFile(outputPath);
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
+function escapeXml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
-async function ensureArtifactToolLink() {
-  const localOaiPath = path.join(process.cwd(), "node_modules", "@oai");
-  const localArtifactToolPath = path.join(localOaiPath, "artifact-tool");
+function normalizeWorkbookCellValue(value: ExportCell) {
+  if (value === null || value === undefined) {
+    return "";
+  }
 
-  try {
-    await access(localArtifactToolPath);
-    return;
-  } catch {}
+  if (typeof value === "boolean") {
+    return value ? "Sim" : "Não";
+  }
 
-  const bundledOaiPath = path.join(
-    homedir(),
-    ".cache",
-    "codex-runtimes",
-    "codex-primary-runtime",
-    "dependencies",
-    "node",
-    "node_modules",
-    "@oai"
+  return value;
+}
+
+function getWorkbookCellType(value: ExportCell) {
+  return typeof value === "number" && Number.isFinite(value) ? "Number" : "String";
+}
+
+function buildWorkbookCellXml({ value, styleId, mergeAcross }: WorkbookRowCell) {
+  const normalizedValue = normalizeWorkbookCellValue(value);
+  const attributes = [
+    styleId ? ` ss:StyleID="${styleId}"` : "",
+    typeof mergeAcross === "number" && mergeAcross > 0
+      ? ` ss:MergeAcross="${mergeAcross}"`
+      : ""
+  ].join("");
+
+  return `<Cell${attributes}><Data ss:Type="${getWorkbookCellType(
+    normalizedValue
+  )}">${escapeXml(String(normalizedValue))}</Data></Cell>`;
+}
+
+function buildWorkbookRowXml(cells: WorkbookRowCell[]) {
+  if (cells.length === 0) {
+    return "<Row/>";
+  }
+
+  return `<Row>${cells.map(buildWorkbookCellXml).join("")}</Row>`;
+}
+
+function getSheetColumnCount(sheet: WorkbookSheetDefinition) {
+  return Math.max(
+    1,
+    sheet.metrics && sheet.metrics.length > 0 ? 3 : 1,
+    ...sheet.tables.map((table) => Math.max(1, table.columns.length))
   );
-  const bundledArtifactToolPath = path.join(bundledOaiPath, "artifact-tool");
+}
 
-  try {
-    await access(bundledArtifactToolPath);
-  } catch {
-    throw new Error(
-      "Não foi possível localizar o runtime de planilhas necessário para exportação Excel."
+function buildMergedTextRow(
+  text: string,
+  columnCount: number,
+  styleId: string
+): WorkbookRowCell[] {
+  return [
+    {
+      value: text,
+      styleId,
+      mergeAcross: columnCount > 1 ? columnCount - 1 : undefined
+    }
+  ];
+}
+
+function buildMetricsRows(metrics: WorkbookMetric[], columnCount: number) {
+  if (metrics.length === 0) {
+    return [];
+  }
+
+  const rows: string[] = [
+    buildWorkbookRowXml(buildMergedTextRow("Indicadores", columnCount, "section"))
+  ];
+
+  for (const metric of metrics) {
+    rows.push(
+      buildWorkbookRowXml([
+        { value: metric.label, styleId: "label" },
+        { value: metric.value, styleId: "value" },
+        { value: metric.hint ?? "", styleId: metric.hint ? "hint" : "value" }
+      ])
     );
   }
 
-  await mkdir(path.join(process.cwd(), "node_modules"), { recursive: true });
+  rows.push("<Row/>");
+  return rows;
+}
 
-  try {
-    await symlink(bundledOaiPath, localOaiPath, "junction");
-  } catch {
-    await access(localArtifactToolPath);
+function buildTableRows(table: WorkbookTable, columnCount: number) {
+  const rows: string[] = [
+    buildWorkbookRowXml(buildMergedTextRow(table.title, columnCount, "section")),
+    buildWorkbookRowXml(
+      table.columns.map((column) => ({ value: column, styleId: "header" }))
+    )
+  ];
+
+  if (table.rows.length === 0) {
+    rows.push(
+      buildWorkbookRowXml(
+        buildMergedTextRow(
+          "Nenhum dado disponível para exportação neste recorte.",
+          Math.max(columnCount, table.columns.length),
+          "hint"
+        )
+      )
+    );
+    rows.push("<Row/>");
+    return rows;
   }
+
+  for (const row of table.rows) {
+    rows.push(
+      buildWorkbookRowXml(
+        row.map((cell) => ({
+          value: cell,
+          styleId: typeof cell === "number" ? "number" : "value"
+        }))
+      )
+    );
+  }
+
+  rows.push("<Row/>");
+  return rows;
+}
+
+function buildWorksheetXml(sheet: WorkbookSheetDefinition) {
+  const columnCount = getSheetColumnCount(sheet);
+  const rows: string[] = [
+    buildWorkbookRowXml(buildMergedTextRow(sheet.title, columnCount, "title"))
+  ];
+
+  if (sheet.subtitle) {
+    rows.push(buildWorkbookRowXml(buildMergedTextRow(sheet.subtitle, columnCount, "subtitle")));
+  }
+
+  rows.push("<Row/>");
+
+  if (sheet.metrics && sheet.metrics.length > 0) {
+    rows.push(...buildMetricsRows(sheet.metrics, columnCount));
+  }
+
+  for (const table of sheet.tables) {
+    rows.push(...buildTableRows(table, Math.max(columnCount, table.columns.length)));
+  }
+
+  const columns = Array.from({ length: columnCount }, (_, index) => {
+    const width = index === 0 ? 180 : index === 1 ? 140 : 110;
+    return `<Column ss:AutoFitWidth="1" ss:Width="${width}"/>`;
+  }).join("");
+
+  return [
+    `<Worksheet ss:Name="${escapeXml(sanitizeSheetName(sheet.name))}">`,
+    `<Table>${columns}${rows.join("")}</Table>`,
+    `<WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">`,
+    "<ProtectObjects>False</ProtectObjects>",
+    "<ProtectScenarios>False</ProtectScenarios>",
+    "</WorksheetOptions>",
+    "</Worksheet>"
+  ].join("");
+}
+
+function buildWorkbookXml(definition: WorkbookDefinition) {
+  const worksheets = definition.sheets.map(buildWorksheetXml).join("");
+
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<?mso-application progid="Excel.Sheet"?>',
+    '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"',
+    ' xmlns:o="urn:schemas-microsoft-com:office:office"',
+    ' xmlns:x="urn:schemas-microsoft-com:office:excel"',
+    ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"',
+    ' xmlns:html="http://www.w3.org/TR/REC-html40">',
+    "<DocumentProperties xmlns=\"urn:schemas-microsoft-com:office:office\">",
+    "<Author>Nexus Academy</Author>",
+    "<Company>Nexus Academy</Company>",
+    "<Version>16.00</Version>",
+    "</DocumentProperties>",
+    "<ExcelWorkbook xmlns=\"urn:schemas-microsoft-com:office:excel\">",
+    "<ProtectStructure>False</ProtectStructure>",
+    "<ProtectWindows>False</ProtectWindows>",
+    "</ExcelWorkbook>",
+    "<Styles>",
+    '<Style ss:ID="Default" ss:Name="Normal">',
+    '<Alignment ss:Vertical="Top" ss:WrapText="1"/>',
+    '<Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/><Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/><Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/><Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E5E7EB"/></Borders>',
+    '<Font ss:FontName="Calibri" ss:Size="10" ss:Color="#111827"/>',
+    '<Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>',
+    "</Style>",
+    '<Style ss:ID="title"><Font ss:FontName="Calibri" ss:Size="15" ss:Bold="1" ss:Color="#0F172A"/><Alignment ss:Vertical="Center" ss:WrapText="1"/></Style>',
+    '<Style ss:ID="subtitle"><Font ss:FontName="Calibri" ss:Size="10" ss:Color="#475569"/><Alignment ss:Vertical="Center" ss:WrapText="1"/></Style>',
+    '<Style ss:ID="section"><Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#0F172A"/><Interior ss:Color="#EEF4FF" ss:Pattern="Solid"/></Style>',
+    '<Style ss:ID="header"><Font ss:FontName="Calibri" ss:Size="10" ss:Bold="1" ss:Color="#0F172A"/><Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/></Style>',
+    '<Style ss:ID="label"><Font ss:FontName="Calibri" ss:Size="10" ss:Bold="1" ss:Color="#1E293B"/></Style>',
+    '<Style ss:ID="value"><Font ss:FontName="Calibri" ss:Size="10" ss:Color="#111827"/></Style>',
+    '<Style ss:ID="number"><Font ss:FontName="Calibri" ss:Size="10" ss:Color="#111827"/><NumberFormat ss:Format="0.00"/></Style>',
+    '<Style ss:ID="hint"><Font ss:FontName="Calibri" ss:Size="9" ss:Italic="1" ss:Color="#64748B"/></Style>',
+    "</Styles>",
+    worksheets,
+    "</Workbook>"
+  ].join("");
+}
+
+async function buildWorkbookBytes(definition: WorkbookDefinition) {
+  return Buffer.from(buildWorkbookXml(definition), "utf8");
 }
 
 export function buildConsolidatedCsv(report: ReportsHubData) {
@@ -620,9 +740,7 @@ export async function buildStudentWorkbook(report: StudentFinalReportData) {
 }
 
 export function getConsolidatedFileBaseName(report: ReportsHubData) {
-  return sanitizeFileName(
-    `relatorio-consolidado-${report.selectedSemester.code}`
-  );
+  return sanitizeFileName(`relatorio-consolidado-${report.selectedSemester.code}`);
 }
 
 export function getClassFileBaseName(report: ClassFinalReportData) {
@@ -639,5 +757,3 @@ export function getStudentFileBaseName(report: StudentFinalReportData) {
     `relatorio-aluno-${report.student.registration}-${report.selectedSemester.code}${areaSuffix}`
   );
 }
-
-

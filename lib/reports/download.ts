@@ -21,9 +21,8 @@ export function buildCsvDownloadResponse(filename: string, content: string) {
 export function buildExcelDownloadResponse(filename: string, content: Buffer) {
   return new Response(new Uint8Array(content), {
     headers: {
-      "Content-Type":
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="${filename}.xlsx"`,
+      "Content-Type": "application/vnd.ms-excel; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${filename}.xls"`,
       "Cache-Control": "no-store"
     }
   });
