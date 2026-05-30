@@ -1807,6 +1807,52 @@ textarea.input:focus {
   min-width: 0;
 }
 
+.reports-dashboard-top-grid {
+  align-items: stretch;
+}
+
+.reports-dashboard-equal-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: clamp(24rem, 43vw, 29rem);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.reports-dashboard-equal-card > :not(.card-header) {
+  min-height: 0;
+}
+
+.reports-dashboard-blocks-content {
+  display: grid;
+  align-content: start;
+  min-height: 0;
+}
+
+.reports-dashboard-priority-card .card-header {
+  margin-bottom: 0.85rem;
+}
+
+.reports-dashboard-priority-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 0.3rem;
+  scrollbar-gutter: stable;
+}
+
+.reports-dashboard-priority-list {
+  gap: 0.72rem;
+}
+
+.reports-dashboard-priority-list .detail-item {
+  align-items: flex-start;
+}
+
+.reports-dashboard-priority-list .detail-item > span:last-child {
+  flex-shrink: 0;
+}
+
 .report-table-primary-cell,
 .report-table-secondary-cell,
 .report-table-text-cell {
@@ -4467,6 +4513,15 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
 
   .reports-dashboard-professor .metrics-grid {
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+
+  .reports-dashboard-equal-card {
+    height: auto;
+    min-height: 0;
+  }
+
+  .reports-dashboard-priority-scroll {
+    max-height: min(18rem, 52vh);
   }
 
   .reports-dashboard-professor .report-class-table,

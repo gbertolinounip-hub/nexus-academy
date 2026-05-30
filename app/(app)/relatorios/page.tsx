@@ -135,19 +135,22 @@ export default async function ReportsPage(props: ReportsPageProps) {
             />
           </div>
 
-          <div className="split-grid">
+          <div className="split-grid reports-dashboard-top-grid">
             <SectionCard
               title="Consolidação por bloco"
               description="Média final agregada por bloco de estágio no semestre."
+              className="reports-dashboard-equal-card reports-dashboard-blocks-card"
             >
               {reports.blockSummaries.length ? (
-                <ProgressBars
-                  items={reports.blockSummaries.map((block) => ({
-                    label: `${block.blockName} · ${block.studentCount} aluno(s)`,
-                    current: block.averageFinalPercentage,
-                    max: 100
-                  }))}
-                />
+                <div className="reports-dashboard-blocks-content">
+                  <ProgressBars
+                    items={reports.blockSummaries.map((block) => ({
+                      label: `${block.blockName} · ${block.studentCount} aluno(s)`,
+                      current: block.averageFinalPercentage,
+                      max: 100
+                    }))}
+                  />
+                </div>
               ) : (
                 <p className="empty-message">
                   Ainda não há dados suficientes para consolidação por bloco.
@@ -158,31 +161,34 @@ export default async function ReportsPage(props: ReportsPageProps) {
             <SectionCard
               title="Casos prioritários"
               description="Alunos que demandam atenção acadêmica imediata neste semestre."
+              className="reports-dashboard-equal-card reports-dashboard-priority-card"
             >
               {reports.priorityStudents.length ? (
-                <ul className="detail-list">
-                  {reports.priorityStudents.map((student) => (
-                    <li
-                      className="detail-item"
-                      key={`${student.studentId}-${student.reportEnrollmentId ?? student.semesterId}`}
-                    >
-                      <span>
-                        {student.studentName}
-                        <span className="table-helper">
-                          {student.reportContext === "area"
-                            ? `${student.reportAreaName} · ${student.reportBlockName}`
-                            : student.areaNames.join(", ")}
+                <div className="reports-dashboard-priority-scroll">
+                  <ul className="detail-list reports-dashboard-priority-list">
+                    {reports.priorityStudents.map((student) => (
+                      <li
+                        className="detail-item"
+                        key={`${student.studentId}-${student.reportEnrollmentId ?? student.semesterId}`}
+                      >
+                        <span>
+                          {student.studentName}
+                          <span className="table-helper">
+                            {student.reportContext === "area"
+                              ? `${student.reportAreaName} · ${student.reportBlockName}`
+                              : student.areaNames.join(", ")}
+                          </span>
                         </span>
-                      </span>
-                      <span>
-                        {formatPercentage(student.finalPercentage)} ·{" "}
-                        <span className={`status-pill status-${student.status}`}>
-                          {formatStudentStatusBadge(student.status)}
+                        <span>
+                          {formatPercentage(student.finalPercentage)} ·{" "}
+                          <span className={`status-pill status-${student.status}`}>
+                            {formatStudentStatusBadge(student.status)}
+                          </span>
                         </span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ) : (
                 <p className="empty-message">
                   Nenhum aluno foi sinalizado como prioritário neste semestre.
