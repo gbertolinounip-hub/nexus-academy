@@ -416,6 +416,20 @@ export function ClinicalInstitutionalDashboardScreen(
         {pageData.cases.length ? (
           <div className="table-wrap">
             <table className="table clinical-institutional-case-table">
+              <colgroup>
+                {showUnitScope ? <col className="clinical-case-col-unit" /> : null}
+                <col className="clinical-case-col-patient" />
+                <col className="clinical-case-col-semester" />
+                <col className="clinical-case-col-area" />
+                <col className="clinical-case-col-professor" />
+                <col className="clinical-case-col-student" />
+                <col className="clinical-case-col-status" />
+                <col className="clinical-case-col-start" />
+                <col className="clinical-case-col-end" />
+                <col className="clinical-case-col-evolution" />
+                <col className="clinical-case-col-record" />
+                <col className="clinical-case-col-actions" />
+              </colgroup>
               <thead>
                 <tr>
                   {showUnitScope ? <th>Unidade</th> : null}
@@ -433,19 +447,25 @@ export function ClinicalInstitutionalDashboardScreen(
                 </tr>
               </thead>
               <tbody>
-                {pageData.cases.map((row) => (
-                  <tr key={row.caseItem.id}>
-                    {showUnitScope ? <td>{row.caseItem.unitName}</td> : null}
-                    <td className="clinical-institutional-case-cell-main">
+                  {pageData.cases.map((row) => (
+                    <tr key={row.caseItem.id}>
+                    {showUnitScope ? (
+                      <td className="clinical-institutional-case-cell-unit">
+                        {row.caseItem.unitName}
+                      </td>
+                    ) : null}
+                    <td className="clinical-institutional-case-cell-main clinical-institutional-case-cell-patient">
                       <strong>{row.caseItem.patient.name}</strong>
                       <div className="table-helper">
                         Identificador: {row.caseItem.patient.identifier}
                       </div>
                     </td>
                     <td>{row.caseItem.semesterCode}</td>
-                    <td>{row.caseItem.areaName}</td>
-                    <td>{row.caseItem.professorName}</td>
-                    <td className="clinical-institutional-case-cell-main">
+                    <td className="clinical-institutional-case-cell-area">{row.caseItem.areaName}</td>
+                    <td className="clinical-institutional-case-cell-professor">
+                      {row.caseItem.professorName}
+                    </td>
+                    <td className="clinical-institutional-case-cell-main clinical-institutional-case-cell-student">
                       <strong>{row.caseItem.studentName}</strong>
                       <div className="table-helper">{row.caseItem.registration}</div>
                     </td>
@@ -655,6 +675,19 @@ export function ClinicalInstitutionalDashboardPrintSections(
         {pageData.cases.length ? (
           <div className="table-wrap">
             <table className="table clinical-institutional-case-table">
+              <colgroup>
+                {showUnitScope ? <col className="clinical-case-col-unit" /> : null}
+                <col className="clinical-case-col-patient" />
+                <col className="clinical-case-col-semester" />
+                <col className="clinical-case-col-area" />
+                <col className="clinical-case-col-professor" />
+                <col className="clinical-case-col-student" />
+                <col className="clinical-case-col-status" />
+                <col className="clinical-case-col-start" />
+                <col className="clinical-case-col-end" />
+                <col className="clinical-case-col-evolution" />
+                <col className="clinical-case-col-record" />
+              </colgroup>
               <thead>
                 <tr>
                   {showUnitScope ? <th>Unidade</th> : null}
@@ -673,17 +706,23 @@ export function ClinicalInstitutionalDashboardPrintSections(
               <tbody>
                 {pageData.cases.map((row) => (
                   <tr key={row.caseItem.id}>
-                    {showUnitScope ? <td>{row.caseItem.unitName}</td> : null}
-                    <td className="clinical-institutional-case-cell-main">
+                    {showUnitScope ? (
+                      <td className="clinical-institutional-case-cell-unit">
+                        {row.caseItem.unitName}
+                      </td>
+                    ) : null}
+                    <td className="clinical-institutional-case-cell-main clinical-institutional-case-cell-patient">
                       <strong>{row.caseItem.patient.name}</strong>
                       <div className="table-helper">
                         Identificador: {row.caseItem.patient.identifier}
                       </div>
                     </td>
                     <td>{row.caseItem.semesterCode}</td>
-                    <td>{row.caseItem.areaName}</td>
-                    <td>{row.caseItem.professorName}</td>
-                    <td className="clinical-institutional-case-cell-main">
+                    <td className="clinical-institutional-case-cell-area">{row.caseItem.areaName}</td>
+                    <td className="clinical-institutional-case-cell-professor">
+                      {row.caseItem.professorName}
+                    </td>
+                    <td className="clinical-institutional-case-cell-main clinical-institutional-case-cell-student">
                       <strong>{row.caseItem.studentName}</strong>
                       <div className="table-helper">{row.caseItem.registration}</div>
                     </td>

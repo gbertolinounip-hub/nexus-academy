@@ -3,6 +3,7 @@ import { getNavigationForRole } from "@/lib/auth/navigation";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getAuthenticatedStudentDashboardPageData } from "@/services/dashboard";
 import { getClinicalUnreadNotificationCount } from "@/services/clinical-supervision";
+import { getStudentDocumentUnreadNotificationCount } from "@/services/student-documents";
 
 export default async function AppLayout({
   children
@@ -15,6 +16,10 @@ export default async function AppLayout({
   const clinicalUnreadNotificationCount =
     currentUser.role === "aluno" || currentUser.role === "professor"
       ? await getClinicalUnreadNotificationCount(currentUser)
+      : 0;
+  const studentDocumentUnreadNotificationCount =
+    currentUser.role === "aluno"
+      ? await getStudentDocumentUnreadNotificationCount(currentUser)
       : 0;
   const studentSecondaryNavigationItems =
     currentUser.role === "aluno"
@@ -43,6 +48,14 @@ export default async function AppLayout({
               ? clinicalUnreadNotificationCount
               : undefined
         }
+      : String(item.href) === "/documentos"
+        ? {
+            ...item,
+            badgeCount:
+              studentDocumentUnreadNotificationCount > 0
+                ? studentDocumentUnreadNotificationCount
+                : undefined
+          }
       : item
   );
 

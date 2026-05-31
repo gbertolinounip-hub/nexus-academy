@@ -962,6 +962,126 @@ export interface Database {
         };
         Relationships: [];
       };
+      documentos_aluno: {
+        Row: {
+          id: string;
+          unidade_id: string | null;
+          aluno_id: string;
+          matricula_turma_id: string | null;
+          area_estagio_id: string | null;
+          tipo: "carteira_vacinacao" | "tce";
+          status: "enviado" | "aprovado" | "reprovado";
+          arquivo_nome: string;
+          arquivo_mime_type: string;
+          arquivo_tamanho_bytes: number;
+          storage_path: string;
+          observacao_validacao: string | null;
+          ativo: boolean;
+          versao: number;
+          documento_anterior_id: string | null;
+          validado_por: string | null;
+          validado_por_papel: "professor" | "coordenador" | null;
+          enviado_em: string;
+          validado_em: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          unidade_id?: string | null;
+          aluno_id: string;
+          matricula_turma_id?: string | null;
+          area_estagio_id?: string | null;
+          tipo: "carteira_vacinacao" | "tce";
+          status?: "enviado" | "aprovado" | "reprovado";
+          arquivo_nome: string;
+          arquivo_mime_type: string;
+          arquivo_tamanho_bytes: number;
+          storage_path: string;
+          observacao_validacao?: string | null;
+          ativo?: boolean;
+          versao?: number;
+          documento_anterior_id?: string | null;
+          validado_por?: string | null;
+          validado_por_papel?: "professor" | "coordenador" | null;
+          enviado_em?: string;
+          validado_em?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          unidade_id?: string | null;
+          aluno_id?: string;
+          matricula_turma_id?: string | null;
+          area_estagio_id?: string | null;
+          tipo?: "carteira_vacinacao" | "tce";
+          status?: "enviado" | "aprovado" | "reprovado";
+          arquivo_nome?: string;
+          arquivo_mime_type?: string;
+          arquivo_tamanho_bytes?: number;
+          storage_path?: string;
+          observacao_validacao?: string | null;
+          ativo?: boolean;
+          versao?: number;
+          documento_anterior_id?: string | null;
+          validado_por?: string | null;
+          validado_por_papel?: "professor" | "coordenador" | null;
+          enviado_em?: string;
+          validado_em?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      notificacoes_documentos_aluno: {
+        Row: {
+          id: string;
+          unidade_id: string | null;
+          usuario_id: string;
+          documento_id: string;
+          tipo:
+            | "documento_reprovado_professor"
+            | "documento_reprovado_coordenador";
+          titulo: string;
+          mensagem: string;
+          lida: boolean;
+          lida_em: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          unidade_id?: string | null;
+          usuario_id: string;
+          documento_id: string;
+          tipo:
+            | "documento_reprovado_professor"
+            | "documento_reprovado_coordenador";
+          titulo: string;
+          mensagem: string;
+          lida?: boolean;
+          lida_em?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          unidade_id?: string | null;
+          usuario_id?: string;
+          documento_id?: string;
+          tipo?:
+            | "documento_reprovado_professor"
+            | "documento_reprovado_coordenador";
+          titulo?: string;
+          mensagem?: string;
+          lida?: boolean;
+          lida_em?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       historico_alteracoes: {
         Row: {
           id: number;

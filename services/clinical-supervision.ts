@@ -1,3 +1,4 @@
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 import type {
@@ -1445,7 +1446,10 @@ async function loadClinicalReferenceBundle(
   caseRows: ClinicalCaseRow[],
   currentUser?: SessionUser | null
 ): Promise<ClinicalReferenceBundle> {
-  const supabase = await createSupabaseServerClient();
+  const supabase =
+    currentUser?.role === "coordenador_master"
+      ? createSupabaseAdminClient()
+      : await createSupabaseServerClient();
   const patientIds = uniqueStringValues(caseRows.map((caseRow) => caseRow.paciente_id));
   const enrollmentIds = uniqueStringValues(
     caseRows.map((caseRow) => caseRow.matricula_turma_id)
@@ -2399,7 +2403,10 @@ function buildClinicalInstitutionalPatientListItem(input: {
 }
 
 async function loadClinicalInstitutionalCaseSummaries(currentUser: SessionUser) {
-  const supabase = await createSupabaseServerClient();
+  const supabase =
+    currentUser.role === "coordenador_master"
+      ? createSupabaseAdminClient()
+      : await createSupabaseServerClient();
   const casesQuery = supabase
     .from("casos_clinicos")
     .select("*")
@@ -2421,6 +2428,28 @@ async function loadClinicalInstitutionalCaseSummaries(currentUser: SessionUser) 
   const caseRows = (caseRowsData ?? []) as ClinicalCaseRow[];
   const bundle = await loadClinicalReferenceBundle(caseRows, currentUser);
   return mapClinicalCaseSummaries(caseRows, bundle);
+}
+
+async function loadClinicalInstitutionalUnitOptions(
+  currentUser: SessionUser
+) {
+  if (currentUser.role !== "coordenador_master") {
+    return [] as Array<{ id: string; name: string }>;
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const { data, error } = await adminClient.from("unidades").select("*").order("nome");
+
+  if (error) {
+    throw new Error("clinical-institutional-unit-load-failed");
+  }
+
+  return ((data ?? []) as UnitRow[])
+    .map((unit) => ({
+      id: unit.id,
+      name: unit.nome
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
 }
 
 async function loadInstitutionalPatientRows(input: {
@@ -2831,8 +2860,12 @@ export async function getClinicalInstitutionalDashboardPageData(
   }
 
   try {
-    const supabase = await createSupabaseServerClient();
-    const baseCases = await loadClinicalInstitutionalCaseSummaries(currentUser);
+      const supabase =
+        currentUser.role === "coordenador_master"
+          ? createSupabaseAdminClient()
+          : await createSupabaseServerClient();
+      const unitOptions = await loadClinicalInstitutionalUnitOptions(currentUser);
+      const baseCases = await loadClinicalInstitutionalCaseSummaries(currentUser);
     const caseIds = baseCases.map((caseItem) => caseItem.id);
     const normalizedFilters = {
       query: filters?.query?.trim() ?? "",
@@ -3097,23 +3130,7 @@ export async function getClinicalInstitutionalDashboardPageData(
         generatedAt: new Date().toISOString(),
         filters: normalizedFilters,
         filterOptions: {
-          units:
-            currentUser.role === "coordenador_master"
-              ? [
-                  ...new Map(
-                    baseCases
-                      .filter((caseItem) => caseItem.unitId)
-                      .map((caseItem) => [
-                        caseItem.unitId as string,
-                        caseItem.unitName
-                      ])
-                  ).entries()
-                ]
-                  .map(([id, name]) => ({ id, name }))
-                  .sort((left, right) =>
-                    left.name.localeCompare(right.name, "pt-BR")
-                  )
-              : [],
+          units: unitOptions,
           semesters: [
             ...new Map(
               baseCases.map((caseItem) => [caseItem.semesterId, caseItem.semesterCode])

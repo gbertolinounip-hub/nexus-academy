@@ -14,10 +14,12 @@ type UserRow = Database["public"]["Tables"]["usuarios"]["Row"];
 type SemesterRow = Database["public"]["Tables"]["semestres"]["Row"];
 type ClassRow = Database["public"]["Tables"]["turmas"]["Row"];
 type EnrollmentRow = Database["public"]["Tables"]["matriculas_turma"]["Row"];
+type EvaluationRow = Database["public"]["Tables"]["avaliacoes"]["Row"];
 type AuditHistoryRow = Database["public"]["Tables"]["historico_alteracoes"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["perfis"]["Row"];
 type StudentRow = Database["public"]["Tables"]["alunos"]["Row"];
 type ProfessorRow = Database["public"]["Tables"]["professores"]["Row"];
+type JsonRecord = Record<string, unknown>;
 
 type VisibleProfileCode = Exclude<ProfileCode, "coordenador_master">;
 
@@ -313,6 +315,124 @@ function buildAuditSummary(entry: AuditHistoryRow) {
     default:
       return `MovimentaÃ§Ã£o registrada em ${entry.tabela}.`;
   }
+}
+
+interface MasterGlobalAuditResolutionContext {
+  evaluations: Map<string, Pick<EvaluationRow, "id" | "matricula_turma_id">>;
+  enrollments: Map<string, Pick<EnrollmentRow, "id" | "turma_id">>;
+  classes: Map<string, Pick<ClassRow, "id" | "semestre_id">>;
+  semesters: Map<string, Pick<SemesterRow, "id" | "unidade_id">>;
+}
+
+function asAuditRecord(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : {};
+}
+
+function getAuditString(record: JsonRecord, key: string) {
+  const value = record[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function resolveMasterAuditEvaluationRecord(
+  evaluationId: string | undefined,
+  context: MasterGlobalAuditResolutionContext
+) {
+  return evaluationId ? context.evaluations.get(evaluationId) ?? null : null;
+}
+
+function resolveMasterAuditEnrollmentId(
+  entry: AuditHistoryRow,
+  payload: JsonRecord,
+  context: MasterGlobalAuditResolutionContext
+) {
+  if (entry.tabela === "matriculas_turma") {
+    return getAuditString(payload, "id") ?? entry.registro_id ?? undefined;
+  }
+
+  const directEnrollmentId = getAuditString(payload, "matricula_turma_id");
+
+  if (directEnrollmentId) {
+    return directEnrollmentId;
+  }
+
+  if (entry.tabela === "itens_avaliados") {
+    const evaluationRecord = resolveMasterAuditEvaluationRecord(
+      getAuditString(payload, "avaliacao_id"),
+      context
+    );
+
+    return evaluationRecord?.matricula_turma_id ?? undefined;
+  }
+
+  if (entry.tabela === "avaliacoes") {
+    return getAuditString(payload, "id")
+      ? context.evaluations.get(getAuditString(payload, "id")!)?.matricula_turma_id ??
+          getAuditString(payload, "matricula_turma_id")
+      : getAuditString(payload, "matricula_turma_id");
+  }
+
+  return undefined;
+}
+
+function resolveMasterAuditClassId(
+  entry: AuditHistoryRow,
+  payload: JsonRecord,
+  context: MasterGlobalAuditResolutionContext
+) {
+  if (entry.tabela === "turmas") {
+    return getAuditString(payload, "id") ?? entry.registro_id ?? undefined;
+  }
+
+  const directClassId = getAuditString(payload, "turma_id");
+
+  if (directClassId) {
+    return directClassId;
+  }
+
+  const enrollmentId = resolveMasterAuditEnrollmentId(entry, payload, context);
+  const enrollment = enrollmentId ? context.enrollments.get(enrollmentId) ?? null : null;
+
+  return enrollment?.turma_id ?? undefined;
+}
+
+function resolveMasterAuditSemesterId(
+  entry: AuditHistoryRow,
+  payload: JsonRecord,
+  context: MasterGlobalAuditResolutionContext
+) {
+  if (entry.tabela === "semestres") {
+    return getAuditString(payload, "id") ?? entry.registro_id ?? undefined;
+  }
+
+  const directSemesterId = getAuditString(payload, "semestre_id");
+
+  if (directSemesterId) {
+    return directSemesterId;
+  }
+
+  const classId = resolveMasterAuditClassId(entry, payload, context);
+  const classGroup = classId ? context.classes.get(classId) ?? null : null;
+
+  return classGroup?.semestre_id ?? undefined;
+}
+
+function resolveMasterAuditUnitId(
+  entry: AuditHistoryRow,
+  payload: JsonRecord,
+  context: MasterGlobalAuditResolutionContext
+) {
+  const directUnitId = getAuditString(payload, "unidade_id") ?? entry.unidade_id ?? undefined;
+
+  if (directUnitId) {
+    return directUnitId;
+  }
+
+  const semesterId = resolveMasterAuditSemesterId(entry, payload, context);
+  const semester = semesterId ? context.semesters.get(semesterId) ?? null : null;
+
+  return semester?.unidade_id ?? null;
 }
 
 async function loadProfiles() {
@@ -989,16 +1109,13 @@ export async function getMasterGlobalAuditPageData(input?: {
     requestedPeriod === "365"
       ? requestedPeriod
       : "all";
+  const auditRowLimit = requestedUnitId ? 1200 : 400;
 
   let auditQuery = supabase
     .from("historico_alteracoes")
     .select("*")
     .order("created_at", { ascending: false })
-    .limit(250);
-
-  if (requestedUnitId) {
-    auditQuery = auditQuery.eq("unidade_id", requestedUnitId);
-  }
+    .limit(auditRowLimit);
 
   if (periodFilter !== "all") {
     const threshold = new Date();
@@ -1018,6 +1135,164 @@ export async function getMasterGlobalAuditPageData(input?: {
   }
 
   const auditRows = (auditRowsResult.data ?? []) as AuditHistoryRow[];
+  const evaluationIds = new Set<string>();
+  const enrollmentIds = new Set<string>();
+  const classIds = new Set<string>();
+  const semesterIds = new Set<string>();
+
+  for (const entry of auditRows) {
+    const payload = asAuditRecord(entry.dados_depois ?? entry.dados_antes);
+
+    if (entry.tabela === "semestres") {
+      const semesterId = getAuditString(payload, "id") ?? entry.registro_id ?? undefined;
+      if (semesterId) {
+        semesterIds.add(semesterId);
+      }
+    }
+
+    if (entry.tabela === "turmas") {
+      const classId = getAuditString(payload, "id") ?? entry.registro_id ?? undefined;
+      const semesterId = getAuditString(payload, "semestre_id");
+
+      if (classId) {
+        classIds.add(classId);
+      }
+
+      if (semesterId) {
+        semesterIds.add(semesterId);
+      }
+    }
+
+    if (entry.tabela === "matriculas_turma") {
+      const enrollmentId = getAuditString(payload, "id") ?? entry.registro_id ?? undefined;
+      const classId = getAuditString(payload, "turma_id");
+
+      if (enrollmentId) {
+        enrollmentIds.add(enrollmentId);
+      }
+
+      if (classId) {
+        classIds.add(classId);
+      }
+    }
+
+    if (entry.tabela === "avaliacoes") {
+      const evaluationId = getAuditString(payload, "id") ?? entry.registro_id ?? undefined;
+
+      if (evaluationId) {
+        evaluationIds.add(evaluationId);
+      }
+    }
+
+    const directEvaluationId = getAuditString(payload, "avaliacao_id");
+    if (directEvaluationId) {
+      evaluationIds.add(directEvaluationId);
+    }
+
+    const directEnrollmentId = getAuditString(payload, "matricula_turma_id");
+    if (directEnrollmentId) {
+      enrollmentIds.add(directEnrollmentId);
+    }
+
+    const directClassId = getAuditString(payload, "turma_id");
+    if (directClassId) {
+      classIds.add(directClassId);
+    }
+
+    const directSemesterId = getAuditString(payload, "semestre_id");
+    if (directSemesterId) {
+      semesterIds.add(directSemesterId);
+    }
+  }
+
+  const evaluationRowsResult = evaluationIds.size
+    ? await supabase
+        .from("avaliacoes")
+        .select("id, matricula_turma_id")
+        .in("id", [...evaluationIds])
+    : { data: [], error: null };
+
+  if (evaluationRowsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Não foi possível carregar o contexto das avaliações para a auditoria global.",
+        evaluationRowsResult.error
+      )
+    );
+  }
+
+  const evaluationRows = (evaluationRowsResult.data ?? []) as Array<
+    Pick<EvaluationRow, "id" | "matricula_turma_id">
+  >;
+
+  for (const evaluation of evaluationRows) {
+    enrollmentIds.add(evaluation.matricula_turma_id);
+  }
+
+  const enrollmentRowsResult = enrollmentIds.size
+    ? await supabase
+        .from("matriculas_turma")
+        .select("id, turma_id")
+        .in("id", [...enrollmentIds])
+    : { data: [], error: null };
+
+  if (enrollmentRowsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Não foi possível carregar o contexto das matrículas para a auditoria global.",
+        enrollmentRowsResult.error
+      )
+    );
+  }
+
+  const enrollmentRows = (enrollmentRowsResult.data ?? []) as Array<
+    Pick<EnrollmentRow, "id" | "turma_id">
+  >;
+
+  for (const enrollment of enrollmentRows) {
+    classIds.add(enrollment.turma_id);
+  }
+
+  const classRowsResult = classIds.size
+    ? await supabase
+        .from("turmas")
+        .select("id, semestre_id")
+        .in("id", [...classIds])
+    : { data: [], error: null };
+
+  if (classRowsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Não foi possível carregar o contexto das turmas para a auditoria global.",
+        classRowsResult.error
+      )
+    );
+  }
+
+  const classRows = (classRowsResult.data ?? []) as Array<
+    Pick<ClassRow, "id" | "semestre_id">
+  >;
+
+  for (const classGroup of classRows) {
+    semesterIds.add(classGroup.semestre_id);
+  }
+
+  const semesterRowsResult = semesterIds.size
+    ? await supabase
+        .from("semestres")
+        .select("id, unidade_id")
+        .in("id", [...semesterIds])
+    : { data: [], error: null };
+
+  if (semesterRowsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Não foi possível carregar o contexto dos semestres para a auditoria global.",
+        semesterRowsResult.error
+      )
+    );
+  }
+
   const actorIds = [...new Set(auditRows.map((entry) => entry.usuario_id).filter(Boolean))] as string[];
   const actorUsersResult = actorIds.length
     ? await supabase
@@ -1040,6 +1315,16 @@ export async function getMasterGlobalAuditPageData(input?: {
   >;
   const actorUserMap = new Map(actorUsers.map((user) => [user.id, user]));
   const unitMap = new Map(units.map((unit) => [unit.id, unit]));
+  const resolutionContext: MasterGlobalAuditResolutionContext = {
+    evaluations: new Map(evaluationRows.map((evaluation) => [evaluation.id, evaluation])),
+    enrollments: new Map(enrollmentRows.map((enrollment) => [enrollment.id, enrollment])),
+    classes: new Map(classRows.map((classGroup) => [classGroup.id, classGroup])),
+    semesters: new Map(
+      ((semesterRowsResult.data ?? []) as Array<Pick<SemesterRow, "id" | "unidade_id">>).map(
+        (semester) => [semester.id, semester]
+      )
+    )
+  };
 
   const entries = auditRows
     .map((entry) => {
@@ -1047,11 +1332,13 @@ export async function getMasterGlobalAuditPageData(input?: {
       const profileCode = actor
         ? ((profiles.byId.get(actor.perfil_id)?.codigo ?? null) as VisibleProfileCode | null)
         : null;
+      const payload = asAuditRecord(entry.dados_depois ?? entry.dados_antes);
+      const resolvedUnitId = resolveMasterAuditUnitId(entry, payload, resolutionContext);
 
       return {
         id: String(entry.id),
-        unitName: entry.unidade_id
-          ? unitMap.get(entry.unidade_id)?.nome ?? "Unidade nÃ£o identificada"
+        unitName: resolvedUnitId
+          ? unitMap.get(resolvedUnitId)?.nome ?? "Unidade não identificada"
           : "Sem unidade",
         actorName: actor?.nome_completo ?? "Sistema",
         actorProfileLabel: profileCode ? roleLabel(profileCode) : "Sistema",
@@ -1061,10 +1348,14 @@ export async function getMasterGlobalAuditPageData(input?: {
         recordLabel: buildRecordLabel(entry),
         summary: buildAuditSummary(entry),
         happenedAt: entry.created_at,
-        unitId: entry.unidade_id ?? null
+        unitId: resolvedUnitId
       };
     })
     .filter((entry) => {
+      if (requestedUnitId && entry.unitId !== requestedUnitId) {
+        return false;
+      }
+
       if (roleFilter !== "todos" && entry.actorProfileCode !== roleFilter) {
         return false;
       }

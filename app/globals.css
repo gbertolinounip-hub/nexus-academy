@@ -1072,6 +1072,11 @@ select {
   color: var(--success);
 }
 
+.status-reprovado {
+  background: rgba(var(--danger-rgb), 0.12);
+  color: var(--danger);
+}
+
 .status-ajustes_solicitados {
   background: rgba(var(--alert-rgb), 0.14);
   color: var(--alert);
@@ -2679,19 +2684,332 @@ textarea.input:focus {
   table-layout: fixed;
 }
 
+.clinical-case-col-unit {
+  width: 11rem;
+}
+
+.clinical-case-col-patient {
+  width: 14rem;
+}
+
+.clinical-case-col-semester {
+  width: 7rem;
+}
+
+.clinical-case-col-area {
+  width: 11rem;
+}
+
+.clinical-case-col-professor {
+  width: 12.5rem;
+}
+
+.clinical-case-col-student {
+  width: 12.5rem;
+}
+
+.clinical-case-col-status {
+  width: 12rem;
+}
+
+.clinical-case-col-start,
+.clinical-case-col-end {
+  width: 7rem;
+}
+
+.clinical-case-col-evolution {
+  width: 8.75rem;
+}
+
+.clinical-case-col-record {
+  width: 12rem;
+}
+
+.clinical-case-col-actions {
+  width: 8rem;
+}
+
 .clinical-institutional-case-table td,
 .clinical-institutional-case-table th {
   min-width: 0;
+  vertical-align: top;
 }
 
-.clinical-institutional-case-cell-main {
+.clinical-institutional-case-cell-main,
+.clinical-institutional-case-cell-unit,
+.clinical-institutional-case-cell-area,
+.clinical-institutional-case-cell-professor {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
+.clinical-institutional-case-cell-main strong {
+  display: block;
+}
+
 .clinical-institutional-case-actions-cell {
   white-space: nowrap;
+}
+
+.student-documents-page {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.student-documents-page .hero-card,
+.student-documents-page .card,
+.student-documents-page .table-wrap,
+.student-documents-page .metrics-grid,
+.student-documents-page .management-block-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.student-documents-page .card-header p,
+.student-documents-page .table-helper,
+.student-documents-page .field-help {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.student-document-filter-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  align-items: end;
+}
+
+.student-document-filter-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.student-document-page-split,
+.student-document-module-stack,
+.student-document-record-list,
+.student-document-notification-feed,
+.student-document-directory-mobile-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.student-document-page-split {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.student-document-page-split > * {
+  min-width: 0;
+}
+
+.student-document-notification-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  block-size: clamp(18rem, 32vw, 22.75rem);
+}
+
+.student-document-notification-panel-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 0.2rem;
+  scrollbar-gutter: stable;
+}
+
+.student-document-notification-panel-scroll .empty-message {
+  margin: 0;
+}
+
+.student-document-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.student-document-summary-card-wide {
+  grid-column: span 2;
+}
+
+.student-document-directory-table-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.student-document-directory-table {
+  min-width: 1180px;
+  table-layout: fixed;
+}
+
+.student-document-directory-cell-identity strong,
+.student-document-directory-cell-identity .table-helper,
+.student-document-directory-mobile-card h3,
+.student-document-directory-mobile-card .field-help,
+.student-document-summary-grid strong {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.student-document-directory-status-stack {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.student-document-directory-cell-actions .actions-row {
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.student-document-directory-cell-actions .button {
+  white-space: normal;
+  text-align: center;
+}
+
+.student-document-directory-mobile-list {
+  display: none;
+}
+
+.student-document-directory-mobile-card {
+  min-width: 0;
+}
+
+.student-document-directory-mobile-unit {
+  margin: 0;
+}
+
+.student-document-directory-mobile-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.student-document-directory-mobile-metrics div {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.student-document-directory-mobile-metrics dt {
+  color: var(--muted);
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.student-document-directory-mobile-metrics dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.student-document-upload-form,
+.student-document-review-form {
+  min-width: 0;
+}
+
+.student-document-upload-card,
+.student-document-record-card {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.student-document-record-card-inactive {
+  background: rgba(255, 255, 255, 0.46);
+  opacity: 0.9;
+}
+
+.student-document-record-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.student-document-record-meta-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.student-document-record-reason {
+  margin: 0;
+}
+
+.student-document-review-form {
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+.student-document-review-form .actions-row {
+  justify-content: flex-start;
+}
+
+.student-document-notification-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 1rem 1.05rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.student-document-notification-item-unread {
+  border-color: rgba(var(--alert-rgb), 0.22);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--alert-rgb), 0.08),
+    rgba(255, 255, 255, 0.92)
+  );
+}
+
+.student-document-notification-copy {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.student-document-notification-copy p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.student-document-notification-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.student-document-notification-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(var(--brand-rgb), 0.08);
+  color: var(--brand);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.student-document-notification-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.student-document-notification-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.65rem;
+}
+
+.student-documents-page .management-tag-list .badge {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .master-dashboard .metrics-grid {
@@ -2911,9 +3229,30 @@ textarea.input:focus {
   table-layout: fixed;
 }
 
-.master-coordinator-table th:last-child,
-.master-coordinator-table td:last-child {
+.master-coordinator-col-identity {
+  width: 17rem;
+}
+
+.master-coordinator-col-unit {
+  width: 14rem;
+}
+
+.master-coordinator-col-role {
+  width: 12rem;
+}
+
+.master-coordinator-col-status {
+  width: 9rem;
+}
+
+.master-coordinator-col-actions {
   width: 19rem;
+}
+
+.master-coordinator-table th,
+.master-coordinator-table td {
+  min-width: 0;
+  vertical-align: top;
 }
 
 .master-coordinator-cell-identity strong,
@@ -2925,6 +3264,16 @@ textarea.input:focus {
 .master-coordinator-cell-unit,
 .master-coordinator-cell-actions {
   min-width: 0;
+}
+
+.master-coordinator-cell-identity strong,
+.master-coordinator-cell-identity .table-helper,
+.master-coordinator-cell-unit strong,
+.master-coordinator-cell-unit .table-helper,
+.master-coordinator-table td strong,
+.master-coordinator-table td .table-helper {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .master-coordinator-status-group {
@@ -4297,6 +4646,18 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
     flex-wrap: wrap;
   }
 
+  .student-document-page-split {
+    grid-template-columns: 1fr;
+  }
+
+  .student-document-notification-panel {
+    block-size: clamp(17rem, 58vw, 21rem);
+  }
+
+  .student-document-filter-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .clinical-institutional-filter-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -4304,12 +4665,42 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
   .clinical-institutional-breakdown-grid {
     grid-template-columns: 1fr;
   }
+
+  .student-document-directory-table-wrap {
+    display: none;
+  }
+
+  .student-document-directory-mobile-list {
+    display: grid;
+  }
 }
 
 @media (max-width: 640px) {
   .clinical-patient-filter-grid,
   .clinical-patient-history-grid {
     grid-template-columns: 1fr;
+  }
+
+  .student-document-filter-form {
+    grid-template-columns: 1fr;
+  }
+
+  .student-document-summary-card-wide {
+    grid-column: auto;
+  }
+
+  .student-document-notification-item {
+    grid-template-columns: 1fr;
+  }
+
+  .student-document-notification-actions,
+  .student-document-record-badges {
+    justify-content: flex-start;
+  }
+
+  .student-document-notification-panel {
+    block-size: auto;
+    max-block-size: 21rem;
   }
 
   .clinical-patient-base-grid {
@@ -4468,8 +4859,7 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
     grid-template-columns: 1fr;
   }
 
-  .master-coordinator-table th:last-child,
-  .master-coordinator-table td:last-child {
+  .master-coordinator-col-actions {
     width: 16rem;
   }
 

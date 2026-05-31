@@ -26,6 +26,16 @@ export const navigationItems: NavigationItem[] = [
     allowedRoles: ["aluno", "professor"]
   },
   {
+    href: "/documentos" as Route,
+    label: "Documentos",
+    allowedRoles: ["aluno"]
+  },
+  {
+    href: "/professor/documentos" as Route,
+    label: "Documentos",
+    allowedRoles: ["professor"]
+  },
+  {
     href: "/pacientes" as Route,
     label: "Pacientes",
     allowedRoles: ["professor", "coordenador"]
@@ -61,6 +71,11 @@ export const navigationItems: NavigationItem[] = [
     allowedRoles: ["coordenador_master"]
   },
   {
+    href: "/master/documentos" as Route,
+    label: "Documentos",
+    allowedRoles: ["coordenador_master"]
+  },
+  {
     href: "/coordenador" as Route,
     label: "Coordenador",
     allowedRoles: ["coordenador"]
@@ -68,6 +83,11 @@ export const navigationItems: NavigationItem[] = [
   {
     href: "/coordenador/clinica-supervisionada" as Route,
     label: "Gestão clínica",
+    allowedRoles: ["coordenador"]
+  },
+  {
+    href: "/coordenador/documentos" as Route,
+    label: "Documentos",
     allowedRoles: ["coordenador"]
   },
   {

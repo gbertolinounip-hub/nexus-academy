@@ -700,6 +700,131 @@ create index if not exists idx_notificacoes_clinicas_usuario_lida
 create index if not exists idx_notificacoes_clinicas_caso
   on public.notificacoes_clinicas (caso_clinico_id, created_at desc);
 
+create table if not exists public.documentos_aluno (
+  id uuid primary key default gen_random_uuid(),
+  unidade_id uuid references public.unidades (id) on delete restrict,
+  aluno_id uuid not null references public.alunos (usuario_id) on delete restrict,
+  matricula_turma_id uuid references public.matriculas_turma (id) on delete restrict,
+  area_estagio_id uuid references public.areas_estagio (id) on delete restrict,
+  tipo text not null,
+  status text not null default 'enviado',
+  arquivo_nome text not null,
+  arquivo_mime_type text not null,
+  arquivo_tamanho_bytes integer not null,
+  storage_path text not null,
+  observacao_validacao text,
+  ativo boolean not null default true,
+  versao integer not null default 1,
+  documento_anterior_id uuid references public.documentos_aluno (id) on delete restrict,
+  validado_por uuid references public.usuarios (id) on delete restrict,
+  validado_por_papel text,
+  enviado_em timestamptz not null default now(),
+  validado_em timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint documentos_aluno_tipo_check
+    check (tipo in ('carteira_vacinacao', 'tce')),
+  constraint documentos_aluno_status_check
+    check (status in ('enviado', 'aprovado', 'reprovado')),
+  constraint documentos_aluno_validador_papel_check
+    check (
+      validado_por_papel is null
+      or validado_por_papel in ('professor', 'coordenador')
+    ),
+  constraint documentos_aluno_tamanho_check
+    check (arquivo_tamanho_bytes > 0),
+  constraint documentos_aluno_versao_check
+    check (versao > 0),
+  constraint documentos_aluno_tipo_relacao_check
+    check (
+      (
+        tipo = 'carteira_vacinacao'
+        and matricula_turma_id is null
+        and area_estagio_id is null
+      )
+      or (
+        tipo = 'tce'
+        and matricula_turma_id is not null
+        and area_estagio_id is not null
+      )
+    ),
+  constraint documentos_aluno_validacao_consistencia_check
+    check (
+      (
+        status = 'enviado'
+        and validado_em is null
+        and validado_por is null
+        and validado_por_papel is null
+      )
+      or (
+        status in ('aprovado', 'reprovado')
+        and validado_em is not null
+        and validado_por is not null
+        and validado_por_papel is not null
+      )
+    ),
+  constraint documentos_aluno_reprovacao_obrigatoria_check
+    check (
+      status <> 'reprovado'
+      or nullif(trim(coalesce(observacao_validacao, '')), '') is not null
+    )
+);
+
+create unique index if not exists idx_documentos_aluno_storage_path_uk
+  on public.documentos_aluno (storage_path);
+
+create unique index if not exists idx_documentos_aluno_carteira_ativa_uk
+  on public.documentos_aluno (aluno_id)
+  where tipo = 'carteira_vacinacao'
+    and ativo = true;
+
+create unique index if not exists idx_documentos_aluno_tce_ativo_uk
+  on public.documentos_aluno (aluno_id, matricula_turma_id)
+  where tipo = 'tce'
+    and ativo = true
+    and matricula_turma_id is not null;
+
+create index if not exists idx_documentos_aluno_aluno_tipo
+  on public.documentos_aluno (aluno_id, tipo, ativo, created_at desc);
+
+create index if not exists idx_documentos_aluno_matricula_tipo
+  on public.documentos_aluno (matricula_turma_id, tipo, ativo, created_at desc);
+
+create index if not exists idx_documentos_aluno_unidade_status
+  on public.documentos_aluno (unidade_id, status, created_at desc);
+
+create index if not exists idx_documentos_aluno_area
+  on public.documentos_aluno (area_estagio_id, tipo, created_at desc);
+
+create table if not exists public.notificacoes_documentos_aluno (
+  id uuid primary key default gen_random_uuid(),
+  unidade_id uuid references public.unidades (id) on delete restrict,
+  usuario_id uuid not null references public.usuarios (id) on delete cascade,
+  documento_id uuid not null references public.documentos_aluno (id) on delete cascade,
+  tipo text not null,
+  titulo text not null,
+  mensagem text not null,
+  lida boolean not null default false,
+  lida_em timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint notificacoes_documentos_aluno_tipo_check
+    check (
+      tipo in (
+        'documento_reprovado_professor',
+        'documento_reprovado_coordenador'
+      )
+    ),
+  constraint notificacoes_documentos_aluno_lida_check
+    check (lida = false or lida_em is not null)
+);
+
+create index if not exists idx_notificacoes_documentos_aluno_usuario_lida
+  on public.notificacoes_documentos_aluno (usuario_id, lida, created_at desc);
+
+create index if not exists idx_notificacoes_documentos_aluno_documento
+  on public.notificacoes_documentos_aluno (documento_id, created_at desc);
+
 create table if not exists public.historico_alteracoes (
   id bigserial primary key,
   tabela text not null,
@@ -1303,6 +1428,91 @@ as $$
         and v.ativo = true
         and (v.data_fim is null or v.data_fim >= current_date)
     );
+    );
+$$;
+
+create or replace function private.can_view_student_document(p_documento_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    private.current_user_is_active()
+    and exists (
+      select 1
+      from public.documentos_aluno d
+      where d.id = p_documento_id
+        and (
+          d.aluno_id = (select auth.uid())
+          or private.can_admin_unit(d.unidade_id)
+          or (
+            private.current_profile_code() = 'professor'
+            and (
+              (
+                d.tipo = 'carteira_vacinacao'
+                and exists (
+                  select 1
+                  from public.matriculas_turma m
+                  join public.vinculos_professor_aluno v
+                    on v.matricula_turma_id = m.id
+                  where m.aluno_id = d.aluno_id
+                    and v.professor_id = (select auth.uid())
+                    and v.ativo = true
+                    and (v.data_fim is null or v.data_fim >= current_date)
+                )
+              )
+              or (
+                d.tipo = 'tce'
+                and d.matricula_turma_id is not null
+                and private.is_professor_linked_to_matricula(d.matricula_turma_id)
+              )
+            )
+          )
+        )
+    );
+$$;
+
+create or replace function private.can_manage_student_document(p_documento_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    private.current_user_is_active()
+    and exists (
+      select 1
+      from public.documentos_aluno d
+      where d.id = p_documento_id
+        and (
+          private.can_admin_unit(d.unidade_id)
+          or (
+            private.current_profile_code() = 'professor'
+            and (
+              (
+                d.tipo = 'carteira_vacinacao'
+                and exists (
+                  select 1
+                  from public.matriculas_turma m
+                  join public.vinculos_professor_aluno v
+                    on v.matricula_turma_id = m.id
+                  where m.aluno_id = d.aluno_id
+                    and v.professor_id = (select auth.uid())
+                    and v.ativo = true
+                    and (v.data_fim is null or v.data_fim >= current_date)
+                )
+              )
+              or (
+                d.tipo = 'tce'
+                and d.matricula_turma_id is not null
+                and private.is_professor_linked_to_matricula(d.matricula_turma_id)
+              )
+            )
+          )
+        )
     );
 $$;
 
@@ -1967,6 +2177,16 @@ create trigger trg_notificacoes_clinicas_touch_updated_at
 before update on public.notificacoes_clinicas
 for each row execute function public.touch_updated_at();
 
+drop trigger if exists trg_documentos_aluno_touch_updated_at on public.documentos_aluno;
+create trigger trg_documentos_aluno_touch_updated_at
+before update on public.documentos_aluno
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists trg_notificacoes_documentos_aluno_touch_updated_at on public.notificacoes_documentos_aluno;
+create trigger trg_notificacoes_documentos_aluno_touch_updated_at
+before update on public.notificacoes_documentos_aluno
+for each row execute function public.touch_updated_at();
+
 drop trigger if exists trg_avaliacoes_audit on public.avaliacoes;
 create trigger trg_avaliacoes_audit
 after insert or update or delete on public.avaliacoes
@@ -2050,4 +2270,14 @@ for each row execute function public.audit_changes();
 drop trigger if exists trg_notificacoes_clinicas_audit on public.notificacoes_clinicas;
 create trigger trg_notificacoes_clinicas_audit
 after insert or update or delete on public.notificacoes_clinicas
+for each row execute function public.audit_changes();
+
+drop trigger if exists trg_documentos_aluno_audit on public.documentos_aluno;
+create trigger trg_documentos_aluno_audit
+after insert or update or delete on public.documentos_aluno
+for each row execute function public.audit_changes();
+
+drop trigger if exists trg_notificacoes_documentos_aluno_audit on public.notificacoes_documentos_aluno;
+create trigger trg_notificacoes_documentos_aluno_audit
+after insert or update or delete on public.notificacoes_documentos_aluno
 for each row execute function public.audit_changes();

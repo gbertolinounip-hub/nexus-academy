@@ -22,6 +22,8 @@ alter table public.casos_clinicos enable row level security;
 alter table public.casos_clinicos_horarios enable row level security;
 alter table public.registros_clinicos enable row level security;
 alter table public.notificacoes_clinicas enable row level security;
+alter table public.documentos_aluno enable row level security;
+alter table public.notificacoes_documentos_aluno enable row level security;
 alter table public.historico_alteracoes enable row level security;
 
 alter table public.perfis force row level security;
@@ -48,6 +50,8 @@ alter table public.casos_clinicos force row level security;
 alter table public.casos_clinicos_horarios force row level security;
 alter table public.registros_clinicos force row level security;
 alter table public.notificacoes_clinicas force row level security;
+alter table public.documentos_aluno force row level security;
+alter table public.notificacoes_documentos_aluno force row level security;
 alter table public.historico_alteracoes force row level security;
 
 drop policy if exists perfis_read_policy on public.perfis;
@@ -865,6 +869,93 @@ with check (
   usuario_id = (select auth.uid())
   and private.can_view_clinical_case(caso_clinico_id)
 );
+
+drop policy if exists documentos_aluno_select_policy on public.documentos_aluno;
+create policy documentos_aluno_select_policy
+on public.documentos_aluno
+for select
+to authenticated
+using (private.can_view_student_document(id));
+
+drop policy if exists documentos_aluno_insert_policy on public.documentos_aluno;
+create policy documentos_aluno_insert_policy
+on public.documentos_aluno
+for insert
+to authenticated
+with check (
+  private.current_profile_code() = 'aluno'
+  and aluno_id = (select auth.uid())
+  and private.can_access_unit(unidade_id)
+  and (
+    (
+      tipo = 'carteira_vacinacao'
+      and matricula_turma_id is null
+      and area_estagio_id is null
+    )
+    or (
+      tipo = 'tce'
+      and exists (
+        select 1
+        from public.matriculas_turma m
+        join public.turmas t on t.id = m.turma_id
+        join public.semestres s on s.id = t.semestre_id
+        where m.id = documentos_aluno.matricula_turma_id
+          and m.aluno_id = (select auth.uid())
+          and m.status = 'ativa'
+          and t.area_estagio_id = documentos_aluno.area_estagio_id
+          and private.can_access_unit(s.unidade_id)
+      )
+    )
+  )
+);
+
+drop policy if exists documentos_aluno_update_policy on public.documentos_aluno;
+create policy documentos_aluno_update_policy
+on public.documentos_aluno
+for update
+to authenticated
+using (private.can_manage_student_document(id))
+with check (private.can_manage_student_document(id));
+
+drop policy if exists notificacoes_documentos_aluno_select_policy on public.notificacoes_documentos_aluno;
+create policy notificacoes_documentos_aluno_select_policy
+on public.notificacoes_documentos_aluno
+for select
+to authenticated
+using (
+  usuario_id = (select auth.uid())
+  or private.can_manage_student_document(documento_id)
+);
+
+drop policy if exists notificacoes_documentos_aluno_insert_policy on public.notificacoes_documentos_aluno;
+create policy notificacoes_documentos_aluno_insert_policy
+on public.notificacoes_documentos_aluno
+for insert
+to authenticated
+with check (
+  private.current_user_is_active()
+  and private.can_manage_student_document(documento_id)
+  and usuario_id <> (select auth.uid())
+  and tipo in (
+    'documento_reprovado_professor',
+    'documento_reprovado_coordenador'
+  )
+  and exists (
+    select 1
+    from public.documentos_aluno d
+    where d.id = notificacoes_documentos_aluno.documento_id
+      and d.aluno_id = notificacoes_documentos_aluno.usuario_id
+      and d.unidade_id = notificacoes_documentos_aluno.unidade_id
+  )
+);
+
+drop policy if exists notificacoes_documentos_aluno_update_policy on public.notificacoes_documentos_aluno;
+create policy notificacoes_documentos_aluno_update_policy
+on public.notificacoes_documentos_aluno
+for update
+to authenticated
+using (usuario_id = (select auth.uid()))
+with check (usuario_id = (select auth.uid()));
 
 drop policy if exists historico_alteracoes_read_policy on public.historico_alteracoes;
 create policy historico_alteracoes_read_policy

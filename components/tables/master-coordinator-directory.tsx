@@ -33,6 +33,13 @@ export function MasterCoordinatorDirectory({
     <div className="master-coordinator-directory">
       <div className="table-wrap master-coordinator-table-wrap">
         <table className="table master-coordinator-table">
+          <colgroup>
+            <col className="master-coordinator-col-identity" />
+            {showUnitColumn ? <col className="master-coordinator-col-unit" /> : null}
+            <col className="master-coordinator-col-role" />
+            <col className="master-coordinator-col-status" />
+            <col className="master-coordinator-col-actions" />
+          </colgroup>
           <thead>
             <tr>
               <th>Coordenador</th>

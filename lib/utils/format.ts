@@ -106,6 +106,47 @@ export function formatClinicalRecordType(value: string) {
   }
 }
 
+export function formatStudentDocumentType(value: string) {
+  switch (value) {
+    case "carteira_vacinacao":
+      return "Carteira de vacinação";
+    case "tce":
+      return "TCE";
+    default:
+      return value;
+  }
+}
+
+export function formatStudentDocumentReviewerRole(value: string | null | undefined) {
+  switch (value) {
+    case "professor":
+      return "Professor";
+    case "coordenador":
+      return "Coordenação";
+    default:
+      return null;
+  }
+}
+
+export function formatStudentDocumentStatus(
+  value: string,
+  reviewerRole?: string | null
+) {
+  if (value === "aprovado") {
+    return reviewerRole === "coordenador"
+      ? "Aprovado pela coordenação"
+      : "Aprovado pelo professor";
+  }
+
+  if (value === "reprovado") {
+    return reviewerRole === "coordenador"
+      ? "Reprovado pela coordenação"
+      : "Reprovado pelo professor";
+  }
+
+  return "Enviado";
+}
+
 export function formatClinicalWeekday(value: string) {
   switch (value) {
     case "segunda":

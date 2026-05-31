@@ -15,6 +15,81 @@ export interface SessionUser {
   passwordChangeRecommended?: boolean;
 }
 
+export type StudentDocumentType = "carteira_vacinacao" | "tce";
+export type StudentDocumentStatus = "enviado" | "aprovado" | "reprovado";
+export type StudentDocumentReviewerRole = "professor" | "coordenador";
+export type StudentDocumentNotificationType =
+  | "documento_reprovado_professor"
+  | "documento_reprovado_coordenador";
+
+export interface StudentDocumentAreaOption {
+  enrollmentId: string;
+  areaId: string;
+  areaName: string;
+  blockName: string;
+  className: string;
+  semesterCode: string;
+  professorNames: string[];
+  label: string;
+}
+
+export interface StudentDocumentSummary {
+  id: string;
+  unitId: string | null;
+  unitName: string | null;
+  studentId: string;
+  studentName: string;
+  registration: string;
+  type: StudentDocumentType;
+  typeLabel: string;
+  status: StudentDocumentStatus;
+  statusLabel: string;
+  reviewerRole: StudentDocumentReviewerRole | null;
+  reviewerRoleLabel: string | null;
+  reviewedByName: string | null;
+  fileName: string;
+  fileMimeType: string;
+  fileSizeBytes: number;
+  storagePath: string;
+  active: boolean;
+  version: number;
+  previousDocumentId: string | null;
+  rejectionReason: string | null;
+  submittedAt: string;
+  reviewedAt: string | null;
+  createdAt: string;
+  areaId: string | null;
+  areaName: string | null;
+  blockName: string | null;
+  className: string | null;
+  semesterCode: string | null;
+  enrollmentId: string | null;
+}
+
+export interface StudentDocumentNotificationSummary {
+  id: string;
+  unitId: string | null;
+  userId: string;
+  documentId: string;
+  documentType: StudentDocumentType;
+  type: StudentDocumentNotificationType;
+  title: string;
+  message: string;
+  actionLabel: string;
+  read: boolean;
+  readAt: string | null;
+  createdAt: string;
+  studentName: string;
+  areaName: string | null;
+  blockName: string | null;
+}
+
+export interface StudentDocumentNotificationCenter {
+  unreadCount: number;
+  pendingItems: StudentDocumentNotificationSummary[];
+  historyItems: StudentDocumentNotificationSummary[];
+}
+
 export interface SemesterSummary {
   id: string;
   code: string;
