@@ -3633,6 +3633,16 @@ textarea.input:focus {
   word-break: break-word;
 }
 
+.clinical-sensitive-blur {
+  display: inline-block;
+  min-width: 0;
+  filter: blur(0.34rem);
+  opacity: 0.92;
+  user-select: none;
+  pointer-events: none;
+  transform: translateZ(0);
+}
+
 @supports selector(:has(*)) {
   .shell:has(.clinical-print-page) {
     grid-template-columns: 1fr;
@@ -3938,6 +3948,25 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+}
+
+.clinical-case-side-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  block-size: clamp(20.5rem, 32vw, 24rem);
+}
+
+.clinical-case-side-panel-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 0.2rem;
+  scrollbar-gutter: stable;
+}
+
+.clinical-case-side-panel-scroll .empty-message {
+  margin: 0;
 }
 
 .clinical-record-overview-stack {
@@ -4607,6 +4636,11 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
 
   .clinical-case-integrated-grid {
     grid-template-columns: 1fr;
+  }
+
+  .clinical-case-side-panel {
+    block-size: auto;
+    max-block-size: 24rem;
   }
 
   .clinical-evolution-list-header {

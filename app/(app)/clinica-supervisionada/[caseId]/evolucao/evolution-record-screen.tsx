@@ -62,7 +62,7 @@ export function ClinicalEvolutionRecordScreen({
             >
               Voltar à lista
             </Link>
-            {pageData.evolution ? (
+            {pageData.evolution && pageData.viewerRole !== "aluno" ? (
               <Link
                 href={
                   `/clinica-supervisionada/${pageData.caseItem.id}/evolucao/${pageData.evolution.id}/impressao?print=1` as Route

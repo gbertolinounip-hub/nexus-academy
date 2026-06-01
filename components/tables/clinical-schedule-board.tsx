@@ -3,12 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import type { Route } from "next";
-import { formatClinicalWeekday } from "@/lib/utils/format";
+import { formatClinicalWeekday, formatMaskedFirstName } from "@/lib/utils/format";
 import type { ClinicalCaseSummary, ClinicalWeekday } from "@/types/domain";
 
 interface ClinicalScheduleBoardProps {
   cases: ClinicalCaseSummary[];
   enableProfessorFilters?: boolean;
+  maskPatientNames?: boolean;
 }
 
 const clinicalWeekdays: ClinicalWeekday[] = [
@@ -34,7 +35,8 @@ function sortTimeSlots(timeSlots: string[]) {
 
 export function ClinicalScheduleBoard({
   cases,
-  enableProfessorFilters = false
+  enableProfessorFilters = false,
+  maskPatientNames = false
 }: ClinicalScheduleBoardProps) {
   const [selectedStudentId, setSelectedStudentId] = useState("todos");
   const [selectedWeekday, setSelectedWeekday] = useState<"todos" | ClinicalWeekday>(
@@ -93,7 +95,9 @@ export function ClinicalScheduleBoard({
       const currentSlotAppointments = appointmentsBySlot.get(slotKey) ?? [];
       currentSlotAppointments.push({
         caseId: caseItem.id,
-        patientName: caseItem.patient.name
+        patientName: maskPatientNames
+          ? formatMaskedFirstName(caseItem.patient.name)
+          : caseItem.patient.name
       });
       appointmentsBySlot.set(slotKey, currentSlotAppointments);
     }

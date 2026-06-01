@@ -107,7 +107,7 @@ export default async function ClinicalCaseDetailPage(props: {
     currentUser.role === "professor"
       ? await getClinicalCaseFormPageData(currentUser, { caseId: params.caseId })
       : null;
-  const historyPreviewItems = pageData.notifications.historyItems.slice(0, 8);
+  const isStudentViewer = pageData.viewerRole === "aluno";
 
   return (
     <div className="stack clinical-supervision-page">
@@ -133,14 +133,16 @@ export default async function ClinicalCaseDetailPage(props: {
         description="Leitura clínica e acadêmica rápida do paciente, da supervisão e do andamento geral do caso."
         actions={
           <div className="actions-row">
-            <Link
-              href={`/clinica-supervisionada/${pageData.caseItem.id}/impressao?print=1` as Route}
-              className="button button-secondary button-small"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Imprimir / PDF do caso
-            </Link>
+            {!isStudentViewer ? (
+              <Link
+                href={`/clinica-supervisionada/${pageData.caseItem.id}/impressao?print=1` as Route}
+                className="button button-secondary button-small"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Imprimir / PDF do caso
+              </Link>
+            ) : null}
             {pageData.viewerRole === "professor" ||
             pageData.viewerRole === "coordenador" ? (
               <Link
@@ -176,7 +178,9 @@ export default async function ClinicalCaseDetailPage(props: {
         <div className="clinical-case-summary-grid">
           <div className="report-mini-card">
             <span>Paciente</span>
-            <strong>{pageData.caseItem.patient.name}</strong>
+            <strong className={isStudentViewer ? "clinical-sensitive-blur" : undefined}>
+              {pageData.caseItem.patient.name}
+            </strong>
           </div>
           <div className="report-mini-card">
             <span>Identificador</span>
@@ -226,13 +230,17 @@ export default async function ClinicalCaseDetailPage(props: {
           {pageData.caseItem.patient.contact ? (
             <div className="report-mini-card">
               <span>Contato</span>
-              <strong>{pageData.caseItem.patient.contact}</strong>
+              <strong className={isStudentViewer ? "clinical-sensitive-blur" : undefined}>
+                {pageData.caseItem.patient.contact}
+              </strong>
             </div>
           ) : null}
           {pageData.caseItem.patient.companion ? (
             <div className="report-mini-card">
               <span>Acompanhante</span>
-              <strong>{pageData.caseItem.patient.companion}</strong>
+              <strong className={isStudentViewer ? "clinical-sensitive-blur" : undefined}>
+                {pageData.caseItem.patient.companion}
+              </strong>
             </div>
           ) : null}
         </div>
@@ -438,47 +446,56 @@ export default async function ClinicalCaseDetailPage(props: {
       <div className="clinical-case-integrated-grid">
         <SectionCard
           title="Pendências e notificações"
-        description="Itens deste caso que ainda exigem ação, revisão ou ciência imediata."
-        className="clinical-notification-highlight-card"
-        actions={
-          pageData.viewerRole === "professor" || pageData.viewerRole === "aluno" ? (
-            <div className="clinical-case-header-actions">
+          description="Itens deste caso que ainda exigem ação, revisão ou ciência imediata."
+          className={
+            isStudentViewer
+              ? "clinical-notification-highlight-card clinical-case-side-panel"
+              : "clinical-notification-highlight-card"
+          }
+          actions={
+            pageData.viewerRole === "professor" || pageData.viewerRole === "aluno" ? (
+              <div className="clinical-case-header-actions">
+                <Link
+                  href={"/clinica-supervisionada/historico" as Route}
+                  className="button button-secondary button-small"
+                >
+                  Histórico
+                </Link>
+              </div>
+            ) : undefined
+          }
+        >
+          <div className={isStudentViewer ? "clinical-case-side-panel-scroll" : undefined}>
+            <ClinicalNotificationFeed
+              notifications={pageData.notifications.pendingItems}
+              emptyMessage="Nenhuma pendência clínica deste caso exige ação no momento."
+              showReadAction={false}
+            />
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title="Histórico clínico"
+          description="Linha cronológica consolidada das movimentações clínicas e de supervisão deste caso."
+          className={isStudentViewer ? "clinical-case-side-panel" : undefined}
+          actions={
+            pageData.viewerRole === "professor" || pageData.viewerRole === "aluno" ? (
               <Link
                 href={"/clinica-supervisionada/historico" as Route}
                 className="button button-secondary button-small"
               >
-                Histórico
+                Histórico completo
               </Link>
-            </div>
-          ) : undefined
-        }
-      >
-          <ClinicalNotificationFeed
-            notifications={pageData.notifications.pendingItems}
-            emptyMessage="Nenhuma pendência clínica deste caso exige ação no momento."
-            showReadAction={false}
-          />
-        </SectionCard>
-
-        <SectionCard
-        title="Histórico clínico"
-        description="Linha cronológica consolidada das movimentações clínicas e de supervisão deste caso."
-        actions={
-          pageData.viewerRole === "professor" || pageData.viewerRole === "aluno" ? (
-            <Link
-              href={"/clinica-supervisionada/historico" as Route}
-              className="button button-secondary button-small"
-            >
-              Histórico completo
-            </Link>
-          ) : undefined
-        }
-      >
-          <ClinicalNotificationFeed
-            notifications={historyPreviewItems}
-            emptyMessage="Ainda não há eventos clínicos registrados para este caso."
-            showReadAction
-          />
+            ) : undefined
+          }
+        >
+          <div className={isStudentViewer ? "clinical-case-side-panel-scroll" : undefined}>
+            <ClinicalNotificationFeed
+              notifications={pageData.notifications.historyItems}
+              emptyMessage="Ainda não há eventos clínicos registrados para este caso."
+              showReadAction
+            />
+          </div>
         </SectionCard>
       </div>
 

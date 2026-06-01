@@ -8,6 +8,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatStudentDocumentType } from "@/lib/utils/format";
 import {
+  buildStudentDocumentStoragePath,
   ensureStudentDocumentsBucket,
   getStudentDocumentScopeForCurrentStudent,
   STUDENT_DOCUMENT_ACCEPTED_EXTENSIONS,
@@ -57,16 +58,6 @@ const markStudentDocumentNotificationAsReadSchema = z.object({
 function readStringField(formData: FormData, name: string) {
   const value = formData.get(name);
   return typeof value === "string" ? value.trim() : "";
-}
-
-function sanitizeFileName(fileName: string) {
-  return fileName
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9._-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .toLowerCase();
 }
 
 function getFileExtension(fileName: string) {
@@ -292,12 +283,16 @@ export async function submitStudentDocumentAction(
     await ensureStudentDocumentsBucket();
 
     const documentId = randomUUID();
-    const safeFileName = sanitizeFileName(uploadedFile.name) || `documento.${fileExtension}`;
-    const storageScope =
-      documentType === "carteira_vacinacao"
-        ? "carteira-vacinacao"
-        : `tce/${selectedEnrollment?.enrollmentId}`;
-    const storagePath = `${currentUser.unitId}/${currentUser.id}/${storageScope}/${documentId}-${safeFileName}`;
+    const storagePath = buildStudentDocumentStoragePath({
+      unitId: currentUser.unitId,
+      studentId: currentUser.id,
+      documentId,
+      documentType,
+      fileName: uploadedFile.name || `documento.${fileExtension}`,
+      enrollmentId: selectedEnrollment?.enrollmentId ?? null,
+      areaName: selectedEnrollment?.areaName ?? null,
+      blockName: selectedEnrollment?.blockName ?? null
+    });
     const fileBuffer = Buffer.from(await uploadedFile.arrayBuffer());
     const adminClient = createSupabaseAdminClient();
 

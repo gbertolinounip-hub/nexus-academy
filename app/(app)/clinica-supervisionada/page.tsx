@@ -191,7 +191,7 @@ export default async function ClinicalSupervisionPage(props: {
             description="Agenda semanal fixa dos pacientes atribuídos ao seu estágio atual."
           >
             {pageData.cases.length ? (
-              <ClinicalScheduleBoard cases={pageData.cases} />
+              <ClinicalScheduleBoard cases={pageData.cases} maskPatientNames />
             ) : (
               <p className="empty-message">
                 Ainda não há atendimentos semanais configurados para o seu estágio
@@ -207,7 +207,12 @@ export default async function ClinicalSupervisionPage(props: {
             {pageData.cases.length ? (
               <div className="clinical-case-grid">
                 {pageData.cases.map((caseItem) => (
-                  <ClinicalCaseCard key={caseItem.id} caseItem={caseItem} />
+                  <ClinicalCaseCard
+                    key={caseItem.id}
+                    caseItem={caseItem}
+                    maskPatientName
+                    blurSensitiveContactData
+                  />
                 ))}
               </div>
             ) : (

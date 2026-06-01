@@ -1,5 +1,6 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { formatMaskedFirstName } from "@/lib/utils/format";
 import type { Database } from "@/types/database";
 import type {
   ClinicalCaseSection,
@@ -792,6 +793,45 @@ function buildClinicalPatientSummary(patient: ClinicalPatientRow): ClinicalPatie
     companion: patient.acompanhante,
     active: patient.ativo
   };
+}
+
+function applyClinicalStudentSensitiveMaskToCase(
+  caseItem: ClinicalCaseSummary,
+  currentUser: SessionUser
+) {
+  if (currentUser.role !== "aluno") {
+    return caseItem;
+  }
+
+  return {
+    ...caseItem,
+    patient: {
+      ...caseItem.patient,
+      name: formatMaskedFirstName(caseItem.patient.name)
+    }
+  };
+}
+
+function applyClinicalStudentSensitiveMaskToCases(
+  cases: ClinicalCaseSummary[],
+  currentUser: SessionUser
+) {
+  if (currentUser.role !== "aluno") {
+    return cases;
+  }
+
+  return cases.map((caseItem) =>
+    applyClinicalStudentSensitiveMaskToCase(caseItem, currentUser)
+  );
+}
+
+function applyClinicalStudentSensitiveMaskToNullableCase(
+  caseItem: ClinicalCaseSummary | null,
+  currentUser: SessionUser
+) {
+  return caseItem
+    ? applyClinicalStudentSensitiveMaskToCase(caseItem, currentUser)
+    : null;
 }
 
 function buildClinicalCaseSummary(input: {
@@ -2049,7 +2089,10 @@ export async function getClinicalSupervisionPageData(
 
     try {
       const bundle = await loadClinicalReferenceBundle(caseRows, currentUser);
-      const cases = mapClinicalCaseSummaries(caseRows, bundle);
+      const cases = applyClinicalStudentSensitiveMaskToCases(
+        mapClinicalCaseSummaries(caseRows, bundle),
+        currentUser
+      );
       const notificationCenter = await loadClinicalNotificationCenter(
         currentUser,
         cases
@@ -3286,7 +3329,10 @@ export async function getClinicalCaseDetailPageData(
 
   try {
     const bundle = await loadClinicalReferenceBundle([caseRow], currentUser);
-    const caseItem = mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null;
+    const caseItem = applyClinicalStudentSensitiveMaskToNullableCase(
+      mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null,
+      currentUser
+    );
 
     if (!caseItem) {
       return {
@@ -3437,7 +3483,10 @@ export async function getClinicalEvaluationPageData(
 
   try {
     const bundle = await loadClinicalReferenceBundle([caseRow], currentUser);
-    caseItem = mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null;
+    caseItem = applyClinicalStudentSensitiveMaskToNullableCase(
+      mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null,
+      currentUser
+    );
   } catch {
     return {
       pageData: null,
@@ -3558,7 +3607,10 @@ export async function getClinicalTreatmentPlanPageData(
 
   try {
     const bundle = await loadClinicalReferenceBundle([caseRow], currentUser);
-    caseItem = mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null;
+    caseItem = applyClinicalStudentSensitiveMaskToNullableCase(
+      mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null,
+      currentUser
+    );
   } catch {
     return {
       pageData: null,
@@ -3679,7 +3731,10 @@ export async function getClinicalEvolutionListPageData(
 
   try {
     const bundle = await loadClinicalReferenceBundle([caseRow], currentUser);
-    caseItem = mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null;
+    caseItem = applyClinicalStudentSensitiveMaskToNullableCase(
+      mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null,
+      currentUser
+    );
   } catch {
     return {
       pageData: null,
@@ -3788,7 +3843,10 @@ export async function getClinicalEvolutionPageData(
 
   try {
     const bundle = await loadClinicalReferenceBundle([caseRow], currentUser);
-    caseItem = mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null;
+    caseItem = applyClinicalStudentSensitiveMaskToNullableCase(
+      mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null,
+      currentUser
+    );
   } catch {
     return {
       pageData: null,

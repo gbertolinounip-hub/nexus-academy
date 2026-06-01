@@ -46,6 +46,76 @@ export const STUDENT_DOCUMENT_ACCEPTED_MIME_TYPES = [
   "image/png"
 ] as const;
 
+function normalizeStorageSegment(
+  value: string | null | undefined,
+  fallback: string,
+  maxLength = 48
+) {
+  const normalizedValue = (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase()
+    .slice(0, maxLength)
+    .replace(/-+$/g, "");
+
+  return normalizedValue || fallback;
+}
+
+function normalizeStorageFileName(fileName: string) {
+  const trimmedFileName = fileName.trim();
+  const extensionMatch = trimmedFileName.match(/\.([a-zA-Z0-9]+)$/);
+  const extension = extensionMatch?.[1]?.toLowerCase() ?? "";
+  const baseName = extension
+    ? trimmedFileName.slice(0, -extension.length - 1)
+    : trimmedFileName;
+  const normalizedBaseName = normalizeStorageSegment(baseName, "documento", 80);
+
+  return extension ? `${normalizedBaseName}.${extension}` : normalizedBaseName;
+}
+
+export function buildStudentDocumentStoragePath(input: {
+  unitId: string;
+  studentId: string;
+  documentId: string;
+  documentType: StudentDocumentType;
+  fileName: string;
+  enrollmentId?: string | null;
+  areaName?: string | null;
+  blockName?: string | null;
+}) {
+  const normalizedFileName = normalizeStorageFileName(input.fileName);
+  const baseSegments = [
+    "unidade",
+    input.unitId,
+    "aluno",
+    input.studentId
+  ];
+
+  if (input.documentType === "carteira_vacinacao") {
+    return [
+      ...baseSegments,
+      "carteira-vacinacao",
+      `${input.documentId}-${normalizedFileName}`
+    ].join("/");
+  }
+
+  const tceContextSegment = [
+    `matricula-${input.enrollmentId ?? "sem-matricula"}`,
+    `bloco-${normalizeStorageSegment(input.blockName, "sem-bloco")}`,
+    `area-${normalizeStorageSegment(input.areaName, "sem-area")}`
+  ].join("__");
+
+  return [
+    ...baseSegments,
+    "tce",
+    tceContextSegment,
+    `${input.documentId}-${normalizedFileName}`
+  ].join("/");
+}
+
 const DIRECTORY_STATUS_FILTERS = [
   { value: "todos", label: "Todos os status" },
   { value: "enviado", label: "Enviados" },

@@ -170,6 +170,26 @@ export function formatClinicalScheduleLabel(weekday: string, appointmentTime: st
   return `${formatClinicalWeekday(weekday)} às ${appointmentTime}`;
 }
 
+export function formatMaskedFirstName(value: string) {
+  const normalizedValue = value.trim();
+
+  if (!normalizedValue) {
+    return "";
+  }
+
+  const firstName = normalizedValue.split(/\s+/)[0] ?? "";
+  const characters = Array.from(firstName);
+
+  if (!characters.length) {
+    return "";
+  }
+
+  const visibleCharacter = characters[0] ?? "";
+  const maskLength = Math.max(characters.length - 1, 1);
+
+  return `${visibleCharacter}${"*".repeat(maskLength)}`;
+}
+
 export function formatLaunchIdentity(launchType: string, value: string) {
   return `${formatLaunchType(launchType)} - ${formatDate(value)}`;
 }

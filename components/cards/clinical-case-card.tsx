@@ -2,20 +2,31 @@ import Link from "next/link";
 import type { Route } from "next";
 import {
   formatClinicalCaseStatus,
-  formatClinicalScheduleLabel
+  formatClinicalScheduleLabel,
+  formatMaskedFirstName
 } from "@/lib/utils/format";
 import type { ClinicalCaseSummary } from "@/types/domain";
 
 interface ClinicalCaseCardProps {
   caseItem: ClinicalCaseSummary;
+  maskPatientName?: boolean;
+  blurSensitiveContactData?: boolean;
 }
 
-export function ClinicalCaseCard({ caseItem }: ClinicalCaseCardProps) {
+export function ClinicalCaseCard({
+  caseItem,
+  maskPatientName = false,
+  blurSensitiveContactData = false
+}: ClinicalCaseCardProps) {
+  const patientDisplayName = maskPatientName
+    ? formatMaskedFirstName(caseItem.patient.name)
+    : caseItem.patient.name;
+
   return (
     <article className="clinical-case-card">
       <div className="clinical-case-card-header">
         <div>
-          <h3>{caseItem.patient.name}</h3>
+          <h3>{patientDisplayName}</h3>
           <p>
             {caseItem.patient.identifier} - {caseItem.areaName}
           </p>
@@ -49,11 +60,27 @@ export function ClinicalCaseCard({ caseItem }: ClinicalCaseCardProps) {
         <p className="clinical-case-card-copy">Supervisor: {caseItem.professorName}</p>
         {caseItem.patient.companion ? (
           <p className="clinical-case-card-copy">
-            Acompanhante: {caseItem.patient.companion}
+            Acompanhante:{" "}
+            <span
+              className={
+                blurSensitiveContactData ? "clinical-sensitive-blur" : undefined
+              }
+            >
+              {caseItem.patient.companion}
+            </span>
           </p>
         ) : null}
         {caseItem.patient.contact ? (
-          <p className="clinical-case-card-copy">Contato: {caseItem.patient.contact}</p>
+          <p className="clinical-case-card-copy">
+            Contato:{" "}
+            <span
+              className={
+                blurSensitiveContactData ? "clinical-sensitive-blur" : undefined
+              }
+            >
+              {caseItem.patient.contact}
+            </span>
+          </p>
         ) : null}
       </div>
 

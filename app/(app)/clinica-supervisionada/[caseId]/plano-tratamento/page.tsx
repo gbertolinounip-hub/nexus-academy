@@ -87,16 +87,18 @@ export default async function ClinicalTreatmentPlanPage(props: {
             >
               Voltar ao caso
             </Link>
-            <Link
-              href={
-                `/clinica-supervisionada/${pageData.caseItem.id}/plano-tratamento/impressao?print=1` as Route
-              }
-              className="button button-secondary button-small"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Imprimir / PDF do plano
-            </Link>
+            {pageData.viewerRole !== "aluno" ? (
+              <Link
+                href={
+                  `/clinica-supervisionada/${pageData.caseItem.id}/plano-tratamento/impressao?print=1` as Route
+                }
+                className="button button-secondary button-small"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Imprimir / PDF do plano
+              </Link>
+            ) : null}
           </div>
         }
       >

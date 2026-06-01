@@ -87,16 +87,18 @@ export default async function ClinicalEvaluationPage(props: {
             >
               Voltar ao caso
             </Link>
-            <Link
-              href={
-                `/clinica-supervisionada/${pageData.caseItem.id}/avaliacao/impressao?print=1` as Route
-              }
-              className="button button-secondary button-small"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Imprimir / PDF da avaliação
-            </Link>
+            {pageData.viewerRole !== "aluno" ? (
+              <Link
+                href={
+                  `/clinica-supervisionada/${pageData.caseItem.id}/avaliacao/impressao?print=1` as Route
+                }
+                className="button button-secondary button-small"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Imprimir / PDF da avaliação
+              </Link>
+            ) : null}
           </div>
         }
       >
