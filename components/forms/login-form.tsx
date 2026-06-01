@@ -106,7 +106,7 @@ export function LoginForm({ noticeMessage = null }: LoginFormProps) {
           );
         }
 
-        router.replace("/redirecionar");
+        router.replace("/redirecionar?login=1");
         router.refresh();
       } catch (error) {
         console.error("[login] Falha ao autenticar", {

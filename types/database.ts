@@ -48,6 +48,10 @@ export interface Database {
         };
         Returns: string;
       };
+      registrar_acesso_sistema: {
+        Args: Record<string, never>;
+        Returns: string;
+      };
     };
     Tables: {
       perfis: {
@@ -1079,6 +1083,54 @@ export interface Database {
           lida_em?: string | null;
           created_at?: string;
           updated_at?: string;
+        };
+        Relationships: [];
+      };
+      acessos_sistema: {
+        Row: {
+          id: string;
+          usuario_id: string;
+          unidade_id: string | null;
+          nome_usuario: string;
+          email: string | null;
+          perfil:
+            | "aluno"
+            | "professor"
+            | "coordenador"
+            | "coordenador_master"
+            | null;
+          acessado_em: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          usuario_id: string;
+          unidade_id?: string | null;
+          nome_usuario: string;
+          email?: string | null;
+          perfil?:
+            | "aluno"
+            | "professor"
+            | "coordenador"
+            | "coordenador_master"
+            | null;
+          acessado_em?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          usuario_id?: string;
+          unidade_id?: string | null;
+          nome_usuario?: string;
+          email?: string | null;
+          perfil?:
+            | "aluno"
+            | "professor"
+            | "coordenador"
+            | "coordenador_master"
+            | null;
+          acessado_em?: string;
+          created_at?: string;
         };
         Relationships: [];
       };

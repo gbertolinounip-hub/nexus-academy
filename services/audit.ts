@@ -199,6 +199,9 @@ async function loadAuditRowsForUnit(input: {
   limit: number;
   filters: UnitAuditFilterState;
 }) {
+  const hasExplicitFilters = Boolean(
+    input.filters.startDate || input.filters.endDate || input.filters.areaId
+  );
   let unitScopedQuery = input.supabase
     .from("historico_alteracoes")
     .select("*")
@@ -218,9 +221,15 @@ async function loadAuditRowsForUnit(input: {
     );
   }
 
-  const unitScopedResult = await unitScopedQuery
-    .order("created_at", { ascending: false })
-    .limit(input.limit);
+  let orderedUnitScopedQuery = unitScopedQuery.order("created_at", {
+    ascending: false
+  });
+
+  if (!hasExplicitFilters) {
+    orderedUnitScopedQuery = orderedUnitScopedQuery.limit(input.limit);
+  }
+
+  const unitScopedResult = await orderedUnitScopedQuery;
 
   if (!unitScopedResult.error) {
     return {
@@ -256,9 +265,12 @@ async function loadAuditRowsForUnit(input: {
     );
   }
 
+  const fallbackLimit = hasExplicitFilters
+    ? Math.max(input.limit * 20, 4000)
+    : Math.max(input.limit * 4, 400);
   const fallbackResult = await fallbackQuery
     .order("created_at", { ascending: false })
-    .limit(Math.max(input.limit * 4, 400));
+    .limit(fallbackLimit);
 
   if (fallbackResult.error) {
     return {

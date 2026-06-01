@@ -24,6 +24,13 @@ export function formatDateTime(value: string) {
   }).format(new Date(value));
 }
 
+export function formatTime(value: string) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
 export function formatLaunchType(value: string) {
   switch (value) {
     case "parcial":

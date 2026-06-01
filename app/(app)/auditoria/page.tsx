@@ -5,6 +5,26 @@ import { requireRole } from "@/lib/auth/session";
 import { formatDateTime } from "@/lib/utils/format";
 import { getAuthenticatedAuditEntries } from "@/services/audit";
 
+function buildAccessExportHref(filters: {
+  startDate: string;
+  endDate: string;
+}) {
+  const query = new URLSearchParams();
+
+  if (filters.startDate) {
+    query.set("inicio", filters.startDate);
+  }
+
+  if (filters.endDate) {
+    query.set("fim", filters.endDate);
+  }
+
+  const queryString = query.toString();
+  return queryString
+    ? `/auditoria/export/acessos/excel?${queryString}`
+    : "/auditoria/export/acessos/excel";
+}
+
 export default async function AuditPage(props: {
   searchParams?: Promise<{
     semestre?: string | string[];
@@ -53,6 +73,16 @@ export default async function AuditPage(props: {
           selectedClosedSemester
             ? `Histórico preservado do semestre ${selectedClosedSemester.name}, fora do fluxo operacional e organizado por área arquivada.`
             : "No banco real, estes registros são alimentados por triggers em tabelas críticas."
+        }
+        actions={
+          currentUser.unitId ? (
+            <a
+              href={buildAccessExportHref(filters)}
+              className="button button-secondary"
+            >
+              Exportar acessos
+            </a>
+          ) : null
         }
       >
         {closedSemesters.length ? (

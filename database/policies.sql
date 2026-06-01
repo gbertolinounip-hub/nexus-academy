@@ -24,6 +24,7 @@ alter table public.registros_clinicos enable row level security;
 alter table public.notificacoes_clinicas enable row level security;
 alter table public.documentos_aluno enable row level security;
 alter table public.notificacoes_documentos_aluno enable row level security;
+alter table public.acessos_sistema enable row level security;
 alter table public.historico_alteracoes enable row level security;
 
 alter table public.perfis force row level security;
@@ -52,6 +53,7 @@ alter table public.registros_clinicos force row level security;
 alter table public.notificacoes_clinicas force row level security;
 alter table public.documentos_aluno force row level security;
 alter table public.notificacoes_documentos_aluno force row level security;
+alter table public.acessos_sistema force row level security;
 alter table public.historico_alteracoes force row level security;
 
 drop policy if exists perfis_read_policy on public.perfis;
@@ -956,6 +958,28 @@ for update
 to authenticated
 using (usuario_id = (select auth.uid()))
 with check (usuario_id = (select auth.uid()));
+
+drop policy if exists acessos_sistema_select_policy on public.acessos_sistema;
+create policy acessos_sistema_select_policy
+on public.acessos_sistema
+for select
+to authenticated
+using (private.can_admin_unit(unidade_id));
+
+drop policy if exists acessos_sistema_insert_policy on public.acessos_sistema;
+create policy acessos_sistema_insert_policy
+on public.acessos_sistema
+for insert
+to authenticated
+with check (
+  private.current_user_is_active()
+  and usuario_id = (select auth.uid())
+  and (
+    unidade_id is null
+    or private.can_access_unit(unidade_id)
+    or private.is_master_coordinator()
+  )
+);
 
 drop policy if exists historico_alteracoes_read_policy on public.historico_alteracoes;
 create policy historico_alteracoes_read_policy

@@ -30,6 +30,25 @@ interface WorkbookDefinition {
   sheets: WorkbookSheetDefinition[];
 }
 
+export interface AccessLogWorkbookData {
+  unitName: string;
+  exportedAt: string;
+  totalAccesses: number;
+  filters: {
+    startDate: string;
+    endDate: string;
+  };
+  entries: Array<{
+    userName: string;
+    email: string | null;
+    profileLabel: string;
+    unitName: string;
+    loginDate: string;
+    loginTime: string;
+    loggedAt: string;
+  }>;
+}
+
 type WorkbookRowCell = {
   value: ExportCell;
   styleId?: string;
@@ -756,4 +775,56 @@ export function getStudentFileBaseName(report: StudentFinalReportData) {
   return sanitizeFileName(
     `relatorio-aluno-${report.student.registration}-${report.selectedSemester.code}${areaSuffix}`
   );
+}
+
+export async function buildAccessLogWorkbook(data: AccessLogWorkbookData) {
+  const filtersLabel =
+    data.filters.startDate || data.filters.endDate
+      ? `${data.filters.startDate || "início aberto"} até ${
+          data.filters.endDate || "fim aberto"
+        }`
+      : "Período integral";
+  const definition: WorkbookDefinition = {
+    sheets: [
+      {
+        name: "Acessos",
+        title: `Acessos ao sistema - ${data.unitName}`,
+        subtitle:
+          "Registro simples de logins com sucesso da unidade do coordenador.",
+        metrics: [
+          { label: "Unidade", value: data.unitName },
+          { label: "Período exportado", value: filtersLabel },
+          { label: "Total de acessos", value: String(data.totalAccesses) },
+          { label: "Exportado em", value: data.exportedAt }
+        ],
+        tables: [
+          {
+            title: "Acessos registrados",
+            columns: [
+              "Nome do usuário",
+              "E-mail",
+              "Perfil",
+              "Unidade",
+              "Dia do login",
+              "Horário do login"
+            ],
+            rows: data.entries.map((entry) => [
+              entry.userName,
+              entry.email ?? "",
+              entry.profileLabel,
+              entry.unitName,
+              entry.loginDate,
+              entry.loginTime
+            ])
+          }
+        ]
+      }
+    ]
+  };
+
+  return buildWorkbookBytes(definition);
+}
+
+export function getAccessLogFileBaseName(unitName: string) {
+  return sanitizeFileName(`acessos-${unitName}-${new Date().toISOString().slice(0, 10)}`);
 }

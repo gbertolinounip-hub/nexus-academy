@@ -825,6 +825,28 @@ create index if not exists idx_notificacoes_documentos_aluno_usuario_lida
 create index if not exists idx_notificacoes_documentos_aluno_documento
   on public.notificacoes_documentos_aluno (documento_id, created_at desc);
 
+create table if not exists public.acessos_sistema (
+  id uuid primary key default gen_random_uuid(),
+  usuario_id uuid not null references public.usuarios (id) on delete cascade,
+  unidade_id uuid references public.unidades (id) on delete restrict,
+  nome_usuario text not null,
+  email citext,
+  perfil text,
+  acessado_em timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  constraint acessos_sistema_perfil_check
+    check (
+      perfil is null
+      or perfil in ('aluno', 'professor', 'coordenador', 'coordenador_master')
+    )
+);
+
+create index if not exists idx_acessos_sistema_unidade_data
+  on public.acessos_sistema (unidade_id, acessado_em desc);
+
+create index if not exists idx_acessos_sistema_usuario_data
+  on public.acessos_sistema (usuario_id, acessado_em desc);
+
 create table if not exists public.historico_alteracoes (
   id bigserial primary key,
   tabela text not null,
@@ -849,9 +871,190 @@ create index if not exists idx_historico_alteracoes_usuario_id
 create index if not exists idx_historico_alteracoes_unidade_id
   on public.historico_alteracoes (unidade_id, created_at desc);
 
-update public.historico_alteracoes
-set unidade_id = public.default_unidade_id()
-where unidade_id is null;
+create or replace function private.resolve_audit_unit_id(
+  p_table_name text,
+  p_record_data jsonb,
+  p_actor_unit_id uuid default null
+)
+returns uuid
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  resolved_unit_id uuid;
+begin
+  if p_record_data is null then
+    return p_actor_unit_id;
+  end if;
+
+  begin
+    resolved_unit_id :=
+      nullif(trim(coalesce(p_record_data ->> 'unidade_id', '')), '')::uuid;
+  exception
+    when invalid_text_representation then
+      resolved_unit_id := null;
+  end;
+
+  if resolved_unit_id is not null then
+    return resolved_unit_id;
+  end if;
+
+  case p_table_name
+    when 'usuarios' then
+      select u.unidade_id
+      into resolved_unit_id
+      from public.usuarios u
+      where u.id = nullif(p_record_data ->> 'id', '')::uuid
+      limit 1;
+
+    when 'alunos' then
+      select coalesce(a.unidade_id, u.unidade_id)
+      into resolved_unit_id
+      from public.alunos a
+      left join public.usuarios u on u.id = a.usuario_id
+      where a.usuario_id = nullif(p_record_data ->> 'usuario_id', '')::uuid
+      limit 1;
+
+    when 'professores' then
+      select coalesce(p.unidade_id, u.unidade_id)
+      into resolved_unit_id
+      from public.professores p
+      left join public.usuarios u on u.id = p.usuario_id
+      where p.usuario_id = nullif(p_record_data ->> 'usuario_id', '')::uuid
+      limit 1;
+
+    when 'coordenadores' then
+      select coalesce(c.unidade_id, u.unidade_id)
+      into resolved_unit_id
+      from public.coordenadores c
+      left join public.usuarios u on u.id = c.usuario_id
+      where c.usuario_id = nullif(p_record_data ->> 'usuario_id', '')::uuid
+      limit 1;
+
+    when 'semestres' then
+      select s.unidade_id
+      into resolved_unit_id
+      from public.semestres s
+      where s.id = coalesce(
+        nullif(p_record_data ->> 'id', '')::uuid,
+        nullif(p_record_data ->> 'semestre_id', '')::uuid
+      )
+      limit 1;
+
+    when 'turmas' then
+      select s.unidade_id
+      into resolved_unit_id
+      from public.turmas t
+      join public.semestres s on s.id = t.semestre_id
+      where t.id = coalesce(
+        nullif(p_record_data ->> 'id', '')::uuid,
+        nullif(p_record_data ->> 'turma_id', '')::uuid
+      )
+      limit 1;
+
+    when 'matriculas_turma', 'ausencias', 'vinculos_professor_aluno' then
+      select s.unidade_id
+      into resolved_unit_id
+      from public.matriculas_turma m
+      join public.turmas t on t.id = m.turma_id
+      join public.semestres s on s.id = t.semestre_id
+      where m.id = coalesce(
+        nullif(p_record_data ->> 'id', '')::uuid,
+        nullif(p_record_data ->> 'matricula_turma_id', '')::uuid
+      )
+      limit 1;
+
+    when 'professor_areas_estagio' then
+      select coalesce(p.unidade_id, u.unidade_id)
+      into resolved_unit_id
+      from public.professores p
+      left join public.usuarios u on u.id = p.usuario_id
+      where p.usuario_id = nullif(p_record_data ->> 'professor_id', '')::uuid
+      limit 1;
+
+    when 'avaliacoes' then
+      select s.unidade_id
+      into resolved_unit_id
+      from public.semestres s
+      where s.id = nullif(p_record_data ->> 'semestre_id', '')::uuid
+      limit 1;
+
+      if resolved_unit_id is null then
+        select s.unidade_id
+        into resolved_unit_id
+        from public.matriculas_turma m
+        join public.turmas t on t.id = m.turma_id
+        join public.semestres s on s.id = t.semestre_id
+        where m.id = nullif(p_record_data ->> 'matricula_turma_id', '')::uuid
+        limit 1;
+      end if;
+
+    when 'itens_avaliados' then
+      select s.unidade_id
+      into resolved_unit_id
+      from public.avaliacoes a
+      join public.semestres s on s.id = a.semestre_id
+      where a.id = nullif(p_record_data ->> 'avaliacao_id', '')::uuid
+      limit 1;
+
+    when 'pacientes_clinica' then
+      select p.unidade_id
+      into resolved_unit_id
+      from public.pacientes_clinica p
+      where p.id = coalesce(
+        nullif(p_record_data ->> 'id', '')::uuid,
+        nullif(p_record_data ->> 'paciente_id', '')::uuid
+      )
+      limit 1;
+
+    when 'casos_clinicos' then
+      select c.unidade_id
+      into resolved_unit_id
+      from public.casos_clinicos c
+      where c.id = coalesce(
+        nullif(p_record_data ->> 'id', '')::uuid,
+        nullif(p_record_data ->> 'caso_clinico_id', '')::uuid
+      )
+      limit 1;
+
+      if resolved_unit_id is null then
+        select s.unidade_id
+        into resolved_unit_id
+        from public.semestres s
+        where s.id = nullif(p_record_data ->> 'semestre_id', '')::uuid
+        limit 1;
+      end if;
+
+    when 'casos_clinicos_horarios', 'registros_clinicos', 'notificacoes_clinicas' then
+      select c.unidade_id
+      into resolved_unit_id
+      from public.casos_clinicos c
+      where c.id = nullif(p_record_data ->> 'caso_clinico_id', '')::uuid
+      limit 1;
+
+    when 'documentos_aluno' then
+      select d.unidade_id
+      into resolved_unit_id
+      from public.documentos_aluno d
+      where d.id = coalesce(
+        nullif(p_record_data ->> 'id', '')::uuid,
+        nullif(p_record_data ->> 'documento_id', '')::uuid
+      )
+      limit 1;
+
+    when 'notificacoes_documentos_aluno' then
+      select d.unidade_id
+      into resolved_unit_id
+      from public.documentos_aluno d
+      where d.id = nullif(p_record_data ->> 'documento_id', '')::uuid
+      limit 1;
+  end case;
+
+  return coalesce(resolved_unit_id, p_actor_unit_id);
+end;
+$$;
 
 create or replace function public.audit_changes()
 returns trigger
@@ -863,6 +1066,7 @@ declare
   current_user_id uuid;
   current_user_unit_id uuid;
   record_unit_id uuid;
+  record_payload jsonb;
 begin
   current_user_id := auth.uid();
   current_user_unit_id := (
@@ -873,10 +1077,16 @@ begin
   );
 
   if tg_op = 'DELETE' then
-    record_unit_id := nullif(to_jsonb(old) ->> 'unidade_id', '')::uuid;
+    record_payload := to_jsonb(old);
   else
-    record_unit_id := nullif(to_jsonb(new) ->> 'unidade_id', '')::uuid;
+    record_payload := to_jsonb(new);
   end if;
+
+  record_unit_id := private.resolve_audit_unit_id(
+    tg_table_name,
+    record_payload,
+    current_user_unit_id
+  );
 
   if tg_op = 'INSERT' then
     insert into public.historico_alteracoes (
@@ -893,7 +1103,7 @@ begin
       tg_op,
       to_jsonb(new),
       current_user_id,
-      coalesce(record_unit_id, current_user_unit_id, public.default_unidade_id())
+      record_unit_id
     );
     return new;
   elsif tg_op = 'UPDATE' then
@@ -913,7 +1123,7 @@ begin
       to_jsonb(old),
       to_jsonb(new),
       current_user_id,
-      coalesce(record_unit_id, current_user_unit_id, public.default_unidade_id())
+      record_unit_id
     );
     return new;
   elsif tg_op = 'DELETE' then
@@ -931,12 +1141,82 @@ begin
       tg_op,
       to_jsonb(old),
       current_user_id,
-      coalesce(record_unit_id, current_user_unit_id, public.default_unidade_id())
+      record_unit_id
     );
     return old;
   end if;
 
   return null;
+end;
+$$;
+
+update public.historico_alteracoes h
+set unidade_id = coalesce(
+  private.resolve_audit_unit_id(
+    h.tabela,
+    coalesce(h.dados_depois, h.dados_antes),
+    null
+  ),
+  (
+    select u.unidade_id
+    from public.usuarios u
+    where u.id = h.usuario_id
+    limit 1
+  )
+)
+where h.unidade_id is null;
+
+create or replace function public.registrar_acesso_sistema()
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  current_user_id uuid;
+  current_user_record public.usuarios%rowtype;
+  current_profile_code text;
+  access_id uuid;
+begin
+  current_user_id := auth.uid();
+
+  if current_user_id is null then
+    raise exception 'Usuário autenticado não encontrado para registrar acesso.';
+  end if;
+
+  select u.*
+  into current_user_record
+  from public.usuarios u
+  where u.id = current_user_id
+    and u.ativo = true
+  limit 1;
+
+  if not found then
+    raise exception 'Usuário ativo não encontrado para registrar acesso.';
+  end if;
+
+  select p.codigo
+  into current_profile_code
+  from public.perfis p
+  where p.id = current_user_record.perfil_id
+  limit 1;
+
+  insert into public.acessos_sistema (
+    usuario_id,
+    unidade_id,
+    nome_usuario,
+    email,
+    perfil
+  )
+  values (
+    current_user_record.id,
+    current_user_record.unidade_id,
+    current_user_record.nome_completo,
+    current_user_record.email,
+    current_profile_code
+  )
+  returning id into access_id;
+
+  return access_id;
 end;
 $$;
 
