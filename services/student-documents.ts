@@ -1,3 +1,5 @@
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
@@ -33,6 +35,7 @@ type ProfessorLinkRow =
   Database["public"]["Tables"]["vinculos_professor_aluno"]["Row"];
 
 export const STUDENT_DOCUMENTS_BUCKET = "student-documents";
+const STUDENT_DOCUMENTS_S3_SCHEME = "s3://";
 export const STUDENT_DOCUMENT_MAX_BYTES = 10 * 1024 * 1024;
 export const STUDENT_DOCUMENT_ACCEPTED_EXTENSIONS = [
   "pdf",
@@ -45,6 +48,90 @@ export const STUDENT_DOCUMENT_ACCEPTED_MIME_TYPES = [
   "image/jpeg",
   "image/png"
 ] as const;
+
+interface StudentDocumentsS3Config {
+  region: string;
+  bucket: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+let studentDocumentsS3Client: S3Client | null = null;
+let studentDocumentsS3ClientSignature: string | null = null;
+
+function getStudentDocumentsS3Config(): StudentDocumentsS3Config {
+  const region = process.env.AWS_REGION?.trim() ?? "";
+  const bucket = process.env.AWS_S3_BUCKET?.trim() ?? "";
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID?.trim() ?? "";
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY?.trim() ?? "";
+
+  if (!region || !bucket || !accessKeyId || !secretAccessKey) {
+    throw new Error(
+      "As variáveis AWS_REGION, AWS_S3_BUCKET, AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY devem estar configuradas para o upload de documentos."
+    );
+  }
+
+  return {
+    region,
+    bucket,
+    accessKeyId,
+    secretAccessKey
+  };
+}
+
+function getStudentDocumentsS3Client() {
+  const config = getStudentDocumentsS3Config();
+  const signature = `${config.region}:${config.bucket}:${config.accessKeyId}`;
+
+  if (studentDocumentsS3Client && studentDocumentsS3ClientSignature === signature) {
+    return studentDocumentsS3Client;
+  }
+
+  studentDocumentsS3Client = new S3Client({
+    region: config.region,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey
+    }
+  });
+  studentDocumentsS3ClientSignature = signature;
+
+  return studentDocumentsS3Client;
+}
+
+function isS3StudentDocumentStoragePath(storagePath: string) {
+  return storagePath.startsWith(STUDENT_DOCUMENTS_S3_SCHEME);
+}
+
+function parseS3StudentDocumentStoragePath(storagePath: string) {
+  if (!isS3StudentDocumentStoragePath(storagePath)) {
+    return null;
+  }
+
+  const normalizedPath = storagePath.slice(STUDENT_DOCUMENTS_S3_SCHEME.length);
+  const firstSlashIndex = normalizedPath.indexOf("/");
+
+  if (firstSlashIndex <= 0) {
+    return null;
+  }
+
+  return {
+    bucket: normalizedPath.slice(0, firstSlashIndex),
+    key: normalizedPath.slice(firstSlashIndex + 1)
+  };
+}
+
+function buildPersistedS3StudentDocumentStoragePath(storageKey: string) {
+  const { bucket } = getStudentDocumentsS3Config();
+  return `${STUDENT_DOCUMENTS_S3_SCHEME}${bucket}/${storageKey}`;
+}
+
+function buildInlineDownloadDisposition(fileName: string) {
+  const fallbackName = normalizeStorageFileName(fileName).replace(/"/g, "");
+  const encodedName = encodeURIComponent(fileName);
+
+  return `inline; filename="${fallbackName}"; filename*=UTF-8''${encodedName}`;
+}
 
 function normalizeStorageSegment(
   value: string | null | undefined,
@@ -114,6 +201,109 @@ export function buildStudentDocumentStoragePath(input: {
     tceContextSegment,
     `${input.documentId}-${normalizedFileName}`
   ].join("/");
+}
+
+export function buildStudentDocumentS3StoragePath(input: {
+  unitId: string;
+  studentId: string;
+  documentId: string;
+  documentType: StudentDocumentType;
+  fileName: string;
+  enrollmentId?: string | null;
+  areaName?: string | null;
+  blockName?: string | null;
+}) {
+  return buildPersistedS3StudentDocumentStoragePath(
+    buildStudentDocumentStoragePath(input)
+  );
+}
+
+export async function uploadStudentDocumentBinary(input: {
+  storagePath: string;
+  fileBuffer: Buffer;
+  contentType: string;
+}) {
+  if (!isS3StudentDocumentStoragePath(input.storagePath)) {
+    throw new Error(
+      "Novos uploads de documentos do aluno devem usar um storage_path S3 válido."
+    );
+  }
+
+  const location = parseS3StudentDocumentStoragePath(input.storagePath);
+
+  if (!location) {
+    throw new Error("O caminho S3 do documento é inválido para upload.");
+  }
+
+  const s3Client = getStudentDocumentsS3Client();
+  await s3Client.send(
+    new PutObjectCommand({
+      Bucket: location.bucket,
+      Key: location.key,
+      Body: input.fileBuffer,
+      ContentType: input.contentType
+    })
+  );
+}
+
+export async function removeStudentDocumentBinary(storagePath: string) {
+  if (isS3StudentDocumentStoragePath(storagePath)) {
+    const location = parseS3StudentDocumentStoragePath(storagePath);
+
+    if (!location) {
+      return;
+    }
+
+    const s3Client = getStudentDocumentsS3Client();
+    await s3Client.send(
+      new DeleteObjectCommand({
+        Bucket: location.bucket,
+        Key: location.key
+      })
+    );
+
+    return;
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  await adminClient.storage.from(STUDENT_DOCUMENTS_BUCKET).remove([storagePath]);
+}
+
+async function buildStudentDocumentDownloadUrl(input: {
+  storagePath: string;
+  fileName: string;
+}) {
+  if (isS3StudentDocumentStoragePath(input.storagePath)) {
+    const location = parseS3StudentDocumentStoragePath(input.storagePath);
+
+    if (!location) {
+      return null;
+    }
+
+    const s3Client = getStudentDocumentsS3Client();
+    return await getSignedUrl(
+      s3Client,
+      new GetObjectCommand({
+        Bucket: location.bucket,
+        Key: location.key,
+        ResponseContentDisposition: buildInlineDownloadDisposition(input.fileName)
+      }),
+      {
+        expiresIn: 60
+      }
+    );
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const { data, error } = await adminClient.storage
+    .from(STUDENT_DOCUMENTS_BUCKET)
+    .createSignedUrl(input.storagePath, 60);
+
+  if (error || !data?.signedUrl) {
+    return null;
+  }
+
+  return data.signedUrl;
 }
 
 const DIRECTORY_STATUS_FILTERS = [
@@ -1193,51 +1383,17 @@ export async function getAccessibleStudentDocumentForDownload(
     return null;
   }
 
-  const adminClient = createSupabaseAdminClient();
-  const { data, error } = await adminClient.storage
-    .from(STUDENT_DOCUMENTS_BUCKET)
-    .createSignedUrl((documentRowData as DocumentRow).storage_path, 60);
+  const downloadUrl = await buildStudentDocumentDownloadUrl({
+    storagePath: (documentRowData as DocumentRow).storage_path,
+    fileName: (documentRowData as DocumentRow).arquivo_nome
+  });
 
-  if (error || !data?.signedUrl) {
+  if (!downloadUrl) {
     return null;
   }
 
   return {
-    url: data.signedUrl,
+    url: downloadUrl,
     fileName: (documentRowData as DocumentRow).arquivo_nome
   };
-}
-
-export async function ensureStudentDocumentsBucket() {
-  const adminClient = createSupabaseAdminClient();
-  const { data: buckets, error: bucketError } = await adminClient.storage.listBuckets();
-
-  if (bucketError) {
-    throw new Error(
-      "Não foi possível consultar o bucket privado de documentos do aluno."
-    );
-  }
-
-  const hasBucket = (buckets ?? []).some(
-    (bucket) => bucket.name === STUDENT_DOCUMENTS_BUCKET
-  );
-
-  if (hasBucket) {
-    return;
-  }
-
-  const { error: createError } = await adminClient.storage.createBucket(
-    STUDENT_DOCUMENTS_BUCKET,
-    {
-      public: false,
-      fileSizeLimit: `${STUDENT_DOCUMENT_MAX_BYTES}`,
-      allowedMimeTypes: [...STUDENT_DOCUMENT_ACCEPTED_MIME_TYPES]
-    }
-  );
-
-  if (createError) {
-    throw new Error(
-      "Não foi possível criar o bucket privado de documentos do aluno."
-    );
-  }
 }

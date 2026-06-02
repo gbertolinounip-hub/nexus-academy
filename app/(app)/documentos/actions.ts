@@ -8,13 +8,13 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatStudentDocumentType } from "@/lib/utils/format";
 import {
-  buildStudentDocumentStoragePath,
-  ensureStudentDocumentsBucket,
+  buildStudentDocumentS3StoragePath,
   getStudentDocumentScopeForCurrentStudent,
+  removeStudentDocumentBinary,
   STUDENT_DOCUMENT_ACCEPTED_EXTENSIONS,
   STUDENT_DOCUMENT_ACCEPTED_MIME_TYPES,
   STUDENT_DOCUMENT_MAX_BYTES,
-  STUDENT_DOCUMENTS_BUCKET
+  uploadStudentDocumentBinary
 } from "@/services/student-documents";
 import type { Database } from "@/types/database";
 import type {
@@ -280,10 +280,8 @@ export async function submitStudentDocumentAction(
               document.enrollmentId === selectedEnrollment?.enrollmentId
           ) ?? null;
 
-    await ensureStudentDocumentsBucket();
-
     const documentId = randomUUID();
-    const storagePath = buildStudentDocumentStoragePath({
+    const storagePath = buildStudentDocumentS3StoragePath({
       unitId: currentUser.unitId,
       studentId: currentUser.id,
       documentId,
@@ -296,14 +294,13 @@ export async function submitStudentDocumentAction(
     const fileBuffer = Buffer.from(await uploadedFile.arrayBuffer());
     const adminClient = createSupabaseAdminClient();
 
-    const { error: uploadError } = await adminClient.storage
-      .from(STUDENT_DOCUMENTS_BUCKET)
-      .upload(storagePath, fileBuffer, {
-        contentType: resolvedMimeType,
-        upsert: false
+    try {
+      await uploadStudentDocumentBinary({
+        storagePath,
+        fileBuffer,
+        contentType: resolvedMimeType
       });
-
-    if (uploadError) {
+    } catch (_error) {
       return buildUploadState({
         status: "error",
         message:
@@ -324,7 +321,7 @@ export async function submitStudentDocumentAction(
         .eq("id", previousDocument.id);
 
       if (deactivatePreviousError) {
-        await adminClient.storage.from(STUDENT_DOCUMENTS_BUCKET).remove([storagePath]);
+        await removeStudentDocumentBinary(storagePath);
 
         return buildUploadState({
           status: "error",
@@ -363,7 +360,7 @@ export async function submitStudentDocumentAction(
     );
 
     if (insertError) {
-      await adminClient.storage.from(STUDENT_DOCUMENTS_BUCKET).remove([storagePath]);
+      await removeStudentDocumentBinary(storagePath);
 
       if (previousDocument) {
         await (adminClient.from("documentos_aluno") as any)
