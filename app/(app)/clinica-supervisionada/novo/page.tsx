@@ -8,7 +8,7 @@ export default async function NewClinicalCasePage(props: {
     patient_id?: string;
   }>;
 }) {
-  const currentUser = await requireRole(["professor", "coordenador"]);
+  const currentUser = await requireRole(["professor", "coordenador", "secretaria"]);
   const searchParams = (await props.searchParams) ?? {};
   const { formData, emptyState } = await getClinicalCaseFormPageData(currentUser, {
     patientId: searchParams.patient_id ?? null
@@ -50,7 +50,9 @@ export default async function NewClinicalCasePage(props: {
         <p>
           {formData.operator.role === "coordenador"
             ? "Reaproveite o cadastro-base do paciente, escolha o contexto correto de supervisão e configure os atendimentos semanais fixos do novo caso clínico."
-            : "Cadastre o paciente, escolha o estagiário correto e configure os atendimentos semanais fixos do caso clínico supervisionado."}
+            : formData.operator.role === "secretaria"
+              ? "Reaproveite o cadastro-base do paciente, selecione a área de estágio, filtre o estagiário correto e configure os atendimentos semanais fixos do novo caso."
+              : "Cadastre o paciente, escolha o estagiário correto e configure os atendimentos semanais fixos do caso clínico supervisionado."}
         </p>
       </section>
 

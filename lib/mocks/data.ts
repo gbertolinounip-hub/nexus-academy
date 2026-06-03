@@ -38,6 +38,12 @@ export const demoSessions: Record<SessionUser["role"], SessionUser> = {
     email: "juliana.martins@ies.edu.br",
     role: "professor"
   },
+  secretaria: {
+    id: "sec-luana",
+    name: "Luana Ferreira",
+    email: "luana.ferreira@ies.edu.br",
+    role: "secretaria"
+  },
   coordenador: {
     id: "coord-marcelo",
     name: "Prof. Marcelo Carvalho",

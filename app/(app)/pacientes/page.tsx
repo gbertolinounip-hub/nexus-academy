@@ -25,7 +25,7 @@ export default async function ClinicalPatientsBasePage(props: {
     area_id?: string;
   }>;
 }) {
-  const currentUser = await requireRole(["professor", "coordenador"]);
+  const currentUser = await requireRole(["professor", "coordenador", "secretaria"]);
   const searchParams = (await props.searchParams) ?? {};
   const { pageData, emptyState } = await getClinicalPatientBasePageData(currentUser, {
     query: searchParams.q ?? null,
@@ -42,7 +42,7 @@ export default async function ClinicalPatientsBasePage(props: {
           <h1>Pacientes</h1>
           <p>
             Cadastro permanente de pacientes da Clínica Supervisionada, com
-            histórico longitudinal e reaproveitamento clínico.
+            reaproveitamento entre ciclos da unidade.
           </p>
         </section>
 
@@ -62,6 +62,8 @@ export default async function ClinicalPatientsBasePage(props: {
     );
   }
 
+  const isSecretaryView = pageData.viewerRole === "secretaria";
+
   return (
     <div className="stack clinical-supervision-page">
       <section className="hero-card">
@@ -70,7 +72,9 @@ export default async function ClinicalPatientsBasePage(props: {
         <p>
           {pageData.viewerRole === "coordenador"
             ? "Consulte a base permanente de pacientes da unidade, acompanhe o histórico longitudinal e abra novos casos clínicos sem recadastro desnecessário."
-            : "Consulte os pacientes vinculados à sua atuação clínica, acompanhe o histórico longitudinal e reutilize o cadastro-base para novos casos."}
+            : isSecretaryView
+              ? "Consulte a base administrativa de pacientes da unidade, com busca, filtros e visão operacional para cadastro e atribuição."
+              : "Consulte os pacientes vinculados à sua atuação clínica, acompanhe o histórico longitudinal e reutilize o cadastro-base para novos casos."}
         </p>
       </section>
 
@@ -87,9 +91,13 @@ export default async function ClinicalPatientsBasePage(props: {
           tone="positive"
         />
         <MetricCard
-          label="Com histórico"
+          label={isSecretaryView ? "Cadastros com histórico" : "Com histórico"}
           value={String(pageData.metrics.patientsWithHistory)}
-          hint="Pacientes com pelo menos um caso clínico registrado na base institucional."
+          hint={
+            isSecretaryView
+              ? "Pacientes que já tiveram ao menos um caso registrado na base institucional."
+              : "Pacientes com pelo menos um caso clínico registrado na base institucional."
+          }
         />
       </div>
 
@@ -208,47 +216,62 @@ export default async function ClinicalPatientsBasePage(props: {
                   <p className="clinical-case-card-copy">
                     Estagiário mais recente: {patientItem.latestStudentName ?? "Ainda sem caso"}
                   </p>
-                  <p className="clinical-case-card-copy">
-                    Histórico de casos: {patientItem.historyCount}
-                  </p>
-                  {patientItem.lastUpdatedAt ? (
+                  {!isSecretaryView ? (
+                    <p className="clinical-case-card-copy">
+                      Histórico de casos: {patientItem.historyCount}
+                    </p>
+                  ) : null}
+                  {!isSecretaryView && patientItem.lastUpdatedAt ? (
                     <p className="clinical-case-card-copy">
                       Última atualização clínica: {formatDateTime(patientItem.lastUpdatedAt)}
                     </p>
                   ) : null}
                 </div>
 
-                <div className="clinical-case-card-actions">
-                  <Link
-                    href={`/pacientes/${patientItem.patient.id}` as Route}
-                    className="button button-secondary button-small"
-                  >
-                    Abrir histórico
-                  </Link>
-                  {patientItem.activeCaseId ? (
+                {!isSecretaryView ? (
+                  <div className="clinical-case-card-actions">
                     <Link
-                      href={`/clinica-supervisionada/${patientItem.activeCaseId}` as Route}
+                      href={`/pacientes/${patientItem.patient.id}` as Route}
                       className="button button-secondary button-small"
                     >
-                      Abrir caso ativo
+                      Abrir histórico
                     </Link>
-                  ) : patientItem.latestCaseId ? (
+                    {patientItem.activeCaseId ? (
+                      <Link
+                        href={`/clinica-supervisionada/${patientItem.activeCaseId}` as Route}
+                        className="button button-secondary button-small"
+                      >
+                        Abrir caso ativo
+                      </Link>
+                    ) : patientItem.latestCaseId ? (
+                      <Link
+                        href={`/clinica-supervisionada/${patientItem.latestCaseId}` as Route}
+                        className="button button-secondary button-small"
+                      >
+                        Abrir último caso
+                      </Link>
+                    ) : null}
                     <Link
-                      href={`/clinica-supervisionada/${patientItem.latestCaseId}` as Route}
-                      className="button button-secondary button-small"
+                      href={
+                        `/clinica-supervisionada/novo?patient_id=${encodeURIComponent(patientItem.patient.id)}` as Route
+                      }
+                      className="button button-small"
                     >
-                      Abrir último caso
+                      Abrir novo caso
                     </Link>
-                  ) : null}
-                  <Link
-                    href={
-                      `/clinica-supervisionada/novo?patient_id=${encodeURIComponent(patientItem.patient.id)}` as Route
-                    }
-                    className="button button-small"
-                  >
-                    Abrir novo caso
-                  </Link>
-                </div>
+                  </div>
+                ) : (
+                  <div className="clinical-case-card-actions">
+                    <Link
+                      href={
+                        `/clinica-supervisionada/novo?patient_id=${encodeURIComponent(patientItem.patient.id)}` as Route
+                      }
+                      className="button button-small"
+                    >
+                      Abrir novo caso
+                    </Link>
+                  </div>
+                )}
               </article>
             ))}
           </div>

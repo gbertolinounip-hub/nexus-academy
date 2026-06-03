@@ -4,6 +4,7 @@ import type { ProfileCode } from "@/types/domain";
 export const roleLabels: Record<ProfileCode, string> = {
   aluno: "Aluno",
   professor: "Professor",
+  secretaria: "Secretaria",
   coordenador: "Coordenador",
   coordenador_master: "Coordenador master"
 };
@@ -11,6 +12,7 @@ export const roleLabels: Record<ProfileCode, string> = {
 export const defaultDashboardPath: Record<ProfileCode, Route> = {
   aluno: "/aluno" as Route,
   professor: "/professor" as Route,
+  secretaria: "/secretaria" as Route,
   coordenador: "/coordenador" as Route,
   coordenador_master: "/master" as Route
 };
@@ -25,6 +27,12 @@ export const roleCapabilities = {
   professor: {
     canEditGrades: true,
     canEditAbsences: true,
+    canManageStructure: false,
+    canAudit: false
+  },
+  secretaria: {
+    canEditGrades: false,
+    canEditAbsences: false,
     canManageStructure: false,
     canAudit: false
   },

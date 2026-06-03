@@ -20,7 +20,15 @@ create table if not exists public.perfis (
   descricao text,
   created_at timestamptz not null default now(),
   constraint perfis_codigo_check
-    check (codigo in ('aluno', 'professor', 'coordenador', 'coordenador_master'))
+    check (
+      codigo in (
+        'aluno',
+        'professor',
+        'secretaria',
+        'coordenador',
+        'coordenador_master'
+      )
+    )
 );
 
 create table if not exists public.unidades (
@@ -837,7 +845,13 @@ create table if not exists public.acessos_sistema (
   constraint acessos_sistema_perfil_check
     check (
       perfil is null
-      or perfil in ('aluno', 'professor', 'coordenador', 'coordenador_master')
+      or perfil in (
+        'aluno',
+        'professor',
+        'secretaria',
+        'coordenador',
+        'coordenador_master'
+      )
     )
 );
 

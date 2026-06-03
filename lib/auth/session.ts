@@ -128,7 +128,11 @@ async function resolveAuthState(): Promise<AuthState> {
 
   const role = profileRow.codigo as ProfileCode;
 
-  if (!["aluno", "professor", "coordenador", "coordenador_master"].includes(role)) {
+  if (
+    !["aluno", "professor", "secretaria", "coordenador", "coordenador_master"].includes(
+      role
+    )
+  ) {
     return {
       reason: "invalid_role",
       user: null

@@ -2,16 +2,20 @@
 import {
   discardSemesterAction,
   deleteProfessorAction,
+  deleteSecretaryAction,
   deleteStudentAction,
   deactivateProfessorAction,
+  deactivateSecretaryAction,
   deactivateStudentAction,
   reactivateProfessorAction,
+  reactivateSecretaryAction,
   reactivateStudentAction,
   updateSemesterStatusAction
 } from "@/app/(app)/gestao/alunos/actions";
 import { SectionCard } from "@/components/common/section-card";
 import { ConfirmActionForm } from "@/components/forms/confirm-action-form";
 import { ProfessorRegistrationForm } from "@/components/forms/professor-registration-form";
+import { SecretaryRegistrationForm } from "@/components/forms/secretary-registration-form";
 import { SemesterManagementForm } from "@/components/forms/semester-management-form";
 import { StudentRegistrationForm } from "@/components/forms/student-registration-form";
 import { requireRole } from "@/lib/auth/session";
@@ -47,8 +51,8 @@ export default async function AcademicManagementPage(props: {
         <h1>Cadastros e vínculos de estágio</h1>
         <p>
           Cadastre alunos e supervisores com acesso real ao sistema, vincule
-          áreas dinamicamente por semestre e mantenha a supervisão organizada por
-          bloco e área de estágio.
+          áreas dinamicamente por semestre, registre a secretária da unidade e
+          mantenha a supervisão organizada por bloco e área de estágio.
         </p>
         <div className="actions-row">
           <Link href="/gestao/alunos/importar" className="button button-secondary">
@@ -171,11 +175,11 @@ export default async function AcademicManagementPage(props: {
           </SectionCard>
 
           <div className="split-grid management-registration-grid">
-        <SectionCard
-          title="Cadastrar aluno de estágio"
-          description="Crie acesso do aluno. Os vínculos de estágio podem ser criados agora ou depois, na tela de gerenciamento do aluno."
-          className="management-registration-card"
-        >
+            <SectionCard
+              title="Cadastrar aluno de estágio"
+              description="Crie acesso do aluno. Os vínculos de estágio podem ser criados agora ou depois, na tela de gerenciamento do aluno."
+              className="management-registration-card"
+            >
               <StudentRegistrationForm
                 semesters={pageData.semesters}
                 areaBlocks={pageData.areaBlocks}
@@ -183,14 +187,21 @@ export default async function AcademicManagementPage(props: {
               />
             </SectionCard>
 
-        <SectionCard
-          title="Cadastrar professor / supervisor"
-          description="Crie o acesso do supervisor e vincule as áreas em que ele pode atuar."
-          className="management-registration-card management-professors-card"
-        >
+            <SectionCard
+              title="Cadastrar professor / supervisor"
+              description="Crie o acesso do supervisor e vincule as áreas em que ele pode atuar."
+              className="management-registration-card management-professors-card"
+            >
               <ProfessorRegistrationForm areaBlocks={pageData.areaBlocks} />
             </SectionCard>
           </div>
+
+          <SectionCard
+            title="Cadastrar secretária da unidade"
+            description="Crie o acesso administrativo-operacional da secretária para cadastro, atribuição e consulta institucional de pacientes."
+          >
+            <SecretaryRegistrationForm />
+          </SectionCard>
 
           <SectionCard
             title="Áreas de estágio"
@@ -462,6 +473,85 @@ export default async function AcademicManagementPage(props: {
             ) : (
               <p className="empty-message">
                 Ainda não há professores cadastrados com áreas vinculadas.
+              </p>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Secretárias da unidade"
+            description="Acessos administrativos da Clínica Supervisionada, restritos à operação institucional da unidade."
+          >
+            {pageData.secretaries.length ? (
+              <div className="table-wrap management-professors-table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Secretária</th>
+                      <th>E-mail</th>
+                      <th>Status</th>
+                      <th>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pageData.secretaries.map((secretary) => (
+                      <tr key={secretary.id}>
+                        <td>{secretary.name}</td>
+                        <td>{secretary.email}</td>
+                        <td>
+                          <span
+                            className={`status-pill ${
+                              secretary.isActive ? "status-ativo" : "status-inativo"
+                            }`}
+                          >
+                            {secretary.isActive ? "ativo" : "inativo"}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="actions-row">
+                            {secretary.isActive ? (
+                              <form action={deactivateSecretaryAction}>
+                                <input type="hidden" name="user_id" value={secretary.id} />
+                                <input type="hidden" name="return_to" value="/gestao/alunos" />
+                                <button
+                                  className="button button-secondary button-small"
+                                  type="submit"
+                                >
+                                  Desativar
+                                </button>
+                              </form>
+                            ) : (
+                              <form action={reactivateSecretaryAction}>
+                                <input type="hidden" name="user_id" value={secretary.id} />
+                                <input type="hidden" name="return_to" value="/gestao/alunos" />
+                                <button
+                                  className="button button-secondary button-small"
+                                  type="submit"
+                                >
+                                  Reativar
+                                </button>
+                              </form>
+                            )}
+                            <ConfirmActionForm
+                              action={deleteSecretaryAction}
+                              confirmationMessage={`Excluir permanentemente o cadastro de ${secretary.name}? Use esta opção apenas para registros de teste ou acessos criados por engano.`}
+                              fields={[
+                                { name: "user_id", value: secretary.id },
+                                { name: "return_to", value: "/gestao/alunos" }
+                              ]}
+                              className="button button-danger button-small"
+                            >
+                              Excluir
+                            </ConfirmActionForm>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="empty-message">
+                Ainda não há secretárias cadastradas nesta unidade.
               </p>
             )}
           </SectionCard>

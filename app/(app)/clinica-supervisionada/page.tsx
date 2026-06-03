@@ -15,7 +15,7 @@ export default async function ClinicalSupervisionPage(props: {
     notice_type?: "success" | "error";
   }>;
 }) {
-  const currentUser = await requireRole(["professor", "aluno"]);
+  const currentUser = await requireRole(["professor", "aluno", "secretaria"]);
   const searchParams = (await props.searchParams) ?? {};
   const notice = searchParams.notice?.trim() ?? "";
   const noticeType = searchParams.notice_type === "success" ? "success" : "error";
@@ -54,12 +54,18 @@ export default async function ClinicalSupervisionPage(props: {
       <section className="hero-card">
         <p className="eyebrow">Clínica Supervisionada</p>
         <h1>
-          {pageData.view === "professor" ? pageData.professor.name : pageData.student.name}
+          {pageData.view === "professor"
+            ? pageData.professor.name
+            : pageData.view === "aluno"
+              ? pageData.student.name
+              : pageData.operator.name}
         </h1>
         <p>
           {pageData.view === "professor"
             ? "Cadastre pacientes, atribua-os aos estagiários da sua supervisão e acompanhe a agenda semanal fixa dos atendimentos."
-            : "Acompanhe apenas os pacientes atribuídos ao seu estágio e visualize a agenda semanal fixa dos seus atendimentos clínicos."}
+            : pageData.view === "aluno"
+              ? "Acompanhe apenas os pacientes atribuídos ao seu estágio e visualize a agenda semanal fixa dos seus atendimentos clínicos."
+              : "Apoie a rotina administrativa da unidade com cadastro de pacientes, atribuição operacional e consulta da agenda semanal da Clínica Supervisionada."}
         </p>
         {notice ? (
           <p
@@ -72,33 +78,35 @@ export default async function ClinicalSupervisionPage(props: {
         ) : null}
       </section>
 
-      <SectionCard
-        title="Atualizações recentes"
-        description={
-          pageData.view === "professor"
-            ? "Pendências atuais de avaliação, plano de tratamento e evolução que ainda exigem ação da supervisão."
-            : "Pendências atuais e retornos recentes da supervisão clínica que ainda exigem sua atenção ou ciência."
-        }
-        className="clinical-notification-highlight-card"
-        actions={
-          <Link
-            href={"/clinica-supervisionada/historico" as Route}
-            className="button button-secondary button-small"
-          >
-            Histórico
-          </Link>
-        }
-      >
-        <ClinicalNotificationFeed
-          notifications={pageData.notifications.pendingItems}
-          emptyMessage={
+      {pageData.view !== "secretaria" ? (
+        <SectionCard
+          title="Atualizações recentes"
+          description={
             pageData.view === "professor"
-              ? "Nenhuma pendência clínica aguarda sua supervisão neste momento."
-              : "Nenhum ajuste ou aprovação recente está pendente para os seus casos neste momento."
+              ? "Pendências atuais de avaliação, plano de tratamento e evolução que ainda exigem ação da supervisão."
+              : "Pendências atuais e retornos recentes da supervisão clínica que ainda exigem sua atenção ou ciência."
           }
-          showReadAction={false}
-        />
-      </SectionCard>
+          className="clinical-notification-highlight-card"
+          actions={
+            <Link
+              href={"/clinica-supervisionada/historico" as Route}
+              className="button button-secondary button-small"
+            >
+              Histórico
+            </Link>
+          }
+        >
+          <ClinicalNotificationFeed
+            notifications={pageData.notifications.pendingItems}
+            emptyMessage={
+              pageData.view === "professor"
+                ? "Nenhuma pendência clínica aguarda sua supervisão neste momento."
+                : "Nenhum ajuste ou aprovação recente está pendente para os seus casos neste momento."
+            }
+            showReadAction={false}
+          />
+        </SectionCard>
+      ) : null}
 
       {pageData.view === "professor" ? (
         <>
@@ -161,6 +169,74 @@ export default async function ClinicalSupervisionPage(props: {
             ) : (
               <p className="empty-message">
                 Ainda não há pacientes atribuídos nesta supervisão clínica.
+              </p>
+            )}
+          </SectionCard>
+        </>
+      ) : pageData.view === "secretaria" ? (
+        <>
+          <div className="metrics-grid">
+            <MetricCard
+              label="Casos visíveis"
+              value={String(pageData.metrics.totalCases)}
+              hint="Quantidade total de casos clínicos que a secretaria pode acompanhar no escopo da unidade."
+            />
+            <MetricCard
+              label="Casos ativos"
+              value={String(pageData.metrics.activeCases)}
+              hint="Casos em andamento ou recém-atribuídos na rotina operacional da unidade."
+              tone="positive"
+            />
+            <MetricCard
+              label="Estagiários com pacientes"
+              value={String(pageData.metrics.linkedStudents)}
+              hint="Número de estagiários com ao menos um caso clínico atribuído."
+            />
+          </div>
+
+          <SectionCard
+            title="Cadastro e atribuição de paciente"
+            description="Cadastre o paciente, escolha a área de estágio, filtre o estagiário correto e configure os atendimentos semanais fixos do novo caso."
+            actions={
+              pageData.studentOptions.length ? (
+                <Link href={"/clinica-supervisionada/novo" as Route} className="button">
+                  Cadastrar e atribuir paciente
+                </Link>
+              ) : undefined
+            }
+          >
+            <p className="empty-message">
+              {pageData.emptyHint ??
+                "Use este fluxo sempre que precisar abrir um novo caso clínico no contexto administrativo da unidade."}
+            </p>
+          </SectionCard>
+
+          <SectionCard
+            title="Pacientes agendados"
+            description="Agenda semanal fixa dos pacientes da unidade, com filtro por área de estágio e estagiário."
+          >
+            {pageData.cases.length ? (
+              <ClinicalScheduleBoard
+                cases={pageData.cases}
+                enableProfessorFilters
+                allowCaseLink={false}
+              />
+            ) : (
+              <p className="empty-message">
+                Ainda não há atendimentos semanais configurados para esta unidade.
+              </p>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Pacientes atribuídos"
+            description="Lista operacional dos casos da unidade, sem acesso a avaliação, plano, evolução ou histórico clínico detalhado."
+          >
+            {pageData.cases.length ? (
+              <ClinicalCaseTable cases={pageData.cases} showCaseAction={false} />
+            ) : (
+              <p className="empty-message">
+                Ainda não há pacientes atribuídos na rotina administrativa desta unidade.
               </p>
             )}
           </SectionCard>

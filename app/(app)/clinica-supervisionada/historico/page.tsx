@@ -37,6 +37,9 @@ export default async function ClinicalNotificationHistoryPage() {
     );
   }
 
+  const historyItems =
+    "notifications" in pageData ? pageData.notifications.historyItems : [];
+
   return (
     <div className="stack clinical-supervision-page">
       <section className="hero-card">
@@ -62,7 +65,7 @@ export default async function ClinicalNotificationHistoryPage() {
         }
       >
         <ClinicalNotificationFeed
-          notifications={pageData.notifications.historyItems}
+          notifications={historyItems}
           emptyMessage="Ainda não há notificações clínicas registradas neste contexto."
           showReadAction
         />

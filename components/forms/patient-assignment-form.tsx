@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
 import { createOrUpdateClinicalCaseAction } from "@/app/(app)/clinica-supervisionada/actions";
 import {
   createEmptyClinicalCaseSchedule,
@@ -48,6 +48,20 @@ function getScheduleFieldName(
   return `schedules.${scheduleIndex}.${fieldName}`;
 }
 
+function resolveAreaIdFromEnrollment(
+  studentOptions: ClinicalStudentOption[],
+  enrollmentId: string
+) {
+  if (!enrollmentId) {
+    return "";
+  }
+
+  return (
+    studentOptions.find((studentOption) => studentOption.enrollmentId === enrollmentId)?.areaId ??
+    ""
+  );
+}
+
 export function PatientAssignmentForm({
   mode,
   studentOptions,
@@ -64,12 +78,41 @@ export function PatientAssignmentForm({
     ...initialValues,
     schedules: ensureScheduleRows(initialValues.schedules)
   });
+  const [selectedAreaId, setSelectedAreaId] = useState(
+    resolveAreaIdFromEnrollment(studentOptions, initialValues.enrollment_id)
+  );
   const fieldErrors = safeState.fieldErrors ?? {};
-  const isSubmitDisabled = studentOptions.length === 0;
   const availableStatuses =
     mode === "create"
       ? (["atribuido", "ativo"] as const)
       : (["atribuido", "ativo", "alta", "encerrado"] as const);
+
+  const areaOptions = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          studentOptions
+            .filter((studentOption) => studentOption.areaId)
+            .map((studentOption) => [
+              studentOption.areaId as string,
+              {
+                id: studentOption.areaId as string,
+                name: studentOption.areaName
+              }
+            ])
+        ).values()
+      ).sort((left, right) => left.name.localeCompare(right.name, "pt-BR")),
+    [studentOptions]
+  );
+
+  const filteredStudentOptions = useMemo(
+    () =>
+      selectedAreaId
+        ? studentOptions.filter((studentOption) => studentOption.areaId === selectedAreaId)
+        : [],
+    [selectedAreaId, studentOptions]
+  );
+  const isSubmitDisabled = studentOptions.length === 0;
 
   useEffect(() => {
     if (safeState.status !== "error" || !safeState.formValues) {
@@ -80,14 +123,20 @@ export function PatientAssignmentForm({
       ...safeState.formValues,
       schedules: ensureScheduleRows(safeState.formValues.schedules)
     });
-  }, [safeState.formValues, safeState.status, safeState.submittedAt]);
+    setSelectedAreaId(
+      resolveAreaIdFromEnrollment(studentOptions, safeState.formValues.enrollment_id)
+    );
+  }, [safeState.formValues, safeState.status, safeState.submittedAt, studentOptions]);
 
   useEffect(() => {
     setDraft({
       ...initialValues,
       schedules: ensureScheduleRows(initialValues.schedules)
     });
-  }, [initialValues]);
+    setSelectedAreaId(
+      resolveAreaIdFromEnrollment(studentOptions, initialValues.enrollment_id)
+    );
+  }, [initialValues, studentOptions]);
 
   function updateDraft(
     field: Exclude<keyof ClinicalCaseFormValues, "schedules">,
@@ -131,6 +180,27 @@ export function PatientAssignmentForm({
       return {
         ...currentDraft,
         schedules: ensureScheduleRows(remainingSchedules)
+      };
+    });
+  }
+
+  function handleAreaChange(nextAreaId: string) {
+    setSelectedAreaId(nextAreaId);
+
+    setDraft((currentDraft) => {
+      const selectedEnrollmentStillVisible = studentOptions.some(
+        (studentOption) =>
+          studentOption.enrollmentId === currentDraft.enrollment_id &&
+          studentOption.areaId === nextAreaId
+      );
+
+      if (!currentDraft.enrollment_id || selectedEnrollmentStillVisible) {
+        return currentDraft;
+      }
+
+      return {
+        ...currentDraft,
+        enrollment_id: ""
       };
     });
   }
@@ -246,14 +316,34 @@ export function PatientAssignmentForm({
           <div>
             <h3>Dados acadêmico-operacionais</h3>
             <p>
-              Professor, unidade, semestre, turma e área são derivados do
-              estagiário selecionado para manter a supervisão coerente desde a
-              origem do caso.
+              Escolha primeiro a área de estágio. Depois disso, o sistema
+              filtra os estagiários disponíveis para manter professor, unidade,
+              semestre e turma coerentes desde a origem do caso.
             </p>
           </div>
         </div>
 
         <div className="clinical-case-form-grid">
+          <label className="field">
+            <span>Área de estágio</span>
+            <select
+              className="input"
+              value={selectedAreaId}
+              onChange={(event) => handleAreaChange(event.currentTarget.value)}
+            >
+              <option value="">
+                {areaOptions.length
+                  ? "Selecione a área de estágio"
+                  : "Nenhuma área disponível"}
+              </option>
+              {areaOptions.map((areaOption) => (
+                <option key={areaOption.id} value={areaOption.id}>
+                  {areaOption.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <label className={getFieldClassName(fieldErrors, "enrollment_id")}>
             <span>Estagiário</span>
             <select
@@ -261,13 +351,16 @@ export function PatientAssignmentForm({
               name="enrollment_id"
               value={draft.enrollment_id}
               onChange={(event) => updateDraft("enrollment_id", event.currentTarget.value)}
+              disabled={!selectedAreaId}
             >
               <option value="">
-                {studentOptions.length
-                  ? "Selecione o estagiário vinculado"
-                  : "Nenhum estagiário disponível"}
+                {!selectedAreaId
+                  ? "Selecione a área de estágio primeiro"
+                  : filteredStudentOptions.length
+                    ? "Selecione o estagiário vinculado"
+                    : "Nenhum estagiário disponível para esta área"}
               </option>
-              {studentOptions.map((studentOption) => (
+              {filteredStudentOptions.map((studentOption) => (
                 <option key={studentOption.enrollmentId} value={studentOption.enrollmentId}>
                   {studentOption.label}
                 </option>
@@ -301,8 +394,7 @@ export function PatientAssignmentForm({
               <h3>Atendimentos semanais fixos</h3>
               <p className="field-help">
                 Adicione os dias e horários recorrentes deste paciente. A agenda
-                semanal do professor e do aluno será montada a partir desta
-                lista.
+                semanal do professor e do aluno será montada a partir desta lista.
               </p>
             </div>
           </div>

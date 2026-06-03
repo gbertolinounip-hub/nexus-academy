@@ -52,6 +52,12 @@ export interface ProfessorRegistrationFormValues {
   area_ids: string[];
 }
 
+export interface SecretaryRegistrationFormValues {
+  nome_completo: string;
+  email: string;
+  senha: string;
+}
+
 export interface SemesterManagementFormValues {
   codigo: string;
   nome: string;
@@ -90,6 +96,14 @@ export interface ProfessorRegistrationActionState {
   message: string | null;
   fieldErrors: Record<string, string>;
   formValues?: ProfessorRegistrationFormValues;
+  submittedAt?: number;
+}
+
+export interface SecretaryRegistrationActionState {
+  status: "idle" | "success" | "error";
+  message: string | null;
+  fieldErrors: Record<string, string>;
+  formValues?: SecretaryRegistrationFormValues;
   submittedAt?: number;
 }
 
@@ -228,6 +242,17 @@ export const initialProfessorRegistrationActionState: ProfessorRegistrationActio
     email: "",
     senha: "",
     area_ids: []
+  }
+};
+
+export const initialSecretaryRegistrationActionState: SecretaryRegistrationActionState = {
+  status: "idle",
+  message: null,
+  fieldErrors: {},
+  formValues: {
+    nome_completo: "",
+    email: "",
+    senha: ""
   }
 };
 

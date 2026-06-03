@@ -1,6 +1,7 @@
 export type ProfileCode =
   | "aluno"
   | "professor"
+  | "secretaria"
   | "coordenador"
   | "coordenador_master";
 
@@ -453,6 +454,7 @@ export interface ClinicalStudentOption {
   registration: string;
   className: string;
   semesterCode: string;
+  areaId: string | null;
   areaName: string;
   professorName?: string | null;
   label: string;

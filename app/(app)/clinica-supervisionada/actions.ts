@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth/session";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 import type {
@@ -628,7 +629,7 @@ export async function createOrUpdateClinicalCaseAction(
   _previousState: ClinicalCaseActionState,
   formData: FormData
 ): Promise<ClinicalCaseActionState> {
-  const currentUser = await requireRole(["professor", "coordenador"]);
+  const currentUser = await requireRole(["professor", "coordenador", "secretaria"]);
   const currentUnitId = getRequiredClinicalUnitId(currentUser.unitId);
   const submittedFormValues = buildFormValues(formData);
   const parsedData = clinicalCaseSchema.safeParse(submittedFormValues);
@@ -662,8 +663,12 @@ export async function createOrUpdateClinicalCaseAction(
     );
   }
 
-  const supabase = await createSupabaseServerClient();
-  const { data: authData, error: authError } = await supabase.auth.getUser();
+  const authSupabase = await createSupabaseServerClient();
+  const dataSupabase =
+    currentUser.role === "secretaria"
+      ? createSupabaseAdminClient()
+      : authSupabase;
+  const { data: authData, error: authError } = await authSupabase.auth.getUser();
 
   if (authError || authData.user?.id !== currentUser.id) {
     return buildErrorState(
@@ -690,7 +695,7 @@ export async function createOrUpdateClinicalCaseAction(
   }
 
   const enrollmentContextResult = await loadClinicalAssignmentEnrollmentContext({
-    supabase,
+    supabase: dataSupabase as SupabaseServerClient,
     currentUser,
     unitId: currentUnitId,
     enrollmentId: parsedData.data.enrollment_id
@@ -708,7 +713,7 @@ export async function createOrUpdateClinicalCaseAction(
   let currentCase: ClinicalCaseRow | null = null;
 
   if (isEditing) {
-    const { data: currentCaseData, error: currentCaseError } = await supabase
+    const { data: currentCaseData, error: currentCaseError } = await dataSupabase
       .from("casos_clinicos")
       .select("*")
       .eq("id", parsedData.data.case_id)
@@ -732,7 +737,7 @@ export async function createOrUpdateClinicalCaseAction(
   try {
     if (selectedPatientId) {
       selectedPatient = await loadSelectedPatient({
-        supabase,
+        supabase: dataSupabase as SupabaseServerClient,
         unitId: currentUnitId,
         patientId: selectedPatientId
       });
@@ -747,7 +752,7 @@ export async function createOrUpdateClinicalCaseAction(
     }
 
     existingPatient = await findExistingPatient({
-      supabase,
+      supabase: dataSupabase as SupabaseServerClient,
       unitId: currentUnitId,
       identifier: parsedData.data.patient_identifier,
       cpf: normalizedCpf
@@ -808,7 +813,7 @@ export async function createOrUpdateClinicalCaseAction(
 
   if (patientId) {
     const patientUpdatePayload: ClinicalPatientUpdate = { ...patientPayload };
-    const { error: patientUpdateError } = await (supabase
+    const { error: patientUpdateError } = await (dataSupabase
       .from("pacientes_clinica") as any)
       .update(patientUpdatePayload)
       .eq("id", patientId);
@@ -831,7 +836,7 @@ export async function createOrUpdateClinicalCaseAction(
     }
   } else {
     const generatedPatientId = crypto.randomUUID();
-    const { error: patientInsertError } = await (supabase
+    const { error: patientInsertError } = await (dataSupabase
       .from("pacientes_clinica") as any)
       .insert({
         ...patientPayload,
@@ -878,7 +883,7 @@ export async function createOrUpdateClinicalCaseAction(
   };
 
   if (!isEditing) {
-    const { data: duplicatedCaseData, error: duplicatedCaseError } = await supabase
+    const { data: duplicatedCaseData, error: duplicatedCaseError } = await dataSupabase
       .from("casos_clinicos")
       .select("id")
       .eq("paciente_id", patientId)
@@ -906,7 +911,7 @@ export async function createOrUpdateClinicalCaseAction(
 
   if (isEditing && currentCase) {
     const caseUpdatePayload: ClinicalCaseUpdate = { ...casePayload };
-    const { error: caseUpdateError } = await (supabase
+    const { error: caseUpdateError } = await (dataSupabase
       .from("casos_clinicos") as any)
       .update(caseUpdatePayload)
       .eq("id", currentCase.id)
@@ -921,7 +926,7 @@ export async function createOrUpdateClinicalCaseAction(
     }
 
     const schedulePersistState = await replaceClinicalCaseSchedules({
-      supabase,
+      supabase: dataSupabase as SupabaseServerClient,
       caseId: currentCase.id,
       schedules: schedulesToPersist,
       formValues: submittedFormValues
@@ -937,6 +942,7 @@ export async function createOrUpdateClinicalCaseAction(
     revalidatePath(`/pacientes/${patientId}`);
     revalidatePath("/aluno");
     revalidatePath("/professor");
+    revalidatePath("/secretaria");
     revalidatePath("/coordenador");
 
     redirect(
@@ -949,7 +955,7 @@ export async function createOrUpdateClinicalCaseAction(
   }
 
   const createdCaseId = crypto.randomUUID();
-  const { error: caseInsertError } = await (supabase
+  const { error: caseInsertError } = await (dataSupabase
     .from("casos_clinicos") as any)
     .insert({
       ...casePayload,
@@ -966,14 +972,14 @@ export async function createOrUpdateClinicalCaseAction(
   }
 
   const schedulePersistState = await replaceClinicalCaseSchedules({
-    supabase,
+    supabase: dataSupabase as SupabaseServerClient,
     caseId: createdCaseId,
     schedules: schedulesToPersist,
     formValues: submittedFormValues
   });
 
   if (schedulePersistState) {
-    await (supabase.from("casos_clinicos") as any)
+    await (dataSupabase.from("casos_clinicos") as any)
       .delete()
       .eq("id", createdCaseId)
       .eq("professor_id", enrollmentContextResult.context.professorId);
@@ -987,6 +993,7 @@ export async function createOrUpdateClinicalCaseAction(
   revalidatePath(`/pacientes/${patientId}`);
   revalidatePath("/aluno");
   revalidatePath("/professor");
+  revalidatePath("/secretaria");
   revalidatePath("/coordenador");
 
   redirect(

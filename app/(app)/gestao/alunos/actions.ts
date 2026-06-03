@@ -15,6 +15,8 @@ import type {
   StudentProfileFormValues,
   ProfessorRegistrationActionState,
   ProfessorRegistrationFormValues,
+  SecretaryRegistrationActionState,
+  SecretaryRegistrationFormValues,
   SemesterManagementActionState,
   SemesterManagementFormValues,
   StudentRegistrationActionState,
@@ -179,6 +181,23 @@ const professorRegistrationSchema = z.object({
     .min(1, "Selecione ao menos uma area para o professor.")
 });
 
+const secretaryRegistrationSchema = z.object({
+  nome_completo: z
+    .string()
+    .trim()
+    .min(3, "Informe o nome completo da secretária.")
+    .max(160, "O nome da secretária deve ter no maximo 160 caracteres."),
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("Informe um e-mail valido para a secretária."),
+  senha: z
+    .string()
+    .min(8, "A senha da secretária deve ter ao menos 8 caracteres.")
+    .max(72, "A senha da secretária deve ter no maximo 72 caracteres.")
+});
+
 const semesterManagementSchema = z
   .object({
     codigo: z
@@ -294,6 +313,20 @@ function buildProfessorErrorState(
   };
 }
 
+function buildSecretaryErrorState(
+  message: string,
+  fieldErrors: Record<string, string> = {},
+  formValues?: SecretaryRegistrationFormValues
+): SecretaryRegistrationActionState {
+  return {
+    status: "error",
+    message,
+    fieldErrors,
+    formValues,
+    submittedAt: Date.now()
+  };
+}
+
 function buildSemesterErrorState(
   message: string,
   fieldErrors: Record<string, string> = {},
@@ -345,6 +378,15 @@ function buildStudentStageSuccessState(
 }
 
 function buildProfessorSuccessState(message: string): ProfessorRegistrationActionState {
+  return {
+    status: "success",
+    message,
+    fieldErrors: {},
+    submittedAt: Date.now()
+  };
+}
+
+function buildSecretarySuccessState(message: string): SecretaryRegistrationActionState {
   return {
     status: "success",
     message,
@@ -476,6 +518,14 @@ function buildProfessorFormValues(formData: FormData): ProfessorRegistrationForm
     email: readStringField(formData, "email").toLowerCase(),
     senha: readStringField(formData, "senha"),
     area_ids: areaIds
+  };
+}
+
+function buildSecretaryFormValues(formData: FormData): SecretaryRegistrationFormValues {
+  return {
+    nome_completo: readStringField(formData, "nome_completo"),
+    email: readStringField(formData, "email").toLowerCase(),
+    senha: readStringField(formData, "senha")
   };
 }
 
@@ -1609,6 +1659,7 @@ function revalidateAcademicViews(studentId?: string) {
 
   revalidatePath("/coordenador");
   revalidatePath("/professor");
+  revalidatePath("/secretaria");
   revalidatePath("/aluno");
   revalidatePath("/relatorios");
   revalidatePath("/auditoria");
@@ -1744,6 +1795,11 @@ async function purgeProfessorAuditTrail(input: {
   await deleteAuditRowsByActor(input.userId);
 }
 
+async function purgeSecretaryAuditTrail(userId: string) {
+  await deleteAuditRowsByTableRecordIds("usuarios", [userId]);
+  await deleteAuditRowsByActor(userId);
+}
+
 async function purgeSemesterAuditTrail(input: {
   semesterId: string;
   classIds: string[];
@@ -1758,7 +1814,7 @@ async function purgeSemesterAuditTrail(input: {
 
 async function loadUserProfileCode(input: {
   userId: string;
-  expectedProfileCode: "aluno" | "professor";
+  expectedProfileCode: "aluno" | "professor" | "secretaria";
   currentUnitId: string;
 }) {
   const supabase = await createSupabaseServerClient();
@@ -2117,6 +2173,22 @@ async function deleteProfessorSafely(userId: string) {
   };
 }
 
+async function deleteSecretarySafely(userId: string) {
+  const adminClient = createSupabaseAdminClient();
+  const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(userId);
+
+  if (authDeleteError) {
+    throw new Error(authDeleteError.message);
+  }
+
+  await purgeSecretaryAuditTrail(userId);
+
+  return {
+    deleted: true as const,
+    message: "Cadastro da secretária excluído com sucesso."
+  };
+}
+
 async function deleteSemesterSafely(input: {
   semesterId: string;
   unitId: string;
@@ -2433,7 +2505,7 @@ function buildStudentConflictInfo(input: {
 async function updateUserActivation(input: {
   userId: string;
   nextActive: boolean;
-  expectedProfileCode: "aluno" | "professor";
+  expectedProfileCode: "aluno" | "professor" | "secretaria";
   currentUnitId: string;
 }) {
   const supabase = await createSupabaseServerClient();
@@ -2457,6 +2529,7 @@ async function updateUserActivation(input: {
   revalidatePath("/gestao/alunos");
   revalidatePath("/coordenador");
   revalidatePath("/professor");
+  revalidatePath("/secretaria");
   revalidatePath("/aluno");
   revalidatePath("/relatorios");
   revalidatePath("/auditoria");
@@ -3247,6 +3320,97 @@ export async function createProfessorRegistrationAction(
   );
 }
 
+export async function createSecretaryRegistrationAction(
+  _previousState: SecretaryRegistrationActionState,
+  formData: FormData
+): Promise<SecretaryRegistrationActionState> {
+  const currentUser = await requireRole(["coordenador"]);
+  const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
+  const submittedFormValues = buildSecretaryFormValues(formData);
+  const parsedData = secretaryRegistrationSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return buildSecretaryErrorState(
+      "Revise os campos obrigatórios do cadastro da secretária.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const profileMap = await loadProfileMap();
+  const secretaryProfile = profileMap.get("secretaria");
+
+  if (!secretaryProfile) {
+    return buildSecretaryErrorState(
+      "O perfil de secretaria não está configurado no banco.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const adminClient = createSupabaseAdminClient();
+  let authUserId: string | null = null;
+
+  try {
+    const { data: createdAuthUser, error: authError } =
+      await adminClient.auth.admin.createUser({
+        email: parsedData.data.email,
+        password: parsedData.data.senha,
+        email_confirm: true
+      });
+
+    if (authError || !createdAuthUser.user) {
+      return buildSecretaryErrorState(
+        authError?.message ?? "Não foi possível criar o acesso da secretária no Auth.",
+        {
+          email: "Não foi possível criar este e-mail no sistema de autenticação."
+        },
+        submittedFormValues
+      );
+    }
+
+    authUserId = createdAuthUser.user.id;
+
+    const userInsertPayload: UserInsert = {
+      id: createdAuthUser.user.id,
+      perfil_id: secretaryProfile.id,
+      unidade_id: coordinatorUnitId,
+      email: parsedData.data.email,
+      nome_completo: parsedData.data.nome_completo,
+      ativo: true
+    };
+
+    const { error: userInsertError } = await (supabase.from("usuarios") as any).insert(
+      userInsertPayload
+    );
+
+    if (userInsertError) {
+      throw new Error(userInsertError.message);
+    }
+  } catch (error) {
+    if (authUserId) {
+      await adminClient.auth.admin.deleteUser(authUserId);
+    }
+
+    return buildSecretaryErrorState(
+      error instanceof Error
+        ? error.message
+        : "Não foi possível concluir o cadastro da secretária.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  revalidatePath("/gestao/alunos");
+  revalidatePath("/coordenador");
+  revalidatePath("/secretaria");
+
+  return buildSecretarySuccessState(
+    "Secretária cadastrada com sucesso e vinculada à unidade."
+  );
+}
+
 export async function createSemesterAction(
   _previousState: SemesterManagementActionState,
   formData: FormData
@@ -3529,6 +3693,64 @@ export async function reactivateProfessorAction(formData: FormData) {
   }
 }
 
+export async function deactivateSecretaryAction(formData: FormData) {
+  const currentUser = await requireRole(["coordenador"]);
+  const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
+  const userId = readStringField(formData, "user_id");
+  const returnPath = readReturnPath(formData, "/gestao/alunos");
+
+  try {
+    await updateUserActivation({
+      userId,
+      nextActive: false,
+      expectedProfileCode: "secretaria",
+      currentUnitId: coordinatorUnitId
+    });
+    redirectWithManagementNotice(
+      returnPath,
+      "success",
+      "Secretária desativada com sucesso."
+    );
+  } catch (error) {
+    redirectWithManagementNotice(
+      returnPath,
+      "error",
+      error instanceof Error
+        ? error.message
+        : "Não foi possível desativar a secretária."
+    );
+  }
+}
+
+export async function reactivateSecretaryAction(formData: FormData) {
+  const currentUser = await requireRole(["coordenador"]);
+  const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
+  const userId = readStringField(formData, "user_id");
+  const returnPath = readReturnPath(formData, "/gestao/alunos");
+
+  try {
+    await updateUserActivation({
+      userId,
+      nextActive: true,
+      expectedProfileCode: "secretaria",
+      currentUnitId: coordinatorUnitId
+    });
+    redirectWithManagementNotice(
+      returnPath,
+      "success",
+      "Secretária reativada com sucesso."
+    );
+  } catch (error) {
+    redirectWithManagementNotice(
+      returnPath,
+      "error",
+      error instanceof Error
+        ? error.message
+        : "Não foi possível reativar a secretária."
+    );
+  }
+}
+
 export async function deleteStudentAction(formData: FormData) {
   const currentUser = await requireRole(["coordenador"]);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
@@ -3597,6 +3819,38 @@ export async function deleteProfessorAction(formData: FormData) {
   }
 
   redirectWithManagementNotice(targetPath, noticeType, noticeMessage);
+}
+
+export async function deleteSecretaryAction(formData: FormData) {
+  const currentUser = await requireRole(["coordenador"]);
+  const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
+  const userId = readStringField(formData, "user_id");
+  const returnPath = readReturnPath(formData, "/gestao/alunos");
+  let noticeType: "success" | "error" = "error";
+  let noticeMessage = "Não foi possível excluir o cadastro da secretária.";
+
+  try {
+    await loadUserProfileCode({
+      userId,
+      expectedProfileCode: "secretaria",
+      currentUnitId: coordinatorUnitId
+    });
+
+    const result = await deleteSecretarySafely(userId);
+
+    revalidateAcademicViews();
+
+    noticeType = result.deleted ? "success" : "error";
+    noticeMessage = result.message;
+  } catch (error) {
+    noticeType = "error";
+    noticeMessage =
+      error instanceof Error
+        ? error.message
+        : "Não foi possível excluir o cadastro da secretária.";
+  }
+
+  redirectWithManagementNotice(returnPath, noticeType, noticeMessage);
 }
 
 

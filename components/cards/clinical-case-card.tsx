@@ -11,12 +11,14 @@ interface ClinicalCaseCardProps {
   caseItem: ClinicalCaseSummary;
   maskPatientName?: boolean;
   blurSensitiveContactData?: boolean;
+  showClinicalActions?: boolean;
 }
 
 export function ClinicalCaseCard({
   caseItem,
   maskPatientName = false,
-  blurSensitiveContactData = false
+  blurSensitiveContactData = false,
+  showClinicalActions = true
 }: ClinicalCaseCardProps) {
   const patientDisplayName = maskPatientName
     ? formatMaskedFirstName(caseItem.patient.name)
@@ -62,9 +64,7 @@ export function ClinicalCaseCard({
           <p className="clinical-case-card-copy">
             Acompanhante:{" "}
             <span
-              className={
-                blurSensitiveContactData ? "clinical-sensitive-blur" : undefined
-              }
+              className={blurSensitiveContactData ? "clinical-sensitive-blur" : undefined}
             >
               {caseItem.patient.companion}
             </span>
@@ -74,9 +74,7 @@ export function ClinicalCaseCard({
           <p className="clinical-case-card-copy">
             Contato:{" "}
             <span
-              className={
-                blurSensitiveContactData ? "clinical-sensitive-blur" : undefined
-              }
+              className={blurSensitiveContactData ? "clinical-sensitive-blur" : undefined}
             >
               {caseItem.patient.contact}
             </span>
@@ -84,32 +82,34 @@ export function ClinicalCaseCard({
         ) : null}
       </div>
 
-      <div className="clinical-case-card-actions">
-        <Link
-          href={`/clinica-supervisionada/${caseItem.id}` as Route}
-          className="button button-small"
-        >
-          Abrir caso
-        </Link>
-        <Link
-          href={`/clinica-supervisionada/${caseItem.id}/avaliacao` as Route}
-          className="button button-secondary button-small"
-        >
-          Avaliação
-        </Link>
-        <Link
-          href={`/clinica-supervisionada/${caseItem.id}/plano-tratamento` as Route}
-          className="button button-secondary button-small"
-        >
-          Plano de tratamento
-        </Link>
-        <Link
-          href={`/clinica-supervisionada/${caseItem.id}/evolucao` as Route}
-          className="button button-secondary button-small"
-        >
-          Evolução
-        </Link>
-      </div>
+      {showClinicalActions ? (
+        <div className="clinical-case-card-actions">
+          <Link
+            href={`/clinica-supervisionada/${caseItem.id}` as Route}
+            className="button button-small"
+          >
+            Abrir caso
+          </Link>
+          <Link
+            href={`/clinica-supervisionada/${caseItem.id}/avaliacao` as Route}
+            className="button button-secondary button-small"
+          >
+            Avaliação
+          </Link>
+          <Link
+            href={`/clinica-supervisionada/${caseItem.id}/plano-tratamento` as Route}
+            className="button button-secondary button-small"
+          >
+            Plano de tratamento
+          </Link>
+          <Link
+            href={`/clinica-supervisionada/${caseItem.id}/evolucao` as Route}
+            className="button button-secondary button-small"
+          >
+            Evolução
+          </Link>
+        </div>
+      ) : null}
     </article>
   );
 }

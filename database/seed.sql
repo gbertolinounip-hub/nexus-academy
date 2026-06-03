@@ -2,6 +2,7 @@ insert into public.perfis (codigo, nome, descricao)
 values
   ('aluno', 'Aluno', 'Visualiza apenas os proprios dados academicos.'),
   ('professor', 'Professor', 'Lanca avaliacoes e ausencias dos alunos vinculados.'),
+  ('secretaria', 'Secretaria', 'Apoia a rotina administrativa da Clinica Supervisionada no escopo da unidade.'),
   ('coordenador', 'Coordenador', 'Visualiza todos os dados, audita lancamentos e gerencia a estrutura.'),
   ('coordenador_master', 'Coordenador master', 'Mantem a governanca institucional e a estrutura multiunidade da plataforma.')
 on conflict (codigo) do update

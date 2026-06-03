@@ -8,9 +8,13 @@ import type { ClinicalCaseSummary } from "@/types/domain";
 
 interface ClinicalCaseTableProps {
   cases: ClinicalCaseSummary[];
+  showCaseAction?: boolean;
 }
 
-export function ClinicalCaseTable({ cases }: ClinicalCaseTableProps) {
+export function ClinicalCaseTable({
+  cases,
+  showCaseAction = true
+}: ClinicalCaseTableProps) {
   return (
     <div className="table-wrap clinical-case-table-wrap">
       <table className="table clinical-case-table">
@@ -74,12 +78,18 @@ export function ClinicalCaseTable({ cases }: ClinicalCaseTableProps) {
                 </span>
               </td>
               <td className="clinical-case-table-actions-cell">
-                <Link
-                  href={`/clinica-supervisionada/${caseItem.id}` as Route}
-                  className="button button-secondary button-small"
-                >
-                  Abrir caso
-                </Link>
+                {showCaseAction ? (
+                  <Link
+                    href={`/clinica-supervisionada/${caseItem.id}` as Route}
+                    className="button button-secondary button-small"
+                  >
+                    Abrir caso
+                  </Link>
+                ) : (
+                  <span className="table-helper">
+                    Visualização clínica restrita
+                  </span>
+                )}
               </td>
             </tr>
           ))}

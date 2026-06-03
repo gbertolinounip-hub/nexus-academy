@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Route } from "next";
 import { formatClinicalWeekday, formatMaskedFirstName } from "@/lib/utils/format";
@@ -10,6 +10,7 @@ interface ClinicalScheduleBoardProps {
   cases: ClinicalCaseSummary[];
   enableProfessorFilters?: boolean;
   maskPatientNames?: boolean;
+  allowCaseLink?: boolean;
 }
 
 const clinicalWeekdays: ClinicalWeekday[] = [
@@ -36,24 +37,45 @@ function sortTimeSlots(timeSlots: string[]) {
 export function ClinicalScheduleBoard({
   cases,
   enableProfessorFilters = false,
-  maskPatientNames = false
+  maskPatientNames = false,
+  allowCaseLink = true
 }: ClinicalScheduleBoardProps) {
+  const [selectedAreaId, setSelectedAreaId] = useState("todas");
   const [selectedStudentId, setSelectedStudentId] = useState("todos");
   const [selectedWeekday, setSelectedWeekday] = useState<"todos" | ClinicalWeekday>(
     "todos"
   );
   const schedulableCases = cases.filter(isSchedulableClinicalCase);
 
+  const areaOptions = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          schedulableCases
+            .filter((caseItem) => caseItem.areaId)
+            .map((caseItem) => [
+              caseItem.areaId as string,
+              { id: caseItem.areaId as string, name: caseItem.areaName }
+            ])
+        ).values()
+      ).sort((left, right) => left.name.localeCompare(right.name, "pt-BR")),
+    [schedulableCases]
+  );
+
+  const areaFilteredCases = schedulableCases.filter((caseItem) =>
+    selectedAreaId === "todas" ? true : caseItem.areaId === selectedAreaId
+  );
+
   const studentOptions = Array.from(
     new Map(
-      schedulableCases.map((caseItem) => [
+      areaFilteredCases.map((caseItem) => [
         caseItem.studentId,
         { id: caseItem.studentId, name: caseItem.studentName }
       ])
     ).values()
   ).sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
 
-  const filteredCases = schedulableCases.filter((caseItem) => {
+  const filteredCases = areaFilteredCases.filter((caseItem) => {
     const matchesStudent =
       selectedStudentId === "todos" || caseItem.studentId === selectedStudentId;
     const matchesWeekday =
@@ -104,7 +126,30 @@ export function ClinicalScheduleBoard({
   }
 
   const hasActiveFilters =
-    selectedStudentId !== "todos" || selectedWeekday !== "todos";
+    selectedAreaId !== "todas" ||
+    selectedStudentId !== "todos" ||
+    selectedWeekday !== "todos";
+
+  function resetFilters() {
+    setSelectedAreaId("todas");
+    setSelectedStudentId("todos");
+    setSelectedWeekday("todos");
+  }
+
+  function handleAreaChange(nextAreaId: string) {
+    setSelectedAreaId(nextAreaId);
+
+    if (
+      selectedStudentId !== "todos" &&
+      !schedulableCases.some(
+        (caseItem) =>
+          caseItem.studentId === selectedStudentId &&
+          (nextAreaId === "todas" ? true : caseItem.areaId === nextAreaId)
+      )
+    ) {
+      setSelectedStudentId("todos");
+    }
+  }
 
   if (!timeSlots.length) {
     return (
@@ -116,7 +161,23 @@ export function ClinicalScheduleBoard({
             aria-label="Filtros da agenda"
           >
             <label className="field">
-              <span>Aluno</span>
+              <span>Área de estágio</span>
+              <select
+                className="input"
+                value={selectedAreaId}
+                onChange={(event) => handleAreaChange(event.target.value)}
+              >
+                <option value="todas">Todas</option>
+                {areaOptions.map((areaOption) => (
+                  <option key={areaOption.id} value={areaOption.id}>
+                    {areaOption.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Estagiário</span>
               <select
                 className="input"
                 value={selectedStudentId}
@@ -153,10 +214,7 @@ export function ClinicalScheduleBoard({
               <button
                 type="button"
                 className="button button-secondary button-small"
-                onClick={() => {
-                  setSelectedStudentId("todos");
-                  setSelectedWeekday("todos");
-                }}
+                onClick={resetFilters}
                 disabled={!hasActiveFilters}
               >
                 Limpar filtros
@@ -183,7 +241,23 @@ export function ClinicalScheduleBoard({
           aria-label="Filtros da agenda"
         >
           <label className="field">
-            <span>Aluno</span>
+            <span>Área de estágio</span>
+            <select
+              className="input"
+              value={selectedAreaId}
+              onChange={(event) => handleAreaChange(event.target.value)}
+            >
+              <option value="todas">Todas</option>
+              {areaOptions.map((areaOption) => (
+                <option key={areaOption.id} value={areaOption.id}>
+                  {areaOption.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Estagiário</span>
             <select
               className="input"
               value={selectedStudentId}
@@ -220,10 +294,7 @@ export function ClinicalScheduleBoard({
             <button
               type="button"
               className="button button-secondary button-small"
-              onClick={() => {
-                setSelectedStudentId("todos");
-                setSelectedWeekday("todos");
-              }}
+              onClick={resetFilters}
               disabled={!hasActiveFilters}
             >
               Limpar filtros
@@ -262,12 +333,14 @@ export function ClinicalScheduleBoard({
                               className="clinical-schedule-board-entry"
                             >
                               <strong>{appointment.patientName}</strong>
-                              <Link
-                                href={`/clinica-supervisionada/${appointment.caseId}` as Route}
-                                className="button button-secondary button-small clinical-schedule-board-link"
-                              >
-                                Abrir caso
-                              </Link>
+                              {allowCaseLink ? (
+                                <Link
+                                  href={`/clinica-supervisionada/${appointment.caseId}` as Route}
+                                  className="button button-secondary button-small clinical-schedule-board-link"
+                                >
+                                  Abrir caso
+                                </Link>
+                              ) : null}
                             </div>
                           ))}
                         </div>

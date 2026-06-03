@@ -79,6 +79,13 @@ export interface ManagementProfessorListItem {
   areas: string[];
 }
 
+export interface ManagementSecretaryListItem {
+  id: string;
+  name: string;
+  email: string;
+  isActive: boolean;
+}
+
 export interface ManagementPageData {
   coordinator: {
     id: string;
@@ -90,6 +97,7 @@ export interface ManagementPageData {
   professorOptions: ManagementProfessorOption[];
   students: ManagementStudentListItem[];
   professors: ManagementProfessorListItem[];
+  secretaries: ManagementSecretaryListItem[];
 }
 
 export interface ManagementStudentSemesterAssignmentRecord {
@@ -204,7 +212,10 @@ export async function getCoordinatorManagementPageData(
       .select("*")
       .eq("ativa", true)
       .order("ordem", { ascending: true }),
-    supabase.from("perfis").select("*").in("codigo", ["aluno", "professor"]),
+    supabase
+      .from("perfis")
+      .select("*")
+      .in("codigo", ["aluno", "professor", "secretaria"]),
     supabase.from("usuarios").select("*").eq("unidade_id", currentUnitId)
   ]);
 
@@ -237,6 +248,9 @@ export async function getCoordinatorManagementPageData(
   const profileMap = new Map(profileRows.map((profile) => [profile.codigo, profile.id]));
   const professorUsers = unitUsers.filter(
     (user) => user.perfil_id === profileMap.get("professor")
+  );
+  const secretaryUsers = unitUsers.filter(
+    (user) => user.perfil_id === profileMap.get("secretaria")
   );
   const studentUsers = unitUsers.filter(
     (user) => user.perfil_id === profileMap.get("aluno")
@@ -469,6 +483,15 @@ export async function getCoordinatorManagementPageData(
     .filter(Boolean)
     .sort((left, right) => left!.name.localeCompare(right!.name, "pt-BR")) as ManagementProfessorListItem[];
 
+  const secretaries = secretaryUsers
+    .map((user) => ({
+      id: user.id,
+      name: user.nome_completo,
+      email: user.email,
+      isActive: user.ativo
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+
   return {
     pageData: {
       coordinator: {
@@ -488,7 +511,8 @@ export async function getCoordinatorManagementPageData(
       areaBlocks,
       professorOptions,
       students,
-      professors
+      professors,
+      secretaries
     },
     emptyState: null
   };

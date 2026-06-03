@@ -57,21 +57,36 @@ export interface Database {
       perfis: {
         Row: {
           id: number;
-          codigo: "aluno" | "professor" | "coordenador" | "coordenador_master";
+          codigo:
+            | "aluno"
+            | "professor"
+            | "secretaria"
+            | "coordenador"
+            | "coordenador_master";
           nome: string;
           descricao: string | null;
           created_at: string;
         };
         Insert: {
           id?: number;
-          codigo: "aluno" | "professor" | "coordenador" | "coordenador_master";
+          codigo:
+            | "aluno"
+            | "professor"
+            | "secretaria"
+            | "coordenador"
+            | "coordenador_master";
           nome: string;
           descricao?: string | null;
           created_at?: string;
         };
         Update: {
           id?: number;
-          codigo?: "aluno" | "professor" | "coordenador" | "coordenador_master";
+          codigo?:
+            | "aluno"
+            | "professor"
+            | "secretaria"
+            | "coordenador"
+            | "coordenador_master";
           nome?: string;
           descricao?: string | null;
           created_at?: string;
@@ -1096,6 +1111,7 @@ export interface Database {
           perfil:
             | "aluno"
             | "professor"
+            | "secretaria"
             | "coordenador"
             | "coordenador_master"
             | null;
@@ -1111,6 +1127,7 @@ export interface Database {
           perfil?:
             | "aluno"
             | "professor"
+            | "secretaria"
             | "coordenador"
             | "coordenador_master"
             | null;
@@ -1126,6 +1143,7 @@ export interface Database {
           perfil?:
             | "aluno"
             | "professor"
+            | "secretaria"
             | "coordenador"
             | "coordenador_master"
             | null;

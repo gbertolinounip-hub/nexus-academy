@@ -52,7 +52,7 @@ interface ClinicalOperatorContext {
     id: string;
     name: string;
     email: string;
-    role: Extract<SessionUser["role"], "professor" | "coordenador">;
+    role: Extract<SessionUser["role"], "professor" | "coordenador" | "secretaria">;
   };
   studentOptions: ClinicalStudentOption[];
   studentOptionMap: Map<string, ClinicalStudentOption>;
@@ -114,9 +114,23 @@ export interface ClinicalSupervisionStudentPageData {
   emptyHint: string | null;
 }
 
+export interface ClinicalSupervisionSecretaryPageData {
+  view: "secretaria";
+  operator: ClinicalOperatorContext["operator"];
+  studentOptions: ClinicalStudentOption[];
+  cases: ClinicalCaseSummary[];
+  metrics: {
+    totalCases: number;
+    activeCases: number;
+    linkedStudents: number;
+  };
+  emptyHint: string | null;
+}
+
 export type ClinicalSupervisionPageData =
   | ClinicalSupervisionProfessorPageData
-  | ClinicalSupervisionStudentPageData;
+  | ClinicalSupervisionStudentPageData
+  | ClinicalSupervisionSecretaryPageData;
 
 export interface ClinicalSupervisionPageLoadResult {
   pageData: ClinicalSupervisionPageData | null;
@@ -232,7 +246,7 @@ export interface ClinicalEvolutionListLoadResult {
 }
 
 export interface ClinicalPatientBasePageData {
-  viewerRole: "professor" | "coordenador";
+  viewerRole: "professor" | "coordenador" | "secretaria";
   viewerName: string;
   patients: ClinicalInstitutionalPatientListItem[];
   filterOptions: {
@@ -1134,6 +1148,7 @@ async function loadProfessorClinicalContext(
         registration: studentRow.matricula,
         className: classGroup.nome,
         semesterCode: semester.codigo,
+        areaId: area?.id ?? classGroup.area_estagio_id,
         areaName,
         label: `${studentName} · ${studentRow.matricula} · ${areaName} · ${classGroup.nome} · ${semester.codigo}`
       } satisfies ClinicalStudentOption;
@@ -1175,7 +1190,7 @@ function buildClinicalOperatorContext(
       id: currentUser.id,
       name: currentUser.name,
       email: currentUser.email,
-      role: currentUser.role as "professor" | "coordenador"
+      role: currentUser.role as "professor" | "coordenador" | "secretaria"
     },
     studentOptions,
     studentOptionMap: new Map(
@@ -1228,7 +1243,8 @@ async function loadClinicalOperatorContext(
 
   if (
     currentUser.role !== "coordenador" &&
-    currentUser.role !== "coordenador_master"
+    currentUser.role !== "coordenador_master" &&
+    currentUser.role !== "secretaria"
   ) {
     return {
       context: null,
@@ -1249,7 +1265,10 @@ async function loadClinicalOperatorContext(
     };
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase =
+    currentUser.role === "secretaria"
+      ? createSupabaseAdminClient()
+      : await createSupabaseServerClient();
   const { data: linksData, error: linksError } = await supabase
     .from("vinculos_professor_aluno")
     .select("*")
@@ -1460,6 +1479,7 @@ async function loadClinicalOperatorContext(
         registration: studentRow.matricula,
         className: classGroup.nome,
         semesterCode: semester.codigo,
+        areaId: area?.id ?? classGroup.area_estagio_id,
         areaName,
         professorName,
         label: `${studentName} · ${studentRow.matricula} · ${areaName} · ${classGroup.nome} · ${semester.codigo} · Supervisor: ${professorName}`
@@ -1487,7 +1507,7 @@ async function loadClinicalReferenceBundle(
   currentUser?: SessionUser | null
 ): Promise<ClinicalReferenceBundle> {
   const supabase =
-    currentUser?.role === "coordenador_master"
+    currentUser?.role === "coordenador_master" || currentUser?.role === "secretaria"
       ? createSupabaseAdminClient()
       : await createSupabaseServerClient();
   const patientIds = uniqueStringValues(caseRows.map((caseRow) => caseRow.paciente_id));
@@ -2143,6 +2163,75 @@ export async function getClinicalSupervisionPageData(
     }
   }
 
+  if (currentUser.role === "secretaria") {
+    const { context, emptyState } = await loadClinicalOperatorContext(currentUser);
+
+    if (!context || emptyState) {
+      return {
+        pageData: null,
+        emptyState
+      };
+    }
+
+    if (!currentUser.unitId) {
+      return {
+        pageData: null,
+        emptyState: buildEmptyState(
+          "Unidade operacional não identificada",
+          "A secretária autenticada precisa estar vinculada a uma unidade para acessar a Clínica Supervisionada."
+        )
+      };
+    }
+
+    const adminClient = createSupabaseAdminClient();
+    const { data: caseRowsData, error: caseError } = await adminClient
+      .from("casos_clinicos")
+      .select("*")
+      .eq("unidade_id", currentUser.unitId)
+      .order("updated_at", { ascending: false });
+
+    if (caseError) {
+      return {
+        pageData: null,
+        emptyState: buildEmptyState(
+          "Não foi possível carregar os pacientes agendados",
+          "Houve um problema ao consultar os casos clínicos da unidade para a rotina administrativa."
+        )
+      };
+    }
+
+    const caseRows = (caseRowsData ?? []) as ClinicalCaseRow[];
+
+    try {
+      const bundle = await loadClinicalReferenceBundle(caseRows, currentUser);
+      const cases = mapClinicalCaseSummaries(caseRows, bundle);
+
+      return {
+        pageData: {
+          view: "secretaria",
+          operator: context.operator,
+          studentOptions: context.studentOptions,
+          cases,
+          metrics: {
+            totalCases: cases.length,
+            activeCases: cases.filter((caseItem) => caseItem.active).length,
+            linkedStudents: new Set(cases.map((caseItem) => caseItem.studentId)).size
+          },
+          emptyHint: context.emptyHint
+        },
+        emptyState: null
+      };
+    } catch {
+      return {
+        pageData: null,
+        emptyState: buildEmptyState(
+          "Não foi possível consolidar a rotina administrativa da clínica",
+          "Os casos clínicos da unidade foram encontrados, mas os dados de aluno, área, paciente ou agenda não puderam ser consolidados."
+        )
+      };
+    }
+  }
+
   return {
     pageData: null,
     emptyState: buildEmptyState(
@@ -2248,6 +2337,7 @@ export async function getProfessorClinicalCaseFormPageData(
         registration: currentCase.registration,
         className: currentCase.className,
         semesterCode: currentCase.semesterCode,
+        areaId: currentCase.areaId,
         areaName: currentCase.areaName,
         label: `${currentCase.studentName} · ${currentCase.registration} · ${currentCase.areaName} · ${currentCase.className} · ${currentCase.semesterCode}`
       });
@@ -2316,15 +2406,23 @@ export async function getClinicalCaseFormPageData(
     };
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase =
+    currentUser.role === "secretaria"
+      ? createSupabaseAdminClient()
+      : await createSupabaseServerClient();
   let initialValues = createEmptyClinicalCaseInitialValues();
 
   if (options?.patientId) {
-    const { data: patientData, error: patientError } = await supabase
+    let patientQuery = supabase
       .from("pacientes_clinica")
       .select("*")
-      .eq("id", options.patientId)
-      .maybeSingle();
+      .eq("id", options.patientId);
+
+    if (currentUser.unitId) {
+      patientQuery = patientQuery.eq("unidade_id", currentUser.unitId);
+    }
+
+    const { data: patientData, error: patientError } = await patientQuery.maybeSingle();
 
     if (patientError || !patientData) {
       return {
@@ -2447,7 +2545,7 @@ function buildClinicalInstitutionalPatientListItem(input: {
 
 async function loadClinicalInstitutionalCaseSummaries(currentUser: SessionUser) {
   const supabase =
-    currentUser.role === "coordenador_master"
+    currentUser.role === "coordenador_master" || currentUser.role === "secretaria"
       ? createSupabaseAdminClient()
       : await createSupabaseServerClient();
   const casesQuery = supabase
@@ -2457,11 +2555,12 @@ async function loadClinicalInstitutionalCaseSummaries(currentUser: SessionUser) 
   const scopedQuery =
     currentUser.role === "professor"
       ? casesQuery.eq("professor_id", currentUser.id)
-      : currentUser.role === "coordenador" && currentUser.unitId
+      : (currentUser.role === "coordenador" || currentUser.role === "secretaria") &&
+          currentUser.unitId
         ? casesQuery.eq("unidade_id", currentUser.unitId)
         : currentUser.role === "coordenador_master"
           ? casesQuery
-        : casesQuery.eq("id", "__no_case__");
+          : casesQuery.eq("id", "__no_case__");
   const { data: caseRowsData, error: caseError } = await scopedQuery;
 
   if (caseError) {
@@ -2499,10 +2598,17 @@ async function loadInstitutionalPatientRows(input: {
   currentUser: SessionUser;
   patientIds?: string[];
 }) {
-  const supabase = await createSupabaseServerClient();
+  const supabase =
+    input.currentUser.role === "secretaria"
+      ? createSupabaseAdminClient()
+      : await createSupabaseServerClient();
   let query = supabase.from("pacientes_clinica").select("*");
 
-  if (input.currentUser.role === "coordenador" && input.currentUser.unitId) {
+  if (
+    (input.currentUser.role === "coordenador" ||
+      input.currentUser.role === "secretaria") &&
+    input.currentUser.unitId
+  ) {
     query = query.eq("unidade_id", input.currentUser.unitId);
   } else if (input.patientIds?.length) {
     query = query.in("id", input.patientIds);
@@ -2528,7 +2634,11 @@ export async function getClinicalPatientBasePageData(
     areaId?: string | null;
   }
 ): Promise<ClinicalPatientBaseLoadResult> {
-  if (currentUser.role !== "professor" && currentUser.role !== "coordenador") {
+  if (
+    currentUser.role !== "professor" &&
+    currentUser.role !== "coordenador" &&
+    currentUser.role !== "secretaria"
+  ) {
     return {
       pageData: null,
       emptyState: buildEmptyState(

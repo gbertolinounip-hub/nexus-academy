@@ -20,10 +20,11 @@ export interface SecondaryNavigationItem {
 export const navigationItems: NavigationItem[] = [
   { href: "/aluno" as Route, label: "Aluno", allowedRoles: ["aluno"] },
   { href: "/professor" as Route, label: "Professor", allowedRoles: ["professor"] },
+  { href: "/secretaria" as Route, label: "Secretaria", allowedRoles: ["secretaria"] },
   {
     href: "/clinica-supervisionada" as Route,
     label: "Clínica Supervisionada",
-    allowedRoles: ["aluno", "professor"]
+    allowedRoles: ["aluno", "professor", "secretaria"]
   },
   {
     href: "/documentos" as Route,
@@ -38,7 +39,7 @@ export const navigationItems: NavigationItem[] = [
   {
     href: "/pacientes" as Route,
     label: "Pacientes",
-    allowedRoles: ["professor", "coordenador"]
+    allowedRoles: ["professor", "secretaria", "coordenador"]
   },
   {
     href: "/master" as Route,
