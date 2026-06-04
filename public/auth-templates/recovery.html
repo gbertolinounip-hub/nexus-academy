@@ -9,9 +9,9 @@
     style="
       margin: 0;
       padding: 0;
-      background: #f4f7fb;
+      background: #f3f6fb;
       font-family: Arial, Helvetica, sans-serif;
-      color: #16324f;
+      color: #17324d;
     "
   >
     <table
@@ -19,7 +19,7 @@
       width="100%"
       cellspacing="0"
       cellpadding="0"
-      style="background: #f4f7fb; padding: 32px 16px"
+      style="background: #f3f6fb; padding: 32px 16px"
     >
       <tr>
         <td align="center">
@@ -31,80 +31,130 @@
             style="
               max-width: 640px;
               background: #ffffff;
-              border-radius: 18px;
+              border: 1px solid #d8e3ef;
+              border-radius: 20px;
               overflow: hidden;
-              border: 1px solid #d9e4f0;
             "
           >
             <tr>
               <td
+                align="center"
                 style="
-                  background: linear-gradient(135deg, #16324f 0%, #295f98 100%);
-                  padding: 28px 32px;
-                  color: #ffffff;
+                  padding: 32px 32px 20px;
+                  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
                 "
               >
+                <img
+                  src="https://app.nexusacad.com.br/icon.png"
+                  alt="Nexus Academy"
+                  width="72"
+                  height="72"
+                  style="
+                    display: block;
+                    width: 72px;
+                    height: 72px;
+                    margin: 0 auto 16px;
+                    border: 0;
+                  "
+                />
                 <p
                   style="
-                    margin: 0 0 8px;
-                    font-size: 12px;
-                    letter-spacing: 0.12em;
-                    text-transform: uppercase;
-                    opacity: 0.88;
+                    margin: 0;
+                    font-size: 28px;
+                    line-height: 1.2;
+                    font-weight: 700;
+                    color: #16324f;
                   "
                 >
                   Nexus Academy
                 </p>
-                <h1 style="margin: 0; font-size: 28px; line-height: 1.2">
-                  Redefinição de senha
-                </h1>
+                <p
+                  style="
+                    margin: 8px 0 0;
+                    font-size: 14px;
+                    line-height: 1.5;
+                    color: #55708d;
+                  "
+                >
+                  Desempenho e gestão de estágios
+                </p>
               </td>
             </tr>
+
             <tr>
-              <td style="padding: 32px">
-                <p style="margin: 0 0 16px; font-size: 16px; line-height: 1.65">
+              <td style="padding: 8px 32px 32px">
+                <h1
+                  style="
+                    margin: 0 0 20px;
+                    font-size: 28px;
+                    line-height: 1.2;
+                    color: #16324f;
+                  "
+                >
+                  Redefinição de senha
+                </h1>
+
+                <p style="margin: 0 0 16px; font-size: 16px; line-height: 1.7">
+                  Olá,
+                </p>
+
+                <p style="margin: 0 0 16px; font-size: 16px; line-height: 1.7">
                   Recebemos uma solicitação para redefinir a senha da sua conta no
-                  <strong>Nexus Academy</strong>.
+                  Nexus Academy.
                 </p>
-                <p style="margin: 0 0 24px; font-size: 16px; line-height: 1.65">
-                  Para continuar com segurança, clique no botão abaixo e defina uma
-                  nova senha.
+
+                <p style="margin: 0 0 24px; font-size: 16px; line-height: 1.7">
+                  Para cadastrar uma nova senha, clique no botão abaixo:
                 </p>
+
                 <p style="margin: 0 0 28px" align="center">
                   <a
                     href="{{ .ConfirmationURL }}"
                     style="
                       display: inline-block;
-                      padding: 14px 24px;
+                      padding: 14px 28px;
                       border-radius: 999px;
                       background: #0f62fe;
                       color: #ffffff;
                       text-decoration: none;
-                      font-weight: 700;
                       font-size: 15px;
+                      font-weight: 700;
                     "
                   >
-                    Redefinir minha senha
+                    Redefinir senha
                   </a>
                 </p>
-                <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.65">
-                  Se o botão não abrir, use este link no navegador:
+
+                <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.7">
+                  Se o botão acima não funcionar, copie e cole este link no seu navegador:
                 </p>
+
                 <p
                   style="
                     margin: 0 0 24px;
                     font-size: 14px;
-                    line-height: 1.65;
+                    line-height: 1.7;
                     word-break: break-word;
                   "
                 >
-                  <a href="{{ .ConfirmationURL }}" style="color: #0f62fe">
+                  <a
+                    href="{{ .ConfirmationURL }}"
+                    style="color: #0f62fe; text-decoration: underline"
+                  >
                     {{ .ConfirmationURL }}
                   </a>
                 </p>
-                <p style="margin: 0; font-size: 14px; line-height: 1.65; color: #4f647c">
-                  Se você não solicitou essa redefinição, pode ignorar este e-mail com
-                  segurança.
+
+                <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.7; color: #51667f">
+                  Se você não solicitou essa alteração, ignore este e-mail.
+                </p>
+
+                <p style="margin: 24px 0 0; font-size: 14px; line-height: 1.7; color: #51667f">
+                  Atenciosamente,
+                  <br />
+                  Equipe Nexus Academy
+                  <br />
+                  contato@nexusacad.com.br
                 </p>
               </td>
             </tr>
