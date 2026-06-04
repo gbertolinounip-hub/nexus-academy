@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import {
+  getPublicAppUrl,
   getSupabasePublishableKey,
   getSupabaseUrl
 } from "@/lib/supabase/config";
@@ -13,8 +14,30 @@ function resolveRedirectPath(nextPath: string | null) {
   return nextPath;
 }
 
+function resolveRequestOrigin(request: NextRequest) {
+  const forwardedProto = request.headers.get("x-forwarded-proto");
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  const forwardedPort = request.headers.get("x-forwarded-port");
+  const host = forwardedHost ?? request.headers.get("host") ?? request.nextUrl.host;
+  const protocol = forwardedProto ?? request.nextUrl.protocol.replace(":", "");
+
+  if (!host) {
+    return request.nextUrl.origin;
+  }
+
+  if (forwardedPort && !host.includes(":")) {
+    return `${protocol}://${host}:${forwardedPort}`;
+  }
+
+  return `${protocol}://${host}`;
+}
+
+function resolvePublicOrigin(request: NextRequest) {
+  return getPublicAppUrl() ?? resolveRequestOrigin(request);
+}
+
 function buildRedirectResponse(request: NextRequest, path: string) {
-  return NextResponse.redirect(new URL(path, request.url));
+  return NextResponse.redirect(new URL(path, resolvePublicOrigin(request)));
 }
 
 export async function GET(request: NextRequest) {

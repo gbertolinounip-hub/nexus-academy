@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition, type FormEvent } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { getPublicAppUrl } from "@/lib/supabase/config";
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
@@ -18,7 +19,8 @@ export function ForgotPasswordForm() {
     startTransition(async () => {
       try {
         const supabase = createSupabaseBrowserClient();
-        const redirectUrl = new URL("/auth/callback", window.location.origin);
+        const publicAppUrl = getPublicAppUrl() ?? window.location.origin;
+        const redirectUrl = new URL("/auth/callback", publicAppUrl);
         redirectUrl.searchParams.set("next", "/redefinir-senha?flow=recovery");
 
         const { error } = await supabase.auth.resetPasswordForEmail(email, {

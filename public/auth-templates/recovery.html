@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Redefinição de senha | Nexus Academy</title>
+  </head>
+  <body
+    style="
+      margin: 0;
+      padding: 0;
+      background: #f4f7fb;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #16324f;
+    "
+  >
+    <table
+      role="presentation"
+      width="100%"
+      cellspacing="0"
+      cellpadding="0"
+      style="background: #f4f7fb; padding: 32px 16px"
+    >
+      <tr>
+        <td align="center">
+          <table
+            role="presentation"
+            width="100%"
+            cellspacing="0"
+            cellpadding="0"
+            style="
+              max-width: 640px;
+              background: #ffffff;
+              border-radius: 18px;
+              overflow: hidden;
+              border: 1px solid #d9e4f0;
+            "
+          >
+            <tr>
+              <td
+                style="
+                  background: linear-gradient(135deg, #16324f 0%, #295f98 100%);
+                  padding: 28px 32px;
+                  color: #ffffff;
+                "
+              >
+                <p
+                  style="
+                    margin: 0 0 8px;
+                    font-size: 12px;
+                    letter-spacing: 0.12em;
+                    text-transform: uppercase;
+                    opacity: 0.88;
+                  "
+                >
+                  Nexus Academy
+                </p>
+                <h1 style="margin: 0; font-size: 28px; line-height: 1.2">
+                  Redefinição de senha
+                </h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 32px">
+                <p style="margin: 0 0 16px; font-size: 16px; line-height: 1.65">
+                  Recebemos uma solicitação para redefinir a senha da sua conta no
+                  <strong>Nexus Academy</strong>.
+                </p>
+                <p style="margin: 0 0 24px; font-size: 16px; line-height: 1.65">
+                  Para continuar com segurança, clique no botão abaixo e defina uma
+                  nova senha.
+                </p>
+                <p style="margin: 0 0 28px" align="center">
+                  <a
+                    href="{{ .ConfirmationURL }}"
+                    style="
+                      display: inline-block;
+                      padding: 14px 24px;
+                      border-radius: 999px;
+                      background: #0f62fe;
+                      color: #ffffff;
+                      text-decoration: none;
+                      font-weight: 700;
+                      font-size: 15px;
+                    "
+                  >
+                    Redefinir minha senha
+                  </a>
+                </p>
+                <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.65">
+                  Se o botão não abrir, use este link no navegador:
+                </p>
+                <p
+                  style="
+                    margin: 0 0 24px;
+                    font-size: 14px;
+                    line-height: 1.65;
+                    word-break: break-word;
+                  "
+                >
+                  <a href="{{ .ConfirmationURL }}" style="color: #0f62fe">
+                    {{ .ConfirmationURL }}
+                  </a>
+                </p>
+                <p style="margin: 0; font-size: 14px; line-height: 1.65; color: #4f647c">
+                  Se você não solicitou essa redefinição, pode ignorar este e-mail com
+                  segurança.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
