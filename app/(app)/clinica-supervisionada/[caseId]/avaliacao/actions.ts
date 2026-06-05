@@ -4,6 +4,10 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  attachExceptionalReleaseToAuditRecords,
+  resolveExceptionalReleaseGate
+} from "@/services/exceptional-releases";
 import type { Database } from "@/types/database";
 import type {
   ClinicalEvaluationActionState,
@@ -17,6 +21,18 @@ type ClinicalRecordInsert =
   Database["public"]["Tables"]["registros_clinicos"]["Insert"];
 type ClinicalRecordUpdate =
   Database["public"]["Tables"]["registros_clinicos"]["Update"];
+type ClinicalCaseScopeRow = Pick<
+  Database["public"]["Tables"]["casos_clinicos"]["Row"],
+  "id" | "unidade_id" | "semestre_id" | "turma_id" | "matricula_turma_id"
+>;
+type EnrollmentRow = Pick<
+  Database["public"]["Tables"]["matriculas_turma"]["Row"],
+  "id" | "aluno_id"
+>;
+type SemesterRow = Pick<
+  Database["public"]["Tables"]["semestres"]["Row"],
+  "id" | "status"
+>;
 
 const clinicalEvaluationSchema = z.object({
   record_id: z.string().trim(),
@@ -231,6 +247,60 @@ function revalidateClinicalEvaluationPaths(caseId: string) {
   revalidatePath("/professor");
 }
 
+function appendExceptionalReleaseNotice(message: string, noticeMessage?: string | null) {
+  return noticeMessage ? `${message} ${noticeMessage}` : message;
+}
+
+async function loadClinicalCaseExceptionalScope(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  caseId: string
+) {
+  const { data: caseData, error: caseError } = await supabase
+    .from("casos_clinicos")
+    .select("id, unidade_id, semestre_id, turma_id, matricula_turma_id")
+    .eq("id", caseId)
+    .maybeSingle();
+
+  const caseRow = (caseData ?? null) as ClinicalCaseScopeRow | null;
+
+  if (caseError || !caseRow) {
+    throw new Error(
+      "Nao foi possivel localizar o caso clinico vinculado a esta avaliacao."
+    );
+  }
+
+  const [{ data: enrollmentData, error: enrollmentError }, { data: semesterData, error: semesterError }] =
+    await Promise.all([
+      supabase
+        .from("matriculas_turma")
+        .select("id, aluno_id")
+        .eq("id", caseRow.matricula_turma_id)
+        .maybeSingle(),
+      supabase
+        .from("semestres")
+        .select("id, status")
+        .eq("id", caseRow.semestre_id)
+        .maybeSingle()
+    ]);
+
+  const enrollment = (enrollmentData ?? null) as EnrollmentRow | null;
+  const semester = (semesterData ?? null) as SemesterRow | null;
+
+  if (enrollmentError || !enrollment || semesterError || !semester) {
+    throw new Error(
+      "Nao foi possivel consolidar o contexto academico do caso clinico."
+    );
+  }
+
+  return {
+    caseRow,
+    semesterId: semester.id,
+    semesterStatus: semester.status,
+    classId: caseRow.turma_id,
+    studentId: enrollment.aluno_id
+  };
+}
+
 export async function saveClinicalEvaluationAction(
   _previousState: ClinicalEvaluationActionState,
   formData: FormData
@@ -258,6 +328,48 @@ export async function saveClinicalEvaluationAction(
   }
 
   const supabase = await createSupabaseServerClient();
+  let clinicalScope;
+
+  try {
+    clinicalScope = await loadClinicalCaseExceptionalScope(
+      supabase,
+      parsedData.data.case_id
+    );
+  } catch (error) {
+    return buildEvaluationErrorState(
+      error instanceof Error
+        ? error.message
+        : "Nao foi possivel localizar o caso clinico desta avaliacao.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const exceptionalReleaseGate = await resolveExceptionalReleaseGate(
+    {
+      type: "clinica_supervisionada",
+      semesterId: clinicalScope.semesterId,
+      classId: clinicalScope.classId,
+      studentId: clinicalScope.studentId,
+      unitId: clinicalScope.caseRow.unidade_id ?? currentUser.unitId ?? null,
+      authorizedUserId: currentUser.id
+    },
+    {
+      currentUser,
+      semesterStatus: clinicalScope.semesterStatus,
+      blockedMessage:
+        "O semestre deste caso clinico ja esta encerrado. Esta edicao so pode ser realizada com liberacao excepcional ativa."
+    }
+  );
+
+  if (!exceptionalReleaseGate.allowed) {
+    return buildEvaluationErrorState(
+      exceptionalReleaseGate.blockedMessage ??
+        "O semestre deste caso clinico ja esta encerrado e nao permite novos ajustes.",
+      {},
+      submittedFormValues
+    );
+  }
   const { data: caseRowData, error: caseError } = await supabase
     .from("casos_clinicos")
     .select("id, unidade_id")
@@ -340,14 +452,25 @@ export async function saveClinicalEvaluationAction(
       );
     }
 
+    if (exceptionalReleaseGate.release) {
+      await attachExceptionalReleaseToAuditRecords({
+        supabase,
+        releaseId: exceptionalReleaseGate.release.releaseId,
+        tableName: "registros_clinicos",
+        recordIds: [existingRecord.id]
+      });
+    }
+
     revalidateClinicalEvaluationPaths(parsedData.data.case_id);
 
     return {
       status: "success",
-      message:
+      message: appendExceptionalReleaseNotice(
         nextStatus === "enviado"
           ? "Avaliação enviada para supervisão com sucesso."
           : "Avaliação salva como rascunho.",
+        exceptionalReleaseGate.noticeMessage
+      ),
       fieldErrors: {},
       savedRecordId: existingRecord.id,
       savedStatus: nextStatus,
@@ -379,14 +502,25 @@ export async function saveClinicalEvaluationAction(
     );
   }
 
+  if (exceptionalReleaseGate.release) {
+    await attachExceptionalReleaseToAuditRecords({
+      supabase,
+      releaseId: exceptionalReleaseGate.release.releaseId,
+      tableName: "registros_clinicos",
+      recordIds: [createdRecordId]
+    });
+  }
+
   revalidateClinicalEvaluationPaths(parsedData.data.case_id);
 
   return {
     status: "success",
-    message:
+    message: appendExceptionalReleaseNotice(
       nextStatus === "enviado"
         ? "Avaliação enviada para supervisão com sucesso."
         : "Avaliação salva como rascunho.",
+      exceptionalReleaseGate.noticeMessage
+    ),
     fieldErrors: {},
     savedRecordId: createdRecordId,
     savedStatus: nextStatus,
@@ -425,6 +559,49 @@ export async function reviewClinicalEvaluationAction(
 
   const currentUser = await requireRole(["professor"]);
   const supabase = await createSupabaseServerClient();
+  let clinicalScope;
+
+  try {
+    clinicalScope = await loadClinicalCaseExceptionalScope(
+      supabase,
+      parsedData.data.case_id
+    );
+  } catch (error) {
+    return buildReviewErrorState(
+      error instanceof Error
+        ? error.message
+        : "Nao foi possivel localizar o caso clinico desta supervisao.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const exceptionalReleaseGate = await resolveExceptionalReleaseGate(
+    {
+      type: "clinica_supervisionada",
+      semesterId: clinicalScope.semesterId,
+      classId: clinicalScope.classId,
+      studentId: clinicalScope.studentId,
+      unitId: clinicalScope.caseRow.unidade_id ?? currentUser.unitId ?? null,
+      authorizedUserId: currentUser.id
+    },
+    {
+      currentUser,
+      semesterStatus: clinicalScope.semesterStatus,
+      blockedMessage:
+        "O semestre deste caso clinico ja esta encerrado. Esta revisao so pode ser realizada com liberacao excepcional ativa."
+    }
+  );
+
+  if (!exceptionalReleaseGate.allowed) {
+    return buildReviewErrorState(
+      exceptionalReleaseGate.blockedMessage ??
+        "O semestre deste caso clinico ja esta encerrado e nao permite novos ajustes.",
+      {},
+      submittedFormValues
+    );
+  }
+
   const { data: recordRowData, error: recordError } = await supabase
     .from("registros_clinicos")
     .select("*")
@@ -461,11 +638,23 @@ export async function reviewClinicalEvaluationAction(
     );
   }
 
+  if (exceptionalReleaseGate.release) {
+    await attachExceptionalReleaseToAuditRecords({
+      supabase,
+      releaseId: exceptionalReleaseGate.release.releaseId,
+      tableName: "registros_clinicos",
+      recordIds: [parsedData.data.record_id]
+    });
+  }
+
   revalidateClinicalEvaluationPaths(parsedData.data.case_id);
 
   return {
     status: "success",
-    message: "Supervisão da avaliação atualizada com sucesso.",
+    message: appendExceptionalReleaseNotice(
+      "Supervisão da avaliação atualizada com sucesso.",
+      exceptionalReleaseGate.noticeMessage
+    ),
     fieldErrors: {},
     submittedAt: Date.now()
   };

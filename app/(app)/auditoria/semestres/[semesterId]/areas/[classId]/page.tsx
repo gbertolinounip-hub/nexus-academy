@@ -15,7 +15,10 @@ export default async function ClosedSemesterAreaAuditPage(props: {
   const { semesterId, classId } = await props.params;
   const [areaDetail, classReportResult] = await Promise.all([
     getAuthenticatedClosedSemesterAreaDetail(currentUser, semesterId, classId),
-    getAuthenticatedClassFinalReport(currentUser, classId)
+    getAuthenticatedClassFinalReport(currentUser, classId, {
+      semesterId,
+      includeHistoricalStudents: true
+    })
   ]);
   const report = classReportResult.report;
 
@@ -65,7 +68,7 @@ export default async function ClosedSemesterAreaAuditPage(props: {
             Imprimir relatório final
           </a>
           <a
-            href={`/relatorios/export/turmas/${areaDetail.area.classId}/excel`}
+            href={`/relatorios/export/turmas/${areaDetail.area.classId}/excel?semestre=${encodeURIComponent(areaDetail.semester.id)}`}
             className="button button-secondary"
           >
             Exportar Excel
@@ -165,7 +168,7 @@ export default async function ClosedSemesterAreaAuditPage(props: {
                     <td>{formatPercentage(student.finalPercentage)}</td>
                     <td>
                       <a
-                        href={`/relatorios/alunos/${student.studentId}?semestre=${encodeURIComponent(areaDetail.semester.id)}&matricula=${encodeURIComponent(student.enrollmentId)}&from=audit&turma=${encodeURIComponent(areaDetail.area.classId)}`}
+                        href={`/auditoria/semestres/${encodeURIComponent(areaDetail.semester.id)}/areas/${encodeURIComponent(areaDetail.area.classId)}/alunos/${encodeURIComponent(student.studentId)}?matricula=${encodeURIComponent(student.enrollmentId)}`}
                         className="button button-secondary button-small"
                       >
                         Ver aluno

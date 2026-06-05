@@ -861,6 +861,80 @@ create index if not exists idx_acessos_sistema_unidade_data
 create index if not exists idx_acessos_sistema_usuario_data
   on public.acessos_sistema (usuario_id, acessado_em desc);
 
+create table if not exists public.liberacoes_excepcionais (
+  id uuid primary key default gen_random_uuid(),
+  unidade_id uuid not null references public.unidades (id) on delete restrict,
+  semestre_id uuid not null references public.semestres (id) on delete restrict,
+  turma_id uuid references public.turmas (id) on delete restrict,
+  aluno_id uuid references public.alunos (usuario_id) on delete restrict,
+  usuario_autorizado_id uuid not null references public.usuarios (id) on delete restrict,
+  tipo text not null,
+  escopo text not null,
+  motivo text not null,
+  criado_por uuid not null references public.usuarios (id) on delete restrict,
+  inicio_em timestamptz not null default now(),
+  expira_em timestamptz not null,
+  ativo boolean not null default true,
+  encerrado_manualmente_em timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint liberacoes_excepcionais_tipo_check
+    check (tipo in ('avaliacao', 'ausencia', 'clinica_supervisionada')),
+  constraint liberacoes_excepcionais_escopo_check
+    check (escopo in ('semestre', 'turma', 'aluno')),
+  constraint liberacoes_excepcionais_motivo_check
+    check (nullif(trim(motivo), '') is not null),
+  constraint liberacoes_excepcionais_periodo_check
+    check (expira_em > inicio_em),
+  constraint liberacoes_excepcionais_encerramento_consistencia_check
+    check (
+      encerrado_manualmente_em is null
+      or (
+        encerrado_manualmente_em >= inicio_em
+        and ativo = false
+      )
+    ),
+  constraint liberacoes_excepcionais_escopo_consistencia_check
+    check (
+      (
+        escopo = 'semestre'
+        and turma_id is null
+        and aluno_id is null
+      )
+      or (
+        escopo = 'turma'
+        and turma_id is not null
+        and aluno_id is null
+      )
+      or (
+        escopo = 'aluno'
+        and aluno_id is not null
+      )
+    )
+);
+
+create index if not exists idx_liberacoes_excepcionais_lookup
+  on public.liberacoes_excepcionais (
+    usuario_autorizado_id,
+    tipo,
+    ativo,
+    unidade_id,
+    semestre_id,
+    inicio_em,
+    expira_em desc
+  );
+
+create index if not exists idx_liberacoes_excepcionais_unidade_created_at
+  on public.liberacoes_excepcionais (unidade_id, created_at desc);
+
+create index if not exists idx_liberacoes_excepcionais_turma
+  on public.liberacoes_excepcionais (turma_id, tipo, ativo, expira_em desc)
+  where turma_id is not null;
+
+create index if not exists idx_liberacoes_excepcionais_aluno
+  on public.liberacoes_excepcionais (aluno_id, tipo, ativo, expira_em desc)
+  where aluno_id is not null;
+
 create table if not exists public.historico_alteracoes (
   id bigserial primary key,
   tabela text not null,
@@ -870,6 +944,7 @@ create table if not exists public.historico_alteracoes (
   dados_depois jsonb,
   usuario_id uuid,
   unidade_id uuid references public.unidades (id) on delete restrict,
+  liberacao_excepcional_id uuid references public.liberacoes_excepcionais (id) on delete set null,
   created_at timestamptz not null default now(),
   constraint historico_alteracoes_acao_check
     check (acao in ('INSERT', 'UPDATE', 'DELETE'))
@@ -878,12 +953,315 @@ create table if not exists public.historico_alteracoes (
 alter table public.historico_alteracoes
   add column if not exists unidade_id uuid references public.unidades (id) on delete restrict;
 
+alter table public.historico_alteracoes
+  add column if not exists liberacao_excepcional_id uuid references public.liberacoes_excepcionais (id) on delete set null;
+
 create index if not exists idx_historico_alteracoes_tabela_registro
   on public.historico_alteracoes (tabela, registro_id);
 create index if not exists idx_historico_alteracoes_usuario_id
   on public.historico_alteracoes (usuario_id, created_at desc);
 create index if not exists idx_historico_alteracoes_unidade_id
   on public.historico_alteracoes (unidade_id, created_at desc);
+create index if not exists idx_historico_alteracoes_liberacao_excepcional_id
+  on public.historico_alteracoes (liberacao_excepcional_id, created_at desc);
+
+create or replace function private.current_exceptional_release_id()
+returns uuid
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  release_id_text text;
+begin
+  release_id_text := nullif(trim(current_setting('app.exceptional_release_id', true)), '');
+
+  if release_id_text is null then
+    return null;
+  end if;
+
+  begin
+    return release_id_text::uuid;
+  exception
+    when invalid_text_representation then
+      return null;
+  end;
+end;
+$$;
+
+create or replace function private.set_current_exceptional_release_id(
+  p_liberacao_excepcional_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform set_config(
+    'app.exceptional_release_id',
+    coalesce(p_liberacao_excepcional_id::text, ''),
+    true
+  );
+end;
+$$;
+
+create or replace function private.validate_exceptional_release_scope()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  semester_unit_id uuid;
+  turma_semester_id uuid;
+  student_unit_id uuid;
+  authorized_user_unit_id uuid;
+  creator_user_unit_id uuid;
+begin
+  select s.unidade_id
+  into semester_unit_id
+  from public.semestres s
+  where s.id = new.semestre_id
+  limit 1;
+
+  if semester_unit_id is null then
+    raise exception 'Semestre inválido para a liberação excepcional.';
+  end if;
+
+  if new.unidade_id is distinct from semester_unit_id then
+    raise exception 'A unidade da liberação excepcional deve coincidir com a unidade do semestre.';
+  end if;
+
+  if new.encerrado_manualmente_em is not null then
+    new.ativo := false;
+  end if;
+
+  if new.turma_id is not null then
+    select t.semestre_id
+    into turma_semester_id
+    from public.turmas t
+    where t.id = new.turma_id
+    limit 1;
+
+    if turma_semester_id is null then
+      raise exception 'Turma inválida para a liberação excepcional.';
+    end if;
+
+    if turma_semester_id is distinct from new.semestre_id then
+      raise exception 'A turma da liberação excepcional deve pertencer ao semestre informado.';
+    end if;
+  end if;
+
+  if new.aluno_id is not null then
+    select coalesce(a.unidade_id, u.unidade_id)
+    into student_unit_id
+    from public.alunos a
+    left join public.usuarios u on u.id = a.usuario_id
+    where a.usuario_id = new.aluno_id
+    limit 1;
+
+    if student_unit_id is null then
+      raise exception 'Aluno inválido para a liberação excepcional.';
+    end if;
+
+    if student_unit_id is distinct from new.unidade_id then
+      raise exception 'O aluno informado deve pertencer à mesma unidade da liberação excepcional.';
+    end if;
+
+    if not exists (
+      select 1
+      from public.matriculas_turma m
+      join public.turmas t on t.id = m.turma_id
+      where m.aluno_id = new.aluno_id
+        and t.semestre_id = new.semestre_id
+        and (new.turma_id is null or m.turma_id = new.turma_id)
+    ) then
+      raise exception 'O aluno informado não possui vínculo acadêmico compatível com o escopo da liberação excepcional.';
+    end if;
+  end if;
+
+  select u.unidade_id
+  into authorized_user_unit_id
+  from public.usuarios u
+  where u.id = new.usuario_autorizado_id
+  limit 1;
+
+  if authorized_user_unit_id is null then
+    raise exception 'Usuário autorizado inválido para a liberação excepcional.';
+  end if;
+
+  if authorized_user_unit_id is distinct from new.unidade_id then
+    raise exception 'O usuário autorizado deve pertencer à mesma unidade da liberação excepcional.';
+  end if;
+
+  select u.unidade_id
+  into creator_user_unit_id
+  from public.usuarios u
+  where u.id = new.criado_por
+  limit 1;
+
+  if creator_user_unit_id is distinct from new.unidade_id
+    and not exists (
+      select 1
+      from public.coordenadores_master cm
+      where cm.usuario_id = new.criado_por
+    ) then
+    raise exception 'O criador da liberação excepcional deve pertencer à unidade ou ser coordenador master.';
+  end if;
+
+  return new;
+end;
+$$;
+
+create or replace function public.obter_liberacao_excepcional_ativa(
+  p_tipo text,
+  p_semestre_id uuid,
+  p_turma_id uuid default null,
+  p_aluno_id uuid default null,
+  p_usuario_id uuid default null,
+  p_unidade_id uuid default null,
+  p_referencia_em timestamptz default now()
+)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with contexto as (
+    select
+      coalesce(p_usuario_id, auth.uid()) as usuario_id,
+      coalesce(p_unidade_id, s.unidade_id) as unidade_id,
+      p_semestre_id as semestre_id,
+      p_turma_id as turma_id,
+      p_aluno_id as aluno_id,
+      coalesce(p_referencia_em, now()) as referencia_em
+    from public.semestres s
+    where s.id = p_semestre_id
+  )
+  select le.id
+  from public.liberacoes_excepcionais le
+  join contexto c
+    on c.unidade_id = le.unidade_id
+   and c.semestre_id = le.semestre_id
+  where c.usuario_id is not null
+    and (
+      c.usuario_id = (select auth.uid())
+      or private.can_admin_unit(c.unidade_id)
+      or private.is_master_coordinator()
+    )
+    and le.usuario_autorizado_id = c.usuario_id
+    and le.tipo = p_tipo
+    and le.ativo = true
+    and le.encerrado_manualmente_em is null
+    and c.referencia_em >= le.inicio_em
+    and c.referencia_em <= le.expira_em
+    and (
+      le.escopo = 'semestre'
+      or (
+        le.escopo = 'turma'
+        and c.turma_id is not null
+        and le.turma_id = c.turma_id
+      )
+      or (
+        le.escopo = 'aluno'
+        and c.aluno_id is not null
+        and le.aluno_id = c.aluno_id
+        and (
+          le.turma_id is null
+          or (
+            c.turma_id is not null
+            and le.turma_id = c.turma_id
+          )
+        )
+      )
+    )
+  order by
+    case le.escopo
+      when 'aluno' then 3
+      when 'turma' then 2
+      else 1
+    end desc,
+    le.expira_em asc,
+    le.created_at desc
+  limit 1;
+$$;
+
+create or replace function public.tem_liberacao_excepcional_ativa(
+  p_tipo text,
+  p_semestre_id uuid,
+  p_turma_id uuid default null,
+  p_aluno_id uuid default null,
+  p_usuario_id uuid default null,
+  p_unidade_id uuid default null,
+  p_referencia_em timestamptz default now()
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.obter_liberacao_excepcional_ativa(
+    p_tipo => p_tipo,
+    p_semestre_id => p_semestre_id,
+    p_turma_id => p_turma_id,
+    p_aluno_id => p_aluno_id,
+    p_usuario_id => p_usuario_id,
+    p_unidade_id => p_unidade_id,
+    p_referencia_em => p_referencia_em
+  ) is not null;
+$$;
+
+create or replace function public.vincular_liberacao_excepcional_auditoria(
+  p_liberacao_excepcional_id uuid,
+  p_tabela text,
+  p_registro_ids uuid[]
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  updated_count integer := 0;
+begin
+  if auth.uid() is null then
+    raise exception 'Usuário autenticado não encontrado para vincular a auditoria.';
+  end if;
+
+  if p_liberacao_excepcional_id is null then
+    return 0;
+  end if;
+
+  if p_registro_ids is null or array_length(p_registro_ids, 1) is null then
+    return 0;
+  end if;
+
+  if not exists (
+    select 1
+    from public.liberacoes_excepcionais le
+    where le.id = p_liberacao_excepcional_id
+      and le.usuario_autorizado_id = auth.uid()
+  ) then
+    raise exception 'A liberação excepcional informada não pertence ao usuário autenticado.';
+  end if;
+
+  update public.historico_alteracoes h
+  set liberacao_excepcional_id = p_liberacao_excepcional_id
+  where h.tabela = p_tabela
+    and h.registro_id = any(p_registro_ids)
+    and (h.usuario_id = auth.uid() or h.usuario_id is null)
+    and h.liberacao_excepcional_id is null
+    and h.created_at >= now() - interval '15 minutes';
+
+  get diagnostics updated_count = row_count;
+
+  return updated_count;
+end;
+$$;
 
 create or replace function private.resolve_audit_unit_id(
   p_table_name text,
@@ -1080,6 +1458,7 @@ declare
   current_user_id uuid;
   current_user_unit_id uuid;
   record_unit_id uuid;
+  current_exceptional_release_id uuid;
   record_payload jsonb;
 begin
   current_user_id := auth.uid();
@@ -1096,6 +1475,8 @@ begin
     record_payload := to_jsonb(new);
   end if;
 
+  current_exceptional_release_id := private.current_exceptional_release_id();
+
   record_unit_id := private.resolve_audit_unit_id(
     tg_table_name,
     record_payload,
@@ -1109,7 +1490,8 @@ begin
       acao,
       dados_depois,
       usuario_id,
-      unidade_id
+      unidade_id,
+      liberacao_excepcional_id
     )
     values (
       tg_table_name,
@@ -1117,7 +1499,8 @@ begin
       tg_op,
       to_jsonb(new),
       current_user_id,
-      record_unit_id
+      record_unit_id,
+      current_exceptional_release_id
     );
     return new;
   elsif tg_op = 'UPDATE' then
@@ -1128,7 +1511,8 @@ begin
       dados_antes,
       dados_depois,
       usuario_id,
-      unidade_id
+      unidade_id,
+      liberacao_excepcional_id
     )
     values (
       tg_table_name,
@@ -1137,7 +1521,8 @@ begin
       to_jsonb(old),
       to_jsonb(new),
       current_user_id,
-      record_unit_id
+      record_unit_id,
+      current_exceptional_release_id
     );
     return new;
   elsif tg_op = 'DELETE' then
@@ -1147,7 +1532,8 @@ begin
       acao,
       dados_antes,
       usuario_id,
-      unidade_id
+      unidade_id,
+      liberacao_excepcional_id
     )
     values (
       tg_table_name,
@@ -1155,7 +1541,8 @@ begin
       tg_op,
       to_jsonb(old),
       current_user_id,
-      record_unit_id
+      record_unit_id,
+      current_exceptional_release_id
     );
     return old;
   end if;
@@ -2361,6 +2748,16 @@ create trigger trg_usuarios_touch_updated_at
 before update on public.usuarios
 for each row execute function public.touch_updated_at();
 
+drop trigger if exists trg_liberacoes_excepcionais_validate on public.liberacoes_excepcionais;
+create trigger trg_liberacoes_excepcionais_validate
+before insert or update on public.liberacoes_excepcionais
+for each row execute function private.validate_exceptional_release_scope();
+
+drop trigger if exists trg_liberacoes_excepcionais_touch_updated_at on public.liberacoes_excepcionais;
+create trigger trg_liberacoes_excepcionais_touch_updated_at
+before update on public.liberacoes_excepcionais
+for each row execute function public.touch_updated_at();
+
 drop trigger if exists trg_alunos_touch_updated_at on public.alunos;
 create trigger trg_alunos_touch_updated_at
 before update on public.alunos
@@ -2504,6 +2901,11 @@ for each row execute function public.audit_changes();
 drop trigger if exists trg_usuarios_audit on public.usuarios;
 create trigger trg_usuarios_audit
 after insert or update or delete on public.usuarios
+for each row execute function public.audit_changes();
+
+drop trigger if exists trg_liberacoes_excepcionais_audit on public.liberacoes_excepcionais;
+create trigger trg_liberacoes_excepcionais_audit
+after insert or update or delete on public.liberacoes_excepcionais
 for each row execute function public.audit_changes();
 
 drop trigger if exists trg_alunos_audit on public.alunos;

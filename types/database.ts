@@ -52,6 +52,38 @@ export interface Database {
         Args: Record<string, never>;
         Returns: string;
       };
+      obter_liberacao_excepcional_ativa: {
+        Args: {
+          p_tipo: "avaliacao" | "ausencia" | "clinica_supervisionada";
+          p_semestre_id: string;
+          p_turma_id?: string | null;
+          p_aluno_id?: string | null;
+          p_usuario_id?: string | null;
+          p_unidade_id?: string | null;
+          p_referencia_em?: string | null;
+        };
+        Returns: string | null;
+      };
+      tem_liberacao_excepcional_ativa: {
+        Args: {
+          p_tipo: "avaliacao" | "ausencia" | "clinica_supervisionada";
+          p_semestre_id: string;
+          p_turma_id?: string | null;
+          p_aluno_id?: string | null;
+          p_usuario_id?: string | null;
+          p_unidade_id?: string | null;
+          p_referencia_em?: string | null;
+        };
+        Returns: boolean;
+      };
+      vincular_liberacao_excepcional_auditoria: {
+        Args: {
+          p_liberacao_excepcional_id: string;
+          p_tabela: string;
+          p_registro_ids: string[];
+        };
+        Returns: number;
+      };
     };
     Tables: {
       perfis: {
@@ -1152,6 +1184,63 @@ export interface Database {
         };
         Relationships: [];
       };
+      liberacoes_excepcionais: {
+        Row: {
+          id: string;
+          unidade_id: string;
+          semestre_id: string;
+          turma_id: string | null;
+          aluno_id: string | null;
+          usuario_autorizado_id: string;
+          tipo: "avaliacao" | "ausencia" | "clinica_supervisionada";
+          escopo: "semestre" | "turma" | "aluno";
+          motivo: string;
+          criado_por: string;
+          inicio_em: string;
+          expira_em: string;
+          ativo: boolean;
+          encerrado_manualmente_em: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          unidade_id: string;
+          semestre_id: string;
+          turma_id?: string | null;
+          aluno_id?: string | null;
+          usuario_autorizado_id: string;
+          tipo: "avaliacao" | "ausencia" | "clinica_supervisionada";
+          escopo: "semestre" | "turma" | "aluno";
+          motivo: string;
+          criado_por: string;
+          inicio_em?: string;
+          expira_em: string;
+          ativo?: boolean;
+          encerrado_manualmente_em?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          unidade_id?: string;
+          semestre_id?: string;
+          turma_id?: string | null;
+          aluno_id?: string | null;
+          usuario_autorizado_id?: string;
+          tipo?: "avaliacao" | "ausencia" | "clinica_supervisionada";
+          escopo?: "semestre" | "turma" | "aluno";
+          motivo?: string;
+          criado_por?: string;
+          inicio_em?: string;
+          expira_em?: string;
+          ativo?: boolean;
+          encerrado_manualmente_em?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       historico_alteracoes: {
         Row: {
           id: number;
@@ -1162,6 +1251,7 @@ export interface Database {
           dados_depois: Record<string, unknown> | null;
           usuario_id: string | null;
           unidade_id: string | null;
+          liberacao_excepcional_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -1173,6 +1263,7 @@ export interface Database {
           dados_depois?: Record<string, unknown> | null;
           usuario_id?: string | null;
           unidade_id?: string | null;
+          liberacao_excepcional_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -1184,6 +1275,7 @@ export interface Database {
           dados_depois?: Record<string, unknown> | null;
           usuario_id?: string | null;
           unidade_id?: string | null;
+          liberacao_excepcional_id?: string | null;
           created_at?: string;
         };
         Relationships: [];

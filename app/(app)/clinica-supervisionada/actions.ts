@@ -7,6 +7,10 @@ import { z } from "zod";
 import { requireRole } from "@/lib/auth/session";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  attachExceptionalReleaseToAuditRecords,
+  resolveExceptionalReleaseGate
+} from "@/services/exceptional-releases";
 import type { Database } from "@/types/database";
 import type {
   ClinicalCaseActionState,
@@ -546,6 +550,10 @@ function buildNoticePath(path: string, type: "success" | "error", message: strin
   return `${path}?${searchParams.toString()}`;
 }
 
+function appendExceptionalReleaseNotice(message: string, noticeMessage?: string | null) {
+  return noticeMessage ? `${message} ${noticeMessage}` : message;
+}
+
 function buildPatientUniquenessErrorState(
   submittedFormValues: ClinicalCaseFormValues,
   error: { code?: string | null; message?: string | null; details?: string | null }
@@ -710,7 +718,34 @@ export async function createOrUpdateClinicalCaseAction(
     );
   }
 
+  const exceptionalReleaseGate = await resolveExceptionalReleaseGate(
+    {
+      type: "clinica_supervisionada",
+      semesterId: enrollmentContextResult.context.semester.id,
+      classId: enrollmentContextResult.context.classGroup.id,
+      studentId: enrollmentContextResult.context.studentUser.id,
+      unitId: currentUnitId,
+      authorizedUserId: currentUser.id
+    },
+    {
+      currentUser,
+      semesterStatus: enrollmentContextResult.context.semester.status,
+      blockedMessage:
+        "O semestre vinculado a esta operacao clinica ja esta encerrado. Esta edicao so pode ser realizada com liberacao excepcional ativa."
+    }
+  );
+
+  if (!exceptionalReleaseGate.allowed) {
+    return buildErrorState(
+      exceptionalReleaseGate.blockedMessage ??
+        "O semestre vinculado a esta operacao clinica ja esta encerrado e nao permite novos ajustes.",
+      {},
+      submittedFormValues
+    );
+  }
+
   let currentCase: ClinicalCaseRow | null = null;
+  let previousScheduleIds: string[] = [];
 
   if (isEditing) {
     const { data: currentCaseData, error: currentCaseError } = await dataSupabase
@@ -728,6 +763,19 @@ export async function createOrUpdateClinicalCaseAction(
         {},
         submittedFormValues
       );
+    }
+
+    if (exceptionalReleaseGate.release) {
+      const { data: scheduleRowsData } = await dataSupabase
+        .from("casos_clinicos_horarios")
+        .select("id")
+        .eq("caso_clinico_id", currentCase.id);
+
+      previousScheduleIds = (
+        ((scheduleRowsData ?? []) as Array<
+          Pick<Database["public"]["Tables"]["casos_clinicos_horarios"]["Row"], "id">
+        >)
+      ).map((schedule) => schedule.id);
     }
   }
 
@@ -936,6 +984,38 @@ export async function createOrUpdateClinicalCaseAction(
       return schedulePersistState;
     }
 
+    if (exceptionalReleaseGate.release) {
+      const { data: currentScheduleRowsData } = await dataSupabase
+        .from("casos_clinicos_horarios")
+        .select("id")
+        .eq("caso_clinico_id", currentCase.id);
+
+      const currentScheduleIds = (
+        ((currentScheduleRowsData ?? []) as Array<
+          Pick<Database["public"]["Tables"]["casos_clinicos_horarios"]["Row"], "id">
+        >)
+      ).map((schedule) => schedule.id);
+
+      await attachExceptionalReleaseToAuditRecords({
+        supabase: authSupabase,
+        releaseId: exceptionalReleaseGate.release.releaseId,
+        tableName: "pacientes_clinica",
+        recordIds: [patientId]
+      });
+      await attachExceptionalReleaseToAuditRecords({
+        supabase: authSupabase,
+        releaseId: exceptionalReleaseGate.release.releaseId,
+        tableName: "casos_clinicos",
+        recordIds: [currentCase.id]
+      });
+      await attachExceptionalReleaseToAuditRecords({
+        supabase: authSupabase,
+        releaseId: exceptionalReleaseGate.release.releaseId,
+        tableName: "casos_clinicos_horarios",
+        recordIds: [...previousScheduleIds, ...currentScheduleIds]
+      });
+    }
+
     revalidatePath("/clinica-supervisionada");
     revalidatePath(`/clinica-supervisionada/${currentCase.id}`);
     revalidatePath("/pacientes");
@@ -949,7 +1029,10 @@ export async function createOrUpdateClinicalCaseAction(
       buildNoticePath(
         `/clinica-supervisionada/${currentCase.id}`,
         "success",
-        "Caso clinico atualizado com sucesso."
+        appendExceptionalReleaseNotice(
+          "Caso clinico atualizado com sucesso.",
+          exceptionalReleaseGate.noticeMessage
+        )
       ) as Route
     );
   }
@@ -987,6 +1070,36 @@ export async function createOrUpdateClinicalCaseAction(
     return schedulePersistState;
   }
 
+  if (exceptionalReleaseGate.release) {
+    const { data: currentScheduleRowsData } = await dataSupabase
+      .from("casos_clinicos_horarios")
+      .select("id")
+      .eq("caso_clinico_id", createdCaseId);
+
+    await attachExceptionalReleaseToAuditRecords({
+      supabase: authSupabase,
+      releaseId: exceptionalReleaseGate.release.releaseId,
+      tableName: "pacientes_clinica",
+      recordIds: [patientId]
+    });
+    await attachExceptionalReleaseToAuditRecords({
+      supabase: authSupabase,
+      releaseId: exceptionalReleaseGate.release.releaseId,
+      tableName: "casos_clinicos",
+      recordIds: [createdCaseId]
+    });
+    await attachExceptionalReleaseToAuditRecords({
+      supabase: authSupabase,
+      releaseId: exceptionalReleaseGate.release.releaseId,
+      tableName: "casos_clinicos_horarios",
+      recordIds: (
+        ((currentScheduleRowsData ?? []) as Array<
+          Pick<Database["public"]["Tables"]["casos_clinicos_horarios"]["Row"], "id">
+        >)
+      ).map((schedule) => schedule.id)
+    });
+  }
+
   revalidatePath("/clinica-supervisionada");
   revalidatePath(`/clinica-supervisionada/${createdCaseId}`);
   revalidatePath("/pacientes");
@@ -1000,7 +1113,10 @@ export async function createOrUpdateClinicalCaseAction(
     buildNoticePath(
       `/clinica-supervisionada/${createdCaseId}`,
       "success",
-      "Novo caso clinico criado com sucesso a partir do cadastro-base do paciente."
+      appendExceptionalReleaseNotice(
+        "Novo caso clinico criado com sucesso a partir do cadastro-base do paciente.",
+        exceptionalReleaseGate.noticeMessage
+      )
     ) as Route
   );
 }

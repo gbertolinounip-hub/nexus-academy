@@ -1138,6 +1138,16 @@ select {
   color: var(--muted);
 }
 
+.status-encerrada {
+  background: rgba(var(--brand-rgb), 0.08);
+  color: var(--muted);
+}
+
+.status-expirada {
+  background: rgba(var(--alert-rgb), 0.14);
+  color: var(--alert);
+}
+
 .status-inativo {
   background: rgba(var(--brand-rgb), 0.08);
   color: var(--muted);
@@ -3336,6 +3346,149 @@ textarea.input:focus {
   overflow-wrap: anywhere;
 }
 
+.exceptional-release-page {
+  overflow-x: hidden;
+}
+
+.exceptional-release-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.exceptional-release-form-card .card-header,
+.exceptional-release-form-card .card-header > div,
+.exceptional-release-form-card .card-actions,
+.exceptional-release-form-card .form-stack {
+  min-width: 0;
+}
+
+.exceptional-release-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.exceptional-release-table-wrap {
+  width: 100%;
+  max-width: 100%;
+}
+
+.exceptional-release-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.exceptional-release-col-type {
+  width: 10rem;
+}
+
+.exceptional-release-col-recipient {
+  width: 15rem;
+}
+
+.exceptional-release-col-context {
+  width: 20rem;
+}
+
+.exceptional-release-col-validity {
+  width: 13rem;
+}
+
+.exceptional-release-col-status {
+  width: 8rem;
+}
+
+.exceptional-release-col-actions {
+  width: 11rem;
+}
+
+.exceptional-release-table th,
+.exceptional-release-table td {
+  min-width: 0;
+  vertical-align: top;
+}
+
+.exceptional-release-cell-type strong,
+.exceptional-release-cell-recipient strong,
+.exceptional-release-cell-context strong,
+.exceptional-release-cell-validity strong {
+  display: block;
+}
+
+.exceptional-release-cell-type,
+.exceptional-release-cell-recipient,
+.exceptional-release-cell-context,
+.exceptional-release-cell-validity,
+.exceptional-release-cell-actions {
+  min-width: 0;
+}
+
+.exceptional-release-cell-type strong,
+.exceptional-release-cell-type .table-helper,
+.exceptional-release-cell-recipient strong,
+.exceptional-release-cell-recipient .table-helper,
+.exceptional-release-cell-context strong,
+.exceptional-release-cell-context .table-helper,
+.exceptional-release-cell-validity strong,
+.exceptional-release-cell-validity .table-helper,
+.exceptional-release-table td .table-helper {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.exceptional-release-cell-actions .button {
+  white-space: normal;
+}
+
+.exceptional-release-mobile-list {
+  display: none;
+  gap: 0.85rem;
+}
+
+.exceptional-release-mobile-card {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.exceptional-release-mobile-meta {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.exceptional-release-mobile-meta div,
+.exceptional-release-mobile-meta dd,
+.exceptional-release-mobile-meta dt,
+.exceptional-release-mobile-meta-wide {
+  min-width: 0;
+}
+
+.exceptional-release-mobile-meta dt {
+  margin: 0 0 0.18rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.exceptional-release-mobile-meta dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.exceptional-release-mobile-meta-wide {
+  grid-column: 1 / -1;
+}
+
+.exceptional-release-mobile-actions {
+  align-items: flex-start;
+}
+
+.exceptional-release-mobile-actions .button {
+  white-space: normal;
+}
+
 .master-filter-form {
   display: grid;
   gap: 1rem;
@@ -4905,6 +5058,14 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
     display: grid;
   }
 
+  .exceptional-release-table-wrap {
+    display: none;
+  }
+
+  .exceptional-release-mobile-list {
+    display: grid;
+  }
+
   .master-audit-filter-form {
     grid-template-columns: repeat(2, minmax(180px, 1fr));
   }
@@ -4933,6 +5094,10 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
 
   .audit-closed-area-actions {
     justify-content: flex-start;
+  }
+
+  .exceptional-release-mobile-meta {
+    grid-template-columns: 1fr;
   }
 
   .reports-dashboard-professor .metrics-grid {

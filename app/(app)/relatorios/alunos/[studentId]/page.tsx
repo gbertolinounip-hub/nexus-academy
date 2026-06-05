@@ -55,19 +55,32 @@ export default async function StudentFinalReportPage(
     currentUser,
     studentId,
     requestedSemesterId,
-    requestedEnrollmentId
+    requestedEnrollmentId,
+    origin === "audit"
+      ? {
+          includeHistoricalStudents: true
+        }
+      : undefined
   );
   const isProfessorAreaReport = report?.reportContext.kind === "area";
+  const reportBaseHref =
+    origin === "audit" && requestedSemesterId && sourceClassId
+      ? `/auditoria/semestres/${encodeURIComponent(requestedSemesterId)}/areas/${encodeURIComponent(sourceClassId)}/alunos/${encodeURIComponent(studentId)}`
+      : `/relatorios/alunos/${encodeURIComponent(report?.student.id ?? studentId)}`;
   const backHref =
     origin === "audit" && requestedSemesterId && sourceClassId
       ? `/auditoria/semestres/${encodeURIComponent(requestedSemesterId)}/areas/${encodeURIComponent(sourceClassId)}`
       : `/relatorios?semestre=${report?.selectedSemester.id ?? requestedSemesterId ?? ""}`;
+  const auditQuerySuffix =
+    origin === "audit" && sourceClassId
+      ? `&from=audit&turma=${encodeURIComponent(sourceClassId)}`
+      : "";
   const exportQuerySuffix = report
     ? `?semestre=${report.selectedSemester.id}${
         report.reportContext.enrollmentId
           ? `&matricula=${report.reportContext.enrollmentId}`
           : ""
-      }`
+      }${auditQuerySuffix}`
     : "";
 
   return (
@@ -140,15 +153,15 @@ export default async function StudentFinalReportPage(
                   const active = semester.value === report.selectedSemester.id;
 
                   return (
-                    <Link
+                    <a
                       key={semester.value}
-                      href={`/relatorios/alunos/${report.student.id}?semestre=${semester.value}${
+                      href={`${reportBaseHref}?semestre=${semester.value}${
                         semester.enrollmentId ? `&matricula=${semester.enrollmentId}` : ""
-                      }`}
+                      }${auditQuerySuffix}`}
                       className={`report-chip${active ? " report-chip-active" : ""}`}
                     >
                       {semester.label}
-                    </Link>
+                    </a>
                   );
                 })}
               </div>
@@ -415,9 +428,9 @@ export default async function StudentFinalReportPage(
             "Não foi possível carregar o relatório final deste aluno."
           }
           actions={
-            <Link href="/relatorios" className="button button-secondary">
-              Voltar aos relatórios
-            </Link>
+            <a href={backHref} className="button button-secondary">
+              {origin === "audit" ? "Voltar à área arquivada" : "Voltar aos relatórios"}
+            </a>
           }
         >
           <p className="empty-message">

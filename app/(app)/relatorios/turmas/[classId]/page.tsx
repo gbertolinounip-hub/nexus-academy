@@ -40,9 +40,19 @@ export default async function ClassFinalReportPage({
     (Array.isArray(resolvedSearchParams.print)
       ? resolvedSearchParams.print[0]
       : resolvedSearchParams.print) === "1";
+  const historicalExportQuery =
+    origin === "audit" && semesterId
+      ? `?semestre=${encodeURIComponent(semesterId)}`
+      : "";
   const { report, emptyState } = await getAuthenticatedClassFinalReport(
     currentUser,
-    classId
+    classId,
+    origin === "audit" && semesterId
+      ? {
+          semesterId,
+          includeHistoricalStudents: true
+        }
+      : undefined
   );
   const backHref: Route =
     origin === "audit" && semesterId
@@ -71,13 +81,13 @@ export default async function ClassFinalReportPage({
           <div className="actions-row report-screen-only">
             <ReportPrintButton />
             <a
-              href={`/relatorios/export/turmas/${report.classGroup.id}/csv`}
+              href={`/relatorios/export/turmas/${report.classGroup.id}/csv${historicalExportQuery}`}
               className="button button-secondary"
             >
               Exportar CSV
             </a>
             <a
-              href={`/relatorios/export/turmas/${report.classGroup.id}/excel`}
+              href={`/relatorios/export/turmas/${report.classGroup.id}/excel${historicalExportQuery}`}
               className="button button-secondary"
             >
               Exportar Excel

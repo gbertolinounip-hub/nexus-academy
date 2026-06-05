@@ -18,7 +18,7 @@ interface ClassCsvRouteProps {
   }>;
 }
 
-export async function GET(_request: Request, props: ClassCsvRouteProps) {
+export async function GET(request: Request, props: ClassCsvRouteProps) {
   const currentUser = await requireExportUser();
 
   if (!currentUser) {
@@ -26,7 +26,18 @@ export async function GET(_request: Request, props: ClassCsvRouteProps) {
   }
 
   const { classId } = await props.params;
-  const { report } = await getAuthenticatedClassFinalReport(currentUser, classId);
+  const requestUrl = new URL(request.url);
+  const semesterId = requestUrl.searchParams.get("semestre");
+  const { report } = await getAuthenticatedClassFinalReport(
+    currentUser,
+    classId,
+    semesterId
+      ? {
+          semesterId,
+          includeHistoricalStudents: true
+        }
+      : undefined
+  );
 
   if (!report) {
     return buildUnavailableDownloadResponse(

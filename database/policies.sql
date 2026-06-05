@@ -25,6 +25,7 @@ alter table public.notificacoes_clinicas enable row level security;
 alter table public.documentos_aluno enable row level security;
 alter table public.notificacoes_documentos_aluno enable row level security;
 alter table public.acessos_sistema enable row level security;
+alter table public.liberacoes_excepcionais enable row level security;
 alter table public.historico_alteracoes enable row level security;
 
 alter table public.perfis force row level security;
@@ -54,6 +55,7 @@ alter table public.notificacoes_clinicas force row level security;
 alter table public.documentos_aluno force row level security;
 alter table public.notificacoes_documentos_aluno force row level security;
 alter table public.acessos_sistema force row level security;
+alter table public.liberacoes_excepcionais force row level security;
 alter table public.historico_alteracoes force row level security;
 
 drop policy if exists perfis_read_policy on public.perfis;
@@ -977,6 +979,48 @@ with check (
   and (
     unidade_id is null
     or private.can_access_unit(unidade_id)
+    or private.is_master_coordinator()
+  )
+);
+
+drop policy if exists liberacoes_excepcionais_select_policy on public.liberacoes_excepcionais;
+create policy liberacoes_excepcionais_select_policy
+on public.liberacoes_excepcionais
+for select
+to authenticated
+using (
+  private.can_admin_unit(unidade_id)
+  or private.is_master_coordinator()
+  or usuario_autorizado_id = (select auth.uid())
+);
+
+drop policy if exists liberacoes_excepcionais_insert_policy on public.liberacoes_excepcionais;
+create policy liberacoes_excepcionais_insert_policy
+on public.liberacoes_excepcionais
+for insert
+to authenticated
+with check (
+  private.current_user_is_active()
+  and criado_por = (select auth.uid())
+  and (
+    private.can_admin_unit(unidade_id)
+    or private.is_master_coordinator()
+  )
+);
+
+drop policy if exists liberacoes_excepcionais_update_policy on public.liberacoes_excepcionais;
+create policy liberacoes_excepcionais_update_policy
+on public.liberacoes_excepcionais
+for update
+to authenticated
+using (
+  private.can_admin_unit(unidade_id)
+  or private.is_master_coordinator()
+)
+with check (
+  private.current_user_is_active()
+  and (
+    private.can_admin_unit(unidade_id)
     or private.is_master_coordinator()
   )
 );

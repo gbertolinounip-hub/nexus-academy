@@ -4,6 +4,10 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  attachExceptionalReleaseToAuditRecords,
+  resolveExceptionalReleaseGate
+} from "@/services/exceptional-releases";
 import type {
   AbsenceActionFormValues,
   AbsenceActionState
@@ -17,6 +21,18 @@ type ProfessorLinkValidationRow = Pick<
 type AbsenceValidationRow = Pick<
   Database["public"]["Tables"]["ausencias"]["Row"],
   "id" | "matricula_turma_id"
+>;
+type EnrollmentRow = Pick<
+  Database["public"]["Tables"]["matriculas_turma"]["Row"],
+  "id" | "aluno_id" | "turma_id"
+>;
+type ClassRow = Pick<
+  Database["public"]["Tables"]["turmas"]["Row"],
+  "id" | "semestre_id"
+>;
+type SemesterRow = Pick<
+  Database["public"]["Tables"]["semestres"]["Row"],
+  "id" | "status"
 >;
 type AbsenceInsert = Database["public"]["Tables"]["ausencias"]["Insert"];
 type AbsenceUpdate = Database["public"]["Tables"]["ausencias"]["Update"];
@@ -135,6 +151,58 @@ function getTodayInSaoPaulo() {
     month: "2-digit",
     day: "2-digit"
   }).format(new Date());
+}
+
+function appendExceptionalReleaseNotice(message: string, noticeMessage?: string | null) {
+  return noticeMessage ? `${message} ${noticeMessage}` : message;
+}
+
+async function loadAbsenceOperationalScope(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  enrollmentId: string
+) {
+  const { data: enrollmentData, error: enrollmentError } = await supabase
+    .from("matriculas_turma")
+    .select("id, aluno_id, turma_id")
+    .eq("id", enrollmentId)
+    .maybeSingle();
+
+  const enrollment = (enrollmentData ?? null) as EnrollmentRow | null;
+
+  if (enrollmentError || !enrollment) {
+    throw new Error("Nao foi possivel localizar a matricula vinculada a esta falta.");
+  }
+
+  const { data: classData, error: classError } = await supabase
+    .from("turmas")
+    .select("id, semestre_id")
+    .eq("id", enrollment.turma_id)
+    .maybeSingle();
+
+  const classGroup = (classData ?? null) as ClassRow | null;
+
+  if (classError || !classGroup) {
+    throw new Error("Nao foi possivel localizar a turma vinculada a esta falta.");
+  }
+
+  const { data: semesterData, error: semesterError } = await supabase
+    .from("semestres")
+    .select("id, status")
+    .eq("id", classGroup.semestre_id)
+    .maybeSingle();
+
+  const semester = (semesterData ?? null) as SemesterRow | null;
+
+  if (semesterError || !semester) {
+    throw new Error("Nao foi possivel localizar o semestre vinculado a esta falta.");
+  }
+
+  return {
+    semesterId: semester.id,
+    semesterStatus: semester.status,
+    classId: classGroup.id,
+    studentId: enrollment.aluno_id
+  };
 }
 
 async function validateProfessorLink(
@@ -267,6 +335,46 @@ export async function submitAbsenceAction(
     );
   }
 
+  let absenceScope;
+
+  try {
+    absenceScope = await loadAbsenceOperationalScope(supabase, targetEnrollmentId);
+  } catch (error) {
+    return buildErrorState(
+      error instanceof Error
+        ? error.message
+        : "Nao foi possivel identificar o contexto academico desta falta.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const exceptionalReleaseGate = await resolveExceptionalReleaseGate(
+    {
+      type: "ausencia",
+      semesterId: absenceScope.semesterId,
+      classId: absenceScope.classId,
+      studentId: absenceScope.studentId,
+      unitId: currentUser.unitId ?? null,
+      authorizedUserId: currentUser.id
+    },
+    {
+      currentUser,
+      semesterStatus: absenceScope.semesterStatus,
+      blockedMessage:
+        "O semestre selecionado ja esta encerrado. Esta falta so pode ser ajustada com liberacao excepcional ativa."
+    }
+  );
+
+  if (!exceptionalReleaseGate.allowed) {
+    return buildErrorState(
+      exceptionalReleaseGate.blockedMessage ??
+        "O semestre selecionado ja esta encerrado e nao permite novos ajustes.",
+      {},
+      submittedFormValues
+    );
+  }
+
   const payload = {
     matricula_turma_id: targetEnrollmentId,
     data_ausencia: data_ausencia,
@@ -312,6 +420,15 @@ export async function submitAbsenceAction(
       );
     }
 
+    if (exceptionalReleaseGate.release) {
+      await attachExceptionalReleaseToAuditRecords({
+        supabase,
+        releaseId: exceptionalReleaseGate.release.releaseId,
+        tableName: "ausencias",
+        recordIds: [ausencia_id]
+      });
+    }
+
     revalidatePath("/ausencias");
     revalidatePath(`/ausencias/${ausencia_id}`);
     revalidatePath("/aluno");
@@ -320,7 +437,13 @@ export async function submitAbsenceAction(
     revalidatePath("/relatorios");
     revalidatePath("/auditoria");
 
-    return buildSuccessState("Falta atualizada com sucesso.", ausencia_id);
+    return buildSuccessState(
+      appendExceptionalReleaseNotice(
+        "Falta atualizada com sucesso.",
+        exceptionalReleaseGate.noticeMessage
+      ),
+      ausencia_id
+    );
   }
 
   const { data: insertedAbsence, error: insertError } = await absenceTableClient
@@ -341,6 +464,15 @@ export async function submitAbsenceAction(
     );
   }
 
+  if (exceptionalReleaseGate.release) {
+    await attachExceptionalReleaseToAuditRecords({
+      supabase,
+      releaseId: exceptionalReleaseGate.release.releaseId,
+      tableName: "ausencias",
+      recordIds: [insertedAbsence.id]
+    });
+  }
+
   revalidatePath("/ausencias");
   revalidatePath(`/ausencias/${insertedAbsence.id}`);
   revalidatePath("/aluno");
@@ -349,6 +481,12 @@ export async function submitAbsenceAction(
   revalidatePath("/relatorios");
   revalidatePath("/auditoria");
 
-  return buildSuccessState("Falta registrada com sucesso.", insertedAbsence.id);
+  return buildSuccessState(
+    appendExceptionalReleaseNotice(
+      "Falta registrada com sucesso.",
+      exceptionalReleaseGate.noticeMessage
+    ),
+    insertedAbsence.id
+  );
 }
 

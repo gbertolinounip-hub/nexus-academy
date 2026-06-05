@@ -92,6 +92,11 @@ export const navigationItems: NavigationItem[] = [
     allowedRoles: ["coordenador"]
   },
   {
+    href: "/coordenador/liberacoes-excepcionais" as Route,
+    label: "Liberações excepcionais",
+    allowedRoles: ["coordenador"]
+  },
+  {
     href: "/avaliacoes" as Route,
     label: "Lançamentos",
     allowedRoles: ["professor"]

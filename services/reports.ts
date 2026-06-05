@@ -297,6 +297,19 @@ interface AcademicBundle {
   evaluationItemsByEvaluationId: Map<string, EvaluationItemRow[]>;
 }
 
+interface AcademicBundleOptions {
+  includeInactiveStudents?: boolean;
+}
+
+interface ClassFinalReportOptions {
+  semesterId?: string | null;
+  includeHistoricalStudents?: boolean;
+}
+
+interface StudentFinalReportOptions {
+  includeHistoricalStudents?: boolean;
+}
+
 function round(value: number) {
   return Math.round(value * 100) / 100;
 }
@@ -456,8 +469,13 @@ function filterEnrollmentsToClasses(enrollments: EnrollmentRow[], classRows: Cla
   return enrollments.filter((enrollment) => visibleClassIds.has(enrollment.turma_id));
 }
 
-function filterActiveStudentUsers(studentUsers: UserRow[]) {
-  return studentUsers.filter((studentUser) => studentUser.ativo);
+function filterVisibleStudentUsers(
+  studentUsers: UserRow[],
+  includeInactiveStudents = false
+) {
+  return includeInactiveStudents
+    ? studentUsers
+    : studentUsers.filter((studentUser) => studentUser.ativo);
 }
 
 function filterEnrollmentsToStudentIds(
@@ -597,7 +615,8 @@ async function loadSemestersForClasses(classRows: ClassRow[]) {
 async function loadAcademicBundle(
   enrollments: EnrollmentRow[],
   preloadedClasses?: ClassRow[],
-  preloadedSemesters?: SemesterRow[]
+  preloadedSemesters?: SemesterRow[],
+  options?: AcademicBundleOptions
 ): Promise<AcademicBundle> {
   const supabase = await createSupabaseServerClient();
   const classes =
@@ -629,7 +648,9 @@ async function loadAcademicBundle(
       ? supabase.from("alunos").select("*").in("usuario_id", studentIds)
       : Promise.resolve({ data: [], error: null as null }),
     studentIds.length
-      ? supabase.from("usuarios").select("*").in("id", studentIds).eq("ativo", true)
+      ? options?.includeInactiveStudents
+        ? supabase.from("usuarios").select("*").in("id", studentIds)
+        : supabase.from("usuarios").select("*").in("id", studentIds).eq("ativo", true)
       : Promise.resolve({ data: [], error: null as null }),
     enrollmentIds.length
       ? supabase
@@ -669,13 +690,14 @@ async function loadAcademicBundle(
   const areaById = new Map(areas.map((area) => [area.id, area]));
   const blockIds = [...new Set(areas.map((area) => area.bloco_id))];
   const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
-  const studentUsers = filterActiveStudentUsers(
-    (studentUsersResult.data ?? []) as UserRow[]
+  const studentUsers = filterVisibleStudentUsers(
+    (studentUsersResult.data ?? []) as UserRow[],
+    options?.includeInactiveStudents ?? false
   );
-  const activeStudentIdSet = new Set(studentUsers.map((studentUser) => studentUser.id));
+  const visibleStudentIdSet = new Set(studentUsers.map((studentUser) => studentUser.id));
   const visibleEnrollments = filterEnrollmentsToStudentIds(
     enrollments,
-    activeStudentIdSet
+    visibleStudentIdSet
   );
   const visibleEnrollmentIdSet = new Set(
     visibleEnrollments.map((enrollment) => enrollment.id)
@@ -1581,7 +1603,8 @@ export async function getAuthenticatedStudentFinalReport(
   currentUser: SessionUser,
   studentId: string,
   requestedSemesterId?: string | null,
-  requestedEnrollmentId?: string | null
+  requestedEnrollmentId?: string | null,
+  options?: StudentFinalReportOptions
 ): Promise<StudentFinalReportLoadResult> {
   const { scope, emptyState } = await resolveReportScope(currentUser);
 
@@ -1626,7 +1649,7 @@ export async function getAuthenticatedStudentFinalReport(
   const classRows = await loadClassesForEnrollments(enrollmentRows);
   const classById = new Map(classRows.map((classGroup) => [classGroup.id, classGroup]));
   const preferredSemesterId =
-    scope.role === "professor" && requestedEnrollmentId
+    requestedEnrollmentId
       ? (() => {
           const requestedEnrollment = allAccessibleEnrollments.find(
             (enrollment) => enrollment.id === requestedEnrollmentId
@@ -1654,6 +1677,13 @@ export async function getAuthenticatedStudentFinalReport(
     );
   }
 
+  const shouldIncludeHistoricalStudents =
+    Boolean(options?.includeHistoricalStudents) &&
+    currentUser.role === "coordenador" &&
+    selectedSemester.status === "encerrado";
+  const shouldUseAreaScopedHistoricalView =
+    shouldIncludeHistoricalStudents && Boolean(requestedEnrollmentId);
+
   const visibleClassRows = filterClassesToSemesters(classRows, semesters);
   const selectedClassIds = new Set(
     visibleClassRows
@@ -1671,26 +1701,30 @@ export async function getAuthenticatedStudentFinalReport(
     );
   }
 
-  if (scope.role === "professor") {
-    if (requestedEnrollmentId) {
-      const requestedEnrollment = enrollmentRows.find(
-        (enrollment) => enrollment.id === requestedEnrollmentId
+  if (requestedEnrollmentId) {
+    const requestedEnrollment = enrollmentRows.find(
+      (enrollment) => enrollment.id === requestedEnrollmentId
+    );
+
+    if (!requestedEnrollment) {
+      return buildStudentReportEmptyState(
+        shouldUseAreaScopedHistoricalView
+          ? "Relatório histórico da área não encontrado"
+          : "Relatório da área não encontrado",
+        shouldUseAreaScopedHistoricalView
+          ? "A matrícula/área solicitada não foi localizada no semestre arquivado selecionado."
+          : "A matrícula/área solicitada não está acessível para este supervisor no semestre selecionado."
       );
+    }
 
-      if (!requestedEnrollment) {
-        return buildStudentReportEmptyState(
-          "Relatório da área não encontrado",
-          "A matrícula/área solicitada não está acessível para este supervisor no semestre selecionado."
-        );
-      }
-
+    if (scope.role === "professor" || shouldUseAreaScopedHistoricalView) {
       enrollmentRows = [requestedEnrollment];
-    } else if (enrollmentRows.length > 1) {
+    }
+  } else if (scope.role === "professor" && enrollmentRows.length > 1) {
       return buildStudentReportEmptyState(
         "Selecione a área do relatório",
         "Este aluno possui mais de uma área no escopo deste supervisor. Abra o relatório a partir da área desejada."
       );
-    }
   }
 
   const selectedClasses = visibleClassRows.filter((classGroup) =>
@@ -1699,18 +1733,28 @@ export async function getAuthenticatedStudentFinalReport(
   const bundle = await loadAcademicBundle(
     enrollmentRows,
     selectedClasses,
-    [selectedSemester]
+    [selectedSemester],
+    {
+      includeInactiveStudents: shouldIncludeHistoricalStudents
+    }
   );
 
   if (!bundle.enrollments.length) {
     return buildStudentReportEmptyState(
-      "Aluno indisponível na operação corrente",
-      "Este aluno não possui vínculo operacional ativo acessível neste contexto de relatório."
+      shouldIncludeHistoricalStudents
+        ? "Aluno indisponível no contexto histórico"
+        : "Aluno indisponível na operação corrente",
+      shouldIncludeHistoricalStudents
+        ? "Este aluno não possui vínculo histórico suficiente no semestre arquivado selecionado."
+        : "Este aluno não possui vínculo operacional ativo acessível neste contexto de relatório."
     );
   }
 
+  const shouldUseAreaScopedReport =
+    (scope.role === "professor" && Boolean(requestedEnrollmentId)) ||
+    shouldUseAreaScopedHistoricalView;
   const studentRollup =
-    scope.role === "professor"
+    shouldUseAreaScopedReport
       ? buildProfessorStudentAreaReportRowsForSemester(selectedSemester, bundle).find(
           (student) =>
             student.studentId === studentId &&
@@ -1796,7 +1840,7 @@ export async function getAuthenticatedStudentFinalReport(
     }) as StudentFinalAreaReport[];
   const allAbsences = areaReports.flatMap((areaReport) => areaReport.absences);
   const semesterEnrollmentOptions = semesters.map((semester) => {
-    if (scope.role !== "professor") {
+    if (scope.role !== "professor" && !shouldUseAreaScopedHistoricalView) {
       return {
         value: semester.id,
         label: `${semester.codigo} - ${semester.nome}`,
@@ -1880,7 +1924,8 @@ export async function getAuthenticatedStudentFinalReport(
 
 export async function getAuthenticatedClassFinalReport(
   currentUser: SessionUser,
-  classId: string
+  classId: string,
+  options?: ClassFinalReportOptions
 ): Promise<ClassFinalReportLoadResult> {
   const { scope, emptyState } = await resolveReportScope(currentUser);
 
@@ -1907,6 +1952,15 @@ export async function getAuthenticatedClassFinalReport(
   }
 
   const classGroup = classRowData as ClassRow;
+  const requestedSemesterId = options?.semesterId?.trim() || null;
+
+  if (requestedSemesterId && classGroup.semestre_id !== requestedSemesterId) {
+    return buildClassReportEmptyState(
+      "Turma fora do semestre solicitado",
+      "A turma informada não pertence ao semestre histórico selecionado."
+    );
+  }
+
   const enrollmentQuery =
     scope.role === "coordenador"
       ? supabase.from("matriculas_turma").select("*").eq("turma_id", classId)
@@ -1947,18 +2001,31 @@ export async function getAuthenticatedClassFinalReport(
     );
   }
 
-  const bundle = await loadAcademicBundle(enrollmentRows, [classGroup], semesterRows);
+  const semester =
+    visibleSemesterRows.find((row) => row.id === classGroup.semestre_id) ??
+    visibleSemesterRows[0];
+  const shouldIncludeHistoricalStudents =
+    Boolean(options?.includeHistoricalStudents) &&
+    currentUser.role === "coordenador" &&
+    semester?.status === "encerrado" &&
+    (!requestedSemesterId || semester.id === requestedSemesterId);
+
+  const bundle = await loadAcademicBundle(enrollmentRows, [classGroup], semesterRows, {
+    includeInactiveStudents: shouldIncludeHistoricalStudents
+  });
 
   if (!bundle.enrollments.length) {
     return buildClassReportEmptyState(
-      "Nenhum aluno ativo encontrado no escopo da turma",
-      scope.role === "coordenador"
-        ? "Esta turma não possui alunos ativos suficientes para o relatório corrente."
-        : "Esta turma não possui alunos ativos vinculados a este supervisor no contexto atual."
+      shouldIncludeHistoricalStudents
+        ? "Nenhum aluno arquivado encontrado no escopo da turma"
+        : "Nenhum aluno ativo encontrado no escopo da turma",
+      shouldIncludeHistoricalStudents
+        ? "A turma foi localizada no semestre encerrado, mas não há vínculos históricos suficientes para montar o fechamento arquivado."
+        : scope.role === "coordenador"
+          ? "Esta turma não possui alunos ativos suficientes para o relatório corrente."
+          : "Esta turma não possui alunos ativos vinculados a este supervisor no contexto atual."
     );
   }
-
-  const semester = visibleSemesterRows[0];
   const areaName = fallbackAreaName(classGroup, bundle.areaById);
   const blockName = fallbackBlockName(classGroup, bundle.areaById, bundle.blockById);
   const students = enrollmentRows

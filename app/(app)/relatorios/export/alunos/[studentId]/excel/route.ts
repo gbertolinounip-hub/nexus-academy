@@ -29,11 +29,17 @@ export async function GET(request: Request, props: StudentExcelRouteProps) {
   const { studentId } = await props.params;
   const requestedSemesterId = readRequestQuery(request, "semestre");
   const requestedEnrollmentId = readRequestQuery(request, "matricula");
+  const origin = readRequestQuery(request, "from");
   const { report } = await getAuthenticatedStudentFinalReport(
     currentUser,
     studentId,
     requestedSemesterId,
-    requestedEnrollmentId
+    requestedEnrollmentId,
+    origin === "audit"
+      ? {
+          includeHistoricalStudents: true
+        }
+      : undefined
   );
 
   if (!report) {

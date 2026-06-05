@@ -22,6 +22,55 @@ export type StudentDocumentReviewerRole = "professor" | "coordenador";
 export type StudentDocumentNotificationType =
   | "documento_reprovado_professor"
   | "documento_reprovado_coordenador";
+export type ExceptionalReleaseType =
+  | "avaliacao"
+  | "ausencia"
+  | "clinica_supervisionada";
+export type ExceptionalReleaseScope = "semestre" | "turma" | "aluno";
+
+export interface ExceptionalReleaseRecord {
+  id: string;
+  unitId: string;
+  semesterId: string;
+  classId: string | null;
+  studentId: string | null;
+  authorizedUserId: string;
+  type: ExceptionalReleaseType;
+  scope: ExceptionalReleaseScope;
+  reason: string;
+  createdBy: string;
+  startsAt: string;
+  expiresAt: string;
+  active: boolean;
+  manuallyClosedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExceptionalReleaseCheckContext {
+  type: ExceptionalReleaseType;
+  semesterId: string;
+  classId?: string | null;
+  studentId?: string | null;
+  unitId?: string | null;
+  authorizedUserId?: string | null;
+  referenceAt?: string | null;
+}
+
+export interface ExceptionalReleaseResolution {
+  releaseId: string;
+  expiresAt: string;
+  noticeMessage: string;
+}
+
+export interface ExceptionalReleaseGateResult {
+  semesterClosed: boolean;
+  allowed: boolean;
+  viaExceptionalRelease: boolean;
+  release: ExceptionalReleaseResolution | null;
+  blockedMessage: string | null;
+  noticeMessage: string | null;
+}
 
 export interface StudentDocumentAreaOption {
   enrollmentId: string;
@@ -189,6 +238,7 @@ export interface AuditEntry {
   happenedAt: string;
   recordLabel: string;
   summary: string;
+  exceptionalReleaseId?: string | null;
   semesterId?: string;
   semesterCode?: string;
   areaId?: string | null;
