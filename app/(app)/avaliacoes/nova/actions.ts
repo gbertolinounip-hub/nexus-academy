@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
-  attachExceptionalReleaseToAuditRecords,
   resolveExceptionalReleaseGate
 } from "@/services/exceptional-releases";
 import type {
@@ -211,61 +211,206 @@ function buildEvaluatedAtTimestamp(evaluatedAt: string) {
   return `${evaluatedAt}T12:00:00-03:00`;
 }
 
-function appendExceptionalReleaseNotice(message: string, noticeMessage?: string | null) {
-  return noticeMessage ? `${message} ${noticeMessage}` : message;
+function buildEvaluationSuccessMessage(input: {
+  intent: "rascunho" | "publicado";
+  draftMessage: string;
+}) {
+  return input.intent === "publicado"
+    ? "Lançamento publicado com sucesso!"
+    : input.draftMessage;
+}
+
+async function attachEvaluationExceptionalReleaseToAuditRecords(input: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  releaseId?: string | null;
+  tableName: string;
+  recordIds: Array<string | null | undefined>;
+}) {
+  const releaseId = input.releaseId?.trim() ?? "";
+  const recordIds = Array.from(
+    new Set(
+      input.recordIds.filter((recordId): recordId is string =>
+        Boolean(recordId && recordId.trim())
+      )
+    )
+  );
+
+  if (!releaseId || recordIds.length === 0) {
+    return 0;
+  }
+
+  const { data, error } = await (input.supabase.rpc as any)(
+    "vincular_liberacao_excepcional_auditoria",
+    {
+      p_liberacao_excepcional_id: releaseId,
+      p_tabela: input.tableName,
+      p_registro_ids: recordIds
+    }
+  );
+
+  if (error) {
+    const diagnosticSuffix =
+      process.env.NODE_ENV !== "production"
+        ? ` [rpc=${error.message}${
+            error.code ? ` | code=${error.code}` : ""
+          }${error.details ? ` | details=${error.details}` : ""}${
+            error.hint ? ` | hint=${error.hint}` : ""
+          }]`
+        : "";
+
+    throw new Error(
+      `Não foi possível vincular a liberação excepcional ao histórico de auditoria para ${input.tableName}.${diagnosticSuffix}`
+    );
+  }
+
+  const updatedCount = typeof data === "number" ? data : 0;
+
+  if (updatedCount === 0) {
+    const diagnosticSuffix =
+      process.env.NODE_ENV !== "production"
+        ? ` [table=${input.tableName} | releaseId=${releaseId} | recordIds=${recordIds.join(",")}]`
+        : "";
+
+    throw new Error(
+      `Não foi possível localizar registros auditáveis recentes para vincular a liberação excepcional.${diagnosticSuffix}`
+    );
+  }
+
+  return updatedCount;
+}
+
+async function tryAttachEvaluationExceptionalReleaseAuditTrail(input: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  releaseId?: string | null;
+  evaluationId: string;
+  itemRecordIds?: Array<string | null | undefined>;
+  contextLabel: "criacao" | "edicao" | "revisao";
+}) {
+  if (!input.releaseId?.trim()) {
+    return;
+  }
+
+  try {
+    await attachEvaluationExceptionalReleaseToAuditRecords({
+      supabase: input.supabase,
+      releaseId: input.releaseId,
+      tableName: "avaliacoes",
+      recordIds: [input.evaluationId]
+    });
+
+    await attachEvaluationExceptionalReleaseToAuditRecords({
+      supabase: input.supabase,
+      releaseId: input.releaseId,
+      tableName: "itens_avaliados",
+      recordIds: input.itemRecordIds ?? []
+    });
+
+    return;
+  } catch (error) {
+    console.error("Falha complementar ao vincular liberação excepcional à auditoria.", {
+      contextLabel: input.contextLabel,
+      evaluationId: input.evaluationId,
+      releaseId: input.releaseId,
+      itemRecordIds: input.itemRecordIds ?? [],
+      error
+    });
+  }
 }
 
 async function loadEvaluationOperationalScope(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   enrollmentId: string
 ) {
-  const { data: enrollmentData, error: enrollmentError } = await supabase
-    .from("matriculas_turma")
-    .select("id, aluno_id, turma_id")
-    .eq("id", enrollmentId)
-    .maybeSingle();
+  const adminSupabase = createSupabaseAdminClient();
 
-  const enrollment = (enrollmentData ?? null) as EnrollmentRow | null;
+  async function resolveWithClient(
+    client:
+      | Awaited<ReturnType<typeof createSupabaseServerClient>>
+      | ReturnType<typeof createSupabaseAdminClient>
+  ) {
+    const { data: enrollmentData, error: enrollmentError } = await client
+      .from("matriculas_turma")
+      .select("id, aluno_id, turma_id")
+      .eq("id", enrollmentId)
+      .maybeSingle();
 
-  if (enrollmentError || !enrollment) {
+    const enrollment = (enrollmentData ?? null) as EnrollmentRow | null;
+
+    if (enrollmentError || !enrollment) {
+      return {
+        enrollment: null,
+        classGroup: null,
+        semester: null
+      };
+    }
+
+    const { data: classData, error: classError } = await client
+      .from("turmas")
+      .select("id, semestre_id")
+      .eq("id", enrollment.turma_id)
+      .maybeSingle();
+
+    const classGroup = (classData ?? null) as ClassRow | null;
+
+    if (classError || !classGroup) {
+      return {
+        enrollment,
+        classGroup: null,
+        semester: null
+      };
+    }
+
+    const { data: semesterData, error: semesterError } = await client
+      .from("semestres")
+      .select("id, status")
+      .eq("id", classGroup.semestre_id)
+      .maybeSingle();
+
+    const semester = (semesterData ?? null) as SemesterRow | null;
+
+    if (semesterError || !semester) {
+      return {
+        enrollment,
+        classGroup,
+        semester: null
+      };
+    }
+
+    return {
+      enrollment,
+      classGroup,
+      semester
+    };
+  }
+
+  const authenticatedScope = await resolveWithClient(supabase);
+  const resolvedScope = authenticatedScope.semester
+    ? authenticatedScope
+    : await resolveWithClient(adminSupabase);
+
+  if (!resolvedScope.enrollment) {
     throw new Error(
       "Nao foi possivel localizar a matricula vinculada a este lancamento."
     );
   }
 
-  const { data: classData, error: classError } = await supabase
-    .from("turmas")
-    .select("id, semestre_id")
-    .eq("id", enrollment.turma_id)
-    .maybeSingle();
-
-  const classGroup = (classData ?? null) as ClassRow | null;
-
-  if (classError || !classGroup) {
+  if (!resolvedScope.classGroup) {
     throw new Error(
       "Nao foi possivel localizar a turma vinculada a este lancamento."
     );
   }
 
-  const { data: semesterData, error: semesterError } = await supabase
-    .from("semestres")
-    .select("id, status")
-    .eq("id", classGroup.semestre_id)
-    .maybeSingle();
-
-  const semester = (semesterData ?? null) as SemesterRow | null;
-
-  if (semesterError || !semester) {
+  if (!resolvedScope.semester) {
     throw new Error(
       "Nao foi possivel localizar o semestre vinculado a este lancamento."
     );
   }
 
   return {
-    semesterId: semester.id,
-    semesterStatus: semester.status,
-    classId: classGroup.id,
-    studentId: enrollment.aluno_id
+    semesterId: resolvedScope.semester.id,
+    semesterStatus: resolvedScope.semester.status,
+    classId: resolvedScope.classGroup.id,
+    studentId: resolvedScope.enrollment.aluno_id
   };
 }
 
@@ -668,16 +813,6 @@ export async function submitEvaluationAction(
     isEditing = true;
   }
 
-  const linkValidation = await validateProfessorLink(currentUser.id, targetEnrollmentId);
-
-  if (!linkValidation.ok) {
-    return buildErrorState(
-      linkValidation.message,
-      linkValidation.fieldErrors ?? {},
-      submittedFormValues
-    );
-  }
-
   let evaluationScope;
 
   try {
@@ -705,17 +840,29 @@ export async function submitEvaluationAction(
       currentUser,
       semesterStatus: evaluationScope.semesterStatus,
       blockedMessage:
-        "O semestre selecionado ja esta encerrado. Este lancamento so pode ser realizado com liberacao excepcional ativa."
+        "O semestre selecionado já está encerrado. Este lançamento só pode ser realizado com liberação excepcional ativa."
     }
   );
 
   if (!exceptionalReleaseGate.allowed) {
     return buildErrorState(
       exceptionalReleaseGate.blockedMessage ??
-        "O semestre selecionado ja esta encerrado e nao permite novos ajustes.",
+        "O semestre selecionado já está encerrado e não permite novos ajustes.",
       {},
       submittedFormValues
     );
+  }
+
+  if (!exceptionalReleaseGate.viaExceptionalRelease) {
+    const linkValidation = await validateProfessorLink(currentUser.id, targetEnrollmentId);
+
+    if (!linkValidation.ok) {
+      return buildErrorState(
+        linkValidation.message,
+        linkValidation.fieldErrors ?? {},
+        submittedFormValues
+      );
+    }
   }
 
   const previousItemIds =
@@ -854,21 +1001,16 @@ export async function submitEvaluationAction(
         .select("id")
         .eq("avaliacao_id", evaluationId);
 
-      await attachExceptionalReleaseToAuditRecords({
+      await tryAttachEvaluationExceptionalReleaseAuditTrail({
         supabase,
         releaseId: exceptionalReleaseGate.release.releaseId,
-        tableName: "avaliacoes",
-        recordIds: [evaluationId]
-      });
-      await attachExceptionalReleaseToAuditRecords({
-        supabase,
-        releaseId: exceptionalReleaseGate.release.releaseId,
-        tableName: "itens_avaliados",
-        recordIds: (
+        evaluationId,
+        itemRecordIds: (
           ((currentItemsData ?? []) as Array<
             Pick<Database["public"]["Tables"]["itens_avaliados"]["Row"], "id">
           >)
-        ).map((item) => item.id)
+        ).map((item) => item.id),
+        contextLabel: "revisao"
       });
     }
 
@@ -880,17 +1022,16 @@ export async function submitEvaluationAction(
     revalidatePath("/professor");
     revalidatePath("/aluno");
     revalidatePath("/coordenador");
+    revalidatePath("/coordenador/liberacoes-excepcionais");
     revalidatePath("/relatorios");
     revalidatePath("/auditoria");
     revalidatePath("/auditoria");
 
     return buildSuccessState(
-      appendExceptionalReleaseNotice(
-        intent === "publicado"
-          ? "Revisão publicada com sucesso."
-          : "Rascunho de revisão salvo com sucesso.",
-        exceptionalReleaseGate.noticeMessage
-      ),
+      buildEvaluationSuccessMessage({
+        intent,
+        draftMessage: "Rascunho de revisão salvo com sucesso."
+      }),
       evaluationId,
       intent
     );
@@ -937,24 +1078,19 @@ export async function submitEvaluationAction(
         .select("id")
         .eq("avaliacao_id", evaluationId);
 
-      await attachExceptionalReleaseToAuditRecords({
+      await tryAttachEvaluationExceptionalReleaseAuditTrail({
         supabase,
         releaseId: exceptionalReleaseGate.release.releaseId,
-        tableName: "avaliacoes",
-        recordIds: [evaluationId]
-      });
-      await attachExceptionalReleaseToAuditRecords({
-        supabase,
-        releaseId: exceptionalReleaseGate.release.releaseId,
-        tableName: "itens_avaliados",
-        recordIds: [
+        evaluationId,
+        itemRecordIds: [
           ...previousItemIds,
           ...(
             ((currentItemsData ?? []) as Array<
               Pick<Database["public"]["Tables"]["itens_avaliados"]["Row"], "id">
             >)
           ).map((item) => item.id)
-        ]
+        ],
+        contextLabel: "edicao"
       });
     }
 
@@ -964,16 +1100,15 @@ export async function submitEvaluationAction(
     revalidatePath("/professor");
     revalidatePath("/aluno");
     revalidatePath("/coordenador");
+    revalidatePath("/coordenador/liberacoes-excepcionais");
     revalidatePath("/relatorios");
     revalidatePath("/auditoria");
 
     return buildSuccessState(
-      appendExceptionalReleaseNotice(
-        intent === "publicado"
-          ? "Lançamento publicado com sucesso."
-          : "Rascunho atualizado com sucesso.",
-        exceptionalReleaseGate.noticeMessage
-      ),
+      buildEvaluationSuccessMessage({
+        intent,
+        draftMessage: "Rascunho atualizado com sucesso."
+      }),
       evaluationId,
       intent
     );
@@ -1017,21 +1152,16 @@ export async function submitEvaluationAction(
       .select("id")
       .eq("avaliacao_id", evaluationId);
 
-    await attachExceptionalReleaseToAuditRecords({
+    await tryAttachEvaluationExceptionalReleaseAuditTrail({
       supabase,
       releaseId: exceptionalReleaseGate.release.releaseId,
-      tableName: "avaliacoes",
-      recordIds: [evaluationId]
-    });
-    await attachExceptionalReleaseToAuditRecords({
-      supabase,
-      releaseId: exceptionalReleaseGate.release.releaseId,
-      tableName: "itens_avaliados",
-      recordIds: (
+      evaluationId,
+      itemRecordIds: (
         ((currentItemsData ?? []) as Array<
           Pick<Database["public"]["Tables"]["itens_avaliados"]["Row"], "id">
         >)
-      ).map((item) => item.id)
+      ).map((item) => item.id),
+      contextLabel: "criacao"
     });
   }
 
@@ -1041,16 +1171,15 @@ export async function submitEvaluationAction(
   revalidatePath("/professor");
   revalidatePath("/aluno");
   revalidatePath("/coordenador");
+  revalidatePath("/coordenador/liberacoes-excepcionais");
   revalidatePath("/relatorios");
   revalidatePath("/auditoria");
 
   return buildSuccessState(
-    appendExceptionalReleaseNotice(
-      intent === "publicado"
-        ? "Lançamento publicado com sucesso."
-        : "Rascunho salvo com sucesso.",
-      exceptionalReleaseGate.noticeMessage
-    ),
+    buildEvaluationSuccessMessage({
+      intent,
+      draftMessage: "Rascunho salvo com sucesso."
+    }),
     evaluationId,
     intent
   );

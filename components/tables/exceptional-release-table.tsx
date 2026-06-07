@@ -9,6 +9,22 @@ interface ExceptionalReleaseTableProps {
   closeAction?: (formData: FormData) => void | Promise<void>;
 }
 
+function buildInactiveActionMessage(entry: ExceptionalReleaseListEntry) {
+  if (entry.statusKey === "expirada") {
+    return "Vigência encerrada automaticamente";
+  }
+
+  if (entry.statusKey === "utilizada") {
+    return "Utilizada no fluxo excepcional";
+  }
+
+  if (entry.statusKey === "encerrada") {
+    return "Encerrada manualmente";
+  }
+
+  return "Sem ações disponíveis";
+}
+
 export function ExceptionalReleaseTable({
   entries,
   emptyMessage,
@@ -46,7 +62,6 @@ export function ExceptionalReleaseTable({
               <tr key={entry.id}>
                 <td className="exceptional-release-cell-type">
                   <strong>{entry.typeLabel}</strong>
-                  <span className="table-helper">{entry.scopeLabel}</span>
                 </td>
                 <td className="exceptional-release-cell-recipient">
                   <strong>{entry.authorizedUserName}</strong>
@@ -61,10 +76,10 @@ export function ExceptionalReleaseTable({
                   {entry.classLabel ? (
                     <span className="table-helper">Turma · {entry.classLabel}</span>
                   ) : null}
-                  {entry.studentLabel ? (
-                    <span className="table-helper">Aluno · {entry.studentLabel}</span>
-                  ) : null}
-                  <span className="table-helper">Motivo · {entry.reason}</span>
+                  <span className="table-helper">
+                    Aluno · {entry.studentLabel ?? "Não identificado no registro"}
+                  </span>
+                  <span className="table-helper">Motivo autorizado: {entry.reason}</span>
                   <span className="table-helper">
                     Autorizado por {entry.createdByName}
                   </span>
@@ -74,6 +89,12 @@ export function ExceptionalReleaseTable({
                   <span className="table-helper">
                     até {formatDateTime(entry.expiresAt)}
                   </span>
+                  {entry.usedAt ? (
+                    <span className="table-helper">
+                      Utilizada em {formatDateTime(entry.usedAt)}
+                      {entry.usedByName ? ` por ${entry.usedByName}` : ""}
+                    </span>
+                  ) : null}
                   {entry.manuallyClosedAt ? (
                     <span className="table-helper">
                       Encerrada em {formatDateTime(entry.manuallyClosedAt)}
@@ -97,11 +118,7 @@ export function ExceptionalReleaseTable({
                     </ConfirmActionForm>
                   ) : (
                     <span className="table-helper">
-                      {entry.statusKey === "expirada"
-                        ? "Vigência encerrada automaticamente"
-                        : entry.statusKey === "encerrada"
-                          ? "Encerrada manualmente"
-                          : "Sem ações disponíveis"}
+                      {buildInactiveActionMessage(entry)}
                     </span>
                   )}
                 </td>
@@ -120,9 +137,7 @@ export function ExceptionalReleaseTable({
             <div className="management-block-header">
               <div>
                 <h3>{entry.typeLabel}</h3>
-                <p className="field-help">
-                  {entry.scopeLabel} · {entry.authorizedUserName}
-                </p>
+                <p className="field-help">{entry.authorizedUserName}</p>
               </div>
               <span className={`status-pill ${entry.statusClassName}`}>
                 {entry.statusLabel}
@@ -137,7 +152,7 @@ export function ExceptionalReleaseTable({
                 </dd>
               </div>
               <div>
-                <dt>Usuário</dt>
+                <dt>Usuário liberado</dt>
                 <dd>{entry.authorizedUserRoleLabel}</dd>
               </div>
               {entry.classLabel ? (
@@ -146,24 +161,31 @@ export function ExceptionalReleaseTable({
                   <dd>{entry.classLabel}</dd>
                 </div>
               ) : null}
-              {entry.studentLabel ? (
-                <div>
-                  <dt>Aluno</dt>
-                  <dd>{entry.studentLabel}</dd>
-                </div>
-              ) : null}
+              <div>
+                <dt>Aluno</dt>
+                <dd>{entry.studentLabel ?? "Não identificado no registro"}</dd>
+              </div>
               <div>
                 <dt>Vigência</dt>
                 <dd>
                   {formatDateTime(entry.startsAt)} até {formatDateTime(entry.expiresAt)}
                 </dd>
               </div>
+              {entry.usedAt ? (
+                <div>
+                  <dt>Utilizada</dt>
+                  <dd>
+                    {formatDateTime(entry.usedAt)}
+                    {entry.usedByName ? ` por ${entry.usedByName}` : ""}
+                  </dd>
+                </div>
+              ) : null}
               <div>
                 <dt>Autorizado por</dt>
                 <dd>{entry.createdByName}</dd>
               </div>
               <div className="exceptional-release-mobile-meta-wide">
-                <dt>Motivo</dt>
+                <dt>Motivo autorizado</dt>
                 <dd>{entry.reason}</dd>
               </div>
             </dl>
@@ -180,11 +202,7 @@ export function ExceptionalReleaseTable({
                 </ConfirmActionForm>
               ) : (
                 <span className="table-helper">
-                  {entry.statusKey === "expirada"
-                    ? "Vigência encerrada automaticamente"
-                    : entry.statusKey === "encerrada"
-                      ? "Encerrada manualmente"
-                      : "Sem ações disponíveis"}
+                  {buildInactiveActionMessage(entry)}
                 </span>
               )}
             </div>

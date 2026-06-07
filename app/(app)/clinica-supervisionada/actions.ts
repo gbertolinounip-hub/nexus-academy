@@ -301,6 +301,7 @@ async function loadClinicalAssignmentEnrollmentContext(input: {
   currentUser: Awaited<ReturnType<typeof requireRole>>;
   unitId: string;
   enrollmentId: string;
+  skipProfessorLinkValidation?: boolean;
 }) {
   const today = getTodayInSaoPaulo();
   const enrollmentResult = await input.supabase
@@ -310,7 +311,11 @@ async function loadClinicalAssignmentEnrollmentContext(input: {
     .maybeSingle();
   const enrollment = (enrollmentResult.data ?? null) as EnrollmentRow | null;
 
-  if (enrollmentResult.error || !enrollment || enrollment.status !== "ativa") {
+  if (
+    enrollmentResult.error ||
+    !enrollment ||
+    (!input.skipProfessorLinkValidation && enrollment.status !== "ativa")
+  ) {
     return {
       context: null,
       error:
@@ -320,7 +325,7 @@ async function loadClinicalAssignmentEnrollmentContext(input: {
 
   let professorId = input.currentUser.id;
 
-  if (input.currentUser.role === "professor") {
+  if (input.currentUser.role === "professor" && !input.skipProfessorLinkValidation) {
     const { data: professorLinkData, error: linkError } = await input.supabase
       .from("vinculos_professor_aluno")
       .select("*")
@@ -372,6 +377,16 @@ async function loadClinicalAssignmentEnrollmentContext(input: {
     professorId = professorLinkSelection.link.professor_id;
   }
 
+  let studentUserQuery = input.supabase
+    .from("usuarios")
+    .select("*")
+    .eq("id", enrollment.aluno_id)
+    .eq("unidade_id", input.unitId);
+
+  if (!input.skipProfessorLinkValidation) {
+    studentUserQuery = studentUserQuery.eq("ativo", true);
+  }
+
   const [classResult, studentResult, studentUserResult] = await Promise.all([
     input.supabase.from("turmas").select("*").eq("id", enrollment.turma_id).maybeSingle(),
     input.supabase
@@ -379,13 +394,7 @@ async function loadClinicalAssignmentEnrollmentContext(input: {
       .select("*")
       .eq("usuario_id", enrollment.aluno_id)
       .maybeSingle(),
-    input.supabase
-      .from("usuarios")
-      .select("*")
-      .eq("id", enrollment.aluno_id)
-      .eq("unidade_id", input.unitId)
-      .eq("ativo", true)
-      .maybeSingle()
+    studentUserQuery.maybeSingle()
   ]);
 
   const classGroup = (classResult.data ?? null) as ClassRow | null;
@@ -702,16 +711,17 @@ export async function createOrUpdateClinicalCaseAction(
     );
   }
 
-  const enrollmentContextResult = await loadClinicalAssignmentEnrollmentContext({
+  const preliminaryEnrollmentContextResult = await loadClinicalAssignmentEnrollmentContext({
     supabase: dataSupabase as SupabaseServerClient,
     currentUser,
     unitId: currentUnitId,
-    enrollmentId: parsedData.data.enrollment_id
+    enrollmentId: parsedData.data.enrollment_id,
+    skipProfessorLinkValidation: currentUser.role === "professor"
   });
 
-  if (!enrollmentContextResult.context) {
+  if (!preliminaryEnrollmentContextResult.context) {
     return buildErrorState(
-      enrollmentContextResult.error ??
+      preliminaryEnrollmentContextResult.error ??
         "Nao foi possivel validar o estagiario selecionado para a Clinica Supervisionada.",
       { enrollment_id: "Selecione um estagiario valido da sua supervisao." },
       submittedFormValues
@@ -721,25 +731,44 @@ export async function createOrUpdateClinicalCaseAction(
   const exceptionalReleaseGate = await resolveExceptionalReleaseGate(
     {
       type: "clinica_supervisionada",
-      semesterId: enrollmentContextResult.context.semester.id,
-      classId: enrollmentContextResult.context.classGroup.id,
-      studentId: enrollmentContextResult.context.studentUser.id,
+      semesterId: preliminaryEnrollmentContextResult.context.semester.id,
+      classId: preliminaryEnrollmentContextResult.context.classGroup.id,
+      studentId: preliminaryEnrollmentContextResult.context.studentUser.id,
       unitId: currentUnitId,
       authorizedUserId: currentUser.id
     },
     {
       currentUser,
-      semesterStatus: enrollmentContextResult.context.semester.status,
+      semesterStatus: preliminaryEnrollmentContextResult.context.semester.status,
       blockedMessage:
-        "O semestre vinculado a esta operacao clinica ja esta encerrado. Esta edicao so pode ser realizada com liberacao excepcional ativa."
+        "O semestre vinculado a esta operação clínica já está encerrado. Esta edição só pode ser realizada com liberação excepcional ativa."
     }
   );
 
   if (!exceptionalReleaseGate.allowed) {
     return buildErrorState(
       exceptionalReleaseGate.blockedMessage ??
-        "O semestre vinculado a esta operacao clinica ja esta encerrado e nao permite novos ajustes.",
+        "O semestre vinculado a esta operação clínica já está encerrado e não permite novos ajustes.",
       {},
+      submittedFormValues
+    );
+  }
+
+  const enrollmentContextResult =
+    currentUser.role === "professor" && !exceptionalReleaseGate.viaExceptionalRelease
+      ? await loadClinicalAssignmentEnrollmentContext({
+          supabase: dataSupabase as SupabaseServerClient,
+          currentUser,
+          unitId: currentUnitId,
+          enrollmentId: parsedData.data.enrollment_id
+        })
+      : preliminaryEnrollmentContextResult;
+
+  if (!enrollmentContextResult.context) {
+    return buildErrorState(
+      enrollmentContextResult.error ??
+        "Nao foi possivel validar o estagiario selecionado para a Clinica Supervisionada.",
+      { enrollment_id: "Selecione um estagiario valido da sua supervisao." },
       submittedFormValues
     );
   }

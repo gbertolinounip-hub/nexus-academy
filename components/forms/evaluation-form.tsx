@@ -1,9 +1,10 @@
 ﻿"use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { submitEvaluationAction } from "@/app/(app)/avaliacoes/nova/actions";
+import { ExceptionalReleaseNotice } from "@/components/common/exceptional-release-notice";
 import type { EvaluationActionFormValues } from "@/app/(app)/avaliacoes/nova/state";
 import { initialEvaluationActionState } from "@/app/(app)/avaliacoes/nova/state";
 import type {
@@ -205,10 +206,17 @@ export function EvaluationForm({
       : `evaluation-${mode}-${
           resolvedFormValues.avaliacaoId ?? resolvedFormValues.avaliacaoOrigemId ?? "new"
         }`;
-  const selectedEnrollmentId = resolvedFormValues.matriculaTurmaId;
+  const [selectedEnrollmentId, setSelectedEnrollmentId] = useState(
+    resolvedFormValues.matriculaTurmaId
+  );
   const selectedStudentLabel =
     studentOptions.find((student) => student.enrollmentId === selectedEnrollmentId)?.label ??
     "Aluno vinculado";
+  const selectedStudentOption = studentOptions.find(
+    (student) => student.enrollmentId === selectedEnrollmentId
+  );
+  const exceptionalReleaseNotice =
+    !isReadOnly ? selectedStudentOption?.exceptionalReleaseNotice ?? null : null;
   const hasCriteriaError = Boolean(fieldErrors.criteria);
 
   function getFieldClassName(fieldName: keyof typeof fieldErrors) {
@@ -218,6 +226,10 @@ export function EvaluationForm({
   function getInputClassName(fieldName: keyof typeof fieldErrors) {
     return fieldErrors[fieldName] ? "input input-invalid" : "input";
   }
+
+  useEffect(() => {
+    setSelectedEnrollmentId(resolvedFormValues.matriculaTurmaId);
+  }, [resolvedFormValues.matriculaTurmaId]);
 
   useEffect(() => {
     if (safeState.status !== "success") {
@@ -240,6 +252,9 @@ export function EvaluationForm({
     <form ref={formRef} action={formAction} className="form-stack" key={formRenderKey}>
       {readOnlyMessage ? <div className="form-notice">{readOnlyMessage}</div> : null}
       {contextMessage ? <div className="form-notice">{contextMessage}</div> : null}
+      {exceptionalReleaseNotice ? (
+        <ExceptionalReleaseNotice notice={exceptionalReleaseNotice} compact />
+      ) : null}
 
       {safeState.message ? (
         <div
@@ -279,9 +294,10 @@ export function EvaluationForm({
           <select
             className={getInputClassName("matricula_turma_id")}
             name="matricula_turma_id"
-            defaultValue={selectedEnrollmentId}
+            value={selectedEnrollmentId}
             disabled={mode !== "create"}
             aria-invalid={Boolean(fieldErrors.matricula_turma_id)}
+            onChange={(event) => setSelectedEnrollmentId(event.currentTarget.value)}
           >
             {studentOptions.map((student) => (
               <option key={student.enrollmentId} value={student.enrollmentId}>

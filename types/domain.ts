@@ -22,6 +22,7 @@ export type StudentDocumentReviewerRole = "professor" | "coordenador";
 export type StudentDocumentNotificationType =
   | "documento_reprovado_professor"
   | "documento_reprovado_coordenador";
+export type ExceptionalReleaseManagementType = "avaliacao" | "ausencia";
 export type ExceptionalReleaseType =
   | "avaliacao"
   | "ausencia"
@@ -43,6 +44,8 @@ export interface ExceptionalReleaseRecord {
   expiresAt: string;
   active: boolean;
   manuallyClosedAt: string | null;
+  usedAt: string | null;
+  usedBy: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -60,6 +63,7 @@ export interface ExceptionalReleaseCheckContext {
 export interface ExceptionalReleaseResolution {
   releaseId: string;
   expiresAt: string;
+  reason: string | null;
   noticeMessage: string;
 }
 
@@ -70,6 +74,13 @@ export interface ExceptionalReleaseGateResult {
   release: ExceptionalReleaseResolution | null;
   blockedMessage: string | null;
   noticeMessage: string | null;
+}
+
+export interface ExceptionalReleaseVisualNotice {
+  title: string;
+  message: string;
+  reason: string | null;
+  expiresAt: string;
 }
 
 export interface StudentDocumentAreaOption {
@@ -502,11 +513,14 @@ export interface ClinicalStudentOption {
   studentId: string;
   studentName: string;
   registration: string;
+  classId: string;
   className: string;
+  semesterId: string;
   semesterCode: string;
   areaId: string | null;
   areaName: string;
   professorName?: string | null;
+  exceptionalReleaseNotice?: ExceptionalReleaseVisualNotice | null;
   label: string;
 }
 

@@ -21,11 +21,10 @@ type ReleaseRow = Database["public"]["Tables"]["liberacoes_excepcionais"]["Row"]
 const pagePath = "/coordenador/liberacoes-excepcionais";
 
 const exceptionalReleaseSchema = z.object({
-  tipo: z.enum(["avaliacao", "ausencia", "clinica_supervisionada"]),
-  escopo: z.enum(["semestre", "turma", "aluno"]),
+  tipo: z.enum(["avaliacao", "ausencia"]),
   semestre_id: z.string().uuid("Selecione um semestre válido."),
-  turma_id: z.string().trim(),
-  aluno_id: z.string().trim(),
+  turma_id: z.string().uuid("Selecione uma turma válida."),
+  aluno_id: z.string().uuid("Selecione um aluno válido."),
   usuario_autorizado_id: z.string().uuid("Selecione o usuário que receberá a liberação."),
   motivo: z
     .string()
@@ -53,14 +52,9 @@ function normalizeFieldErrors(
 function buildFormValues(formData: FormData): ExceptionalReleaseFormValues {
   return {
     tipo:
-      formData.get("tipo") === "ausencia" ||
-      formData.get("tipo") === "clinica_supervisionada"
-        ? (formData.get("tipo") as ExceptionalReleaseFormValues["tipo"])
+      formData.get("tipo") === "ausencia"
+        ? "ausencia"
         : "avaliacao",
-    escopo:
-      formData.get("escopo") === "turma" || formData.get("escopo") === "aluno"
-        ? (formData.get("escopo") as ExceptionalReleaseFormValues["escopo"])
-        : "semestre",
     semestre_id: String(formData.get("semestre_id") ?? ""),
     turma_id: String(formData.get("turma_id") ?? ""),
     aluno_id: String(formData.get("aluno_id") ?? ""),
@@ -168,26 +162,6 @@ export async function createExceptionalReleaseAction(
     );
   }
 
-  if (values.escopo === "turma" && !values.turma_id.trim()) {
-    return buildErrorState(
-      "Selecione a turma para uma liberação no escopo de turma.",
-      formValues,
-      {
-        turma_id: "Selecione a turma que ficará liberada."
-      }
-    );
-  }
-
-  if (values.escopo === "aluno" && !values.aluno_id.trim()) {
-    return buildErrorState(
-      "Selecione o aluno para uma liberação no escopo de aluno.",
-      formValues,
-      {
-        aluno_id: "Selecione o aluno que ficará liberado."
-      }
-    );
-  }
-
   const supabase = await createSupabaseServerClient();
   const [semesterResult, authorizedUserResult] = await Promise.all([
     supabase
@@ -275,115 +249,89 @@ export async function createExceptionalReleaseAction(
     );
   }
 
-  let classGroup: Pick<ClassRow, "id" | "semestre_id"> | null = null;
+  const classResult = await supabase
+    .from("turmas")
+    .select("id, semestre_id")
+    .eq("id", values.turma_id)
+    .eq("semestre_id", semester.id)
+    .maybeSingle();
 
-  if (values.turma_id.trim()) {
-    const classResult = await supabase
-      .from("turmas")
-      .select("id, semestre_id")
-      .eq("id", values.turma_id.trim())
-      .eq("semestre_id", semester.id)
-      .maybeSingle();
-
-    if (classResult.error || !classResult.data) {
-      return buildErrorState(
-        "A turma selecionada não pertence ao semestre informado.",
-        formValues,
-        {
-          turma_id: "Selecione uma turma válida dentro do semestre escolhido."
-        }
-      );
-    }
-
-    classGroup = classResult.data as Pick<ClassRow, "id" | "semestre_id">;
+  if (classResult.error || !classResult.data) {
+    return buildErrorState(
+      "A turma selecionada não pertence ao semestre informado.",
+      formValues,
+      {
+        turma_id: "Selecione uma turma válida dentro do semestre escolhido."
+      }
+    );
   }
 
-  if (values.escopo === "aluno") {
-    const studentId = values.aluno_id.trim();
-    const studentResult = await supabase
-      .from("alunos")
-      .select("usuario_id, unidade_id")
-      .eq("usuario_id", studentId)
+  const classGroup = classResult.data as Pick<ClassRow, "id" | "semestre_id">;
+  const studentId = values.aluno_id;
+  const [studentUserResult, studentRecordResult, enrollmentResult] = await Promise.all([
+    supabase
+      .from("usuarios")
+      .select("id, unidade_id")
+      .eq("id", studentId)
       .eq("unidade_id", currentUnitId)
-      .maybeSingle();
-
-    if (studentResult.error || !studentResult.data) {
-      return buildErrorState(
-        "O aluno selecionado não pertence à unidade do coordenador.",
-        formValues,
-        {
-          aluno_id: "Selecione um aluno válido da sua unidade."
-        }
-      );
-    }
-
-    let eligibleClassIds = classGroup ? [classGroup.id] : [];
-
-    if (!classGroup) {
-      const semesterClassRowsResult = await supabase
-        .from("turmas")
-        .select("id")
-        .eq("semestre_id", semester.id);
-
-      eligibleClassIds = (
-        (semesterClassRowsResult.data ?? []) as Array<Pick<ClassRow, "id">>
-      ).map((item) => item.id);
-    }
-
-    if (!eligibleClassIds.length) {
-      return buildErrorState(
-        "Não foi possível localizar turmas válidas no semestre selecionado para filtrar o aluno.",
-        formValues,
-        {
-          aluno_id: "Selecione um semestre com turmas válidas para localizar o aluno."
-        }
-      );
-    }
-
-    let enrollmentQuery = supabase
+      .maybeSingle(),
+    supabase
+      .from("alunos")
+      .select("usuario_id")
+      .eq("usuario_id", studentId)
+      .maybeSingle(),
+    supabase
       .from("matriculas_turma")
       .select("id, turma_id")
       .eq("aluno_id", studentId)
-      .in("turma_id", eligibleClassIds);
+      .eq("turma_id", classGroup.id)
+  ]);
 
-    const enrollmentResult = await enrollmentQuery;
-    const matchingEnrollment =
-      (
-        (enrollmentResult.data ?? []) as Array<Pick<EnrollmentRow, "id" | "turma_id">>
-      ).find((enrollment) => {
-        if (classGroup) {
-          return enrollment.turma_id === classGroup.id;
-        }
+  if (
+    studentUserResult.error ||
+    !studentUserResult.data ||
+    studentRecordResult.error ||
+    !studentRecordResult.data
+  ) {
+    return buildErrorState(
+      "O aluno selecionado não pertence à unidade do coordenador.",
+      formValues,
+      {
+        aluno_id: "Selecione um aluno válido da sua unidade."
+      }
+    );
+  }
 
-        return true;
-      }) ?? null;
+  const matchingEnrollment =
+    ((enrollmentResult.data ?? []) as Array<Pick<EnrollmentRow, "id" | "turma_id">>)[0] ??
+    null;
 
-    if (enrollmentResult.error || !matchingEnrollment) {
-      return buildErrorState(
-        "O aluno selecionado não possui vínculo compatível com o semestre e a turma informados.",
-        formValues,
-        {
-          aluno_id: "Selecione um aluno vinculado ao semestre escolhido."
-        }
-      );
-    }
+  if (enrollmentResult.error || !matchingEnrollment) {
+    return buildErrorState(
+      "O aluno selecionado não possui vínculo compatível com o semestre e a turma informados.",
+      formValues,
+      {
+        aluno_id: "Selecione um aluno vinculado à turma escolhida."
+      }
+    );
   }
 
   const payload: ReleaseInsert = {
     unidade_id: currentUnitId,
     semestre_id: semester.id,
-    turma_id:
-      values.escopo === "semestre" ? null : values.turma_id.trim() || null,
-    aluno_id: values.escopo === "aluno" ? values.aluno_id.trim() : null,
+    turma_id: classGroup.id,
+    aluno_id: studentId,
     usuario_autorizado_id: values.usuario_autorizado_id,
     tipo: values.tipo,
-    escopo: values.escopo,
+    escopo: "aluno",
     motivo: values.motivo.trim(),
     criado_por: currentUser.id,
     inicio_em: startsAt,
     expira_em: expiresAt,
     ativo: true,
-    encerrado_manualmente_em: null
+    encerrado_manualmente_em: null,
+    utilizado_em: null,
+    utilizado_por: null
   };
 
   const { error } = await (supabase.from("liberacoes_excepcionais") as any).insert(
@@ -444,6 +392,15 @@ export async function closeExceptionalReleaseAction(formData: FormData) {
 
   const release = data as ReleaseRow;
   const now = new Date();
+
+  if (release.utilizado_em) {
+    redirect(
+      buildNoticeRedirect(
+        "Essa liberação já foi utilizada e não pode mais ser encerrada manualmente.",
+        "error"
+      )
+    );
+  }
 
   if (!release.ativo || release.encerrado_manualmente_em) {
     redirect(

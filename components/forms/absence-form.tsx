@@ -4,6 +4,7 @@ import { useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { submitAbsenceAction } from "@/app/(app)/ausencias/actions";
+import { ExceptionalReleaseNotice } from "@/components/common/exceptional-release-notice";
 import type { AbsenceActionFormValues } from "@/app/(app)/ausencias/state";
 import { initialAbsenceActionState } from "@/app/(app)/ausencias/state";
 import type {
@@ -125,8 +126,17 @@ export function AbsenceForm({
     return fieldErrors[fieldName] ? "input input-invalid" : "input";
   }
 
+  const selectedStudentOption = studentOptions.find(
+    (studentOption) => studentOption.enrollmentId === draft.matricula_turma_id
+  );
+  const exceptionalReleaseNotice = selectedStudentOption?.exceptionalReleaseNotice ?? null;
+
   return (
     <form action={formAction} className="form-stack absence-form" noValidate>
+      {exceptionalReleaseNotice ? (
+        <ExceptionalReleaseNotice notice={exceptionalReleaseNotice} compact />
+      ) : null}
+
       {safeState.message ? (
         <div
           className={

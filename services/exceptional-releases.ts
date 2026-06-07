@@ -1,3 +1,4 @@
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCurrentAppUser } from "@/lib/auth/session";
 import { roleLabels } from "@/lib/auth/roles";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -6,8 +7,8 @@ import type {
   ExceptionalReleaseCheckContext,
   ExceptionalReleaseGateResult,
   ExceptionalReleaseResolution,
-  ExceptionalReleaseScope,
   ExceptionalReleaseType,
+  ExceptionalReleaseVisualNotice,
   SessionUser
 } from "@/types/domain";
 
@@ -66,8 +67,6 @@ export interface ExceptionalReleaseListEntry {
   id: string;
   type: ExceptionalReleaseType;
   typeLabel: string;
-  scope: ExceptionalReleaseScope;
-  scopeLabel: string;
   semesterCode: string;
   semesterName: string;
   classLabel: string | null;
@@ -80,8 +79,10 @@ export interface ExceptionalReleaseListEntry {
   startsAt: string;
   expiresAt: string;
   manuallyClosedAt: string | null;
+  usedAt: string | null;
+  usedByName: string | null;
   createdAt: string;
-  statusKey: "ativa" | "agendada" | "expirada" | "encerrada";
+  statusKey: "ativa" | "agendada" | "expirada" | "encerrada" | "utilizada";
   statusLabel: string;
   statusClassName: string;
   canManualClose: boolean;
@@ -91,6 +92,7 @@ export interface ExceptionalReleaseSummary {
   activeCount: number;
   scheduledCount: number;
   expiredCount: number;
+  usedCount: number;
   closedCount: number;
 }
 
@@ -115,16 +117,17 @@ export interface ExceptionalReleaseManagementLoadResult {
   emptyState: EmptyState | null;
 }
 
+export interface ExceptionalReleaseEnrollmentContext {
+  enrollmentId: string;
+  classId: string;
+  semesterId: string;
+  studentId: string;
+}
+
 const exceptionalReleaseTypeLabels: Record<ExceptionalReleaseType, string> = {
   avaliacao: "Avaliação",
-  ausencia: "Ausência",
+  ausencia: "Ausências",
   clinica_supervisionada: "Clínica supervisionada"
-};
-
-const exceptionalReleaseScopeLabels: Record<ExceptionalReleaseScope, string> = {
-  semestre: "Semestre",
-  turma: "Turma",
-  aluno: "Aluno"
 };
 
 function normalizeOptionalUuid(value?: string | null) {
@@ -146,7 +149,115 @@ function formatExceptionalReleaseUntil(expiresAt: string) {
 }
 
 function buildExceptionalReleaseNotice(expiresAt: string) {
-  return `Edicao liberada excepcionalmente ate ${formatExceptionalReleaseUntil(expiresAt)}.`;
+  return `Edição liberada excepcionalmente até ${formatExceptionalReleaseUntil(expiresAt)}.`;
+}
+
+export function buildExceptionalReleaseVisualNotice(
+  expiresAt: string,
+  reason?: string | null
+): ExceptionalReleaseVisualNotice {
+  const normalizedReason = reason?.trim() ? reason.trim() : null;
+
+  return {
+    title: "Liberação excepcional ativa",
+    message: buildExceptionalReleaseNotice(expiresAt),
+    reason: normalizedReason,
+    expiresAt
+  };
+}
+
+function resolveReferenceTime(referenceAt?: string | null) {
+  const referenceDate = referenceAt ? new Date(referenceAt) : new Date();
+  return Number.isNaN(referenceDate.getTime()) ? new Date() : referenceDate;
+}
+
+function matchesExceptionalReleaseRow(
+  release: ReleaseRow,
+  input: ExceptionalReleaseCheckContext & {
+    authorizedUserId: string;
+    unitId?: string | null;
+    referenceAt?: string | null;
+  }
+) {
+  const referenceDate = resolveReferenceTime(input.referenceAt);
+  const startsAt = new Date(release.inicio_em);
+  const expiresAt = new Date(release.expira_em);
+
+  if (
+    release.usuario_autorizado_id !== input.authorizedUserId ||
+    release.tipo !== input.type ||
+    release.semestre_id !== input.semesterId ||
+    !release.ativo ||
+    release.encerrado_manualmente_em ||
+    release.utilizado_em
+  ) {
+    return false;
+  }
+
+  if (input.unitId && release.unidade_id !== input.unitId) {
+    return false;
+  }
+
+  if (
+    Number.isNaN(startsAt.getTime()) ||
+    Number.isNaN(expiresAt.getTime()) ||
+    referenceDate < startsAt ||
+    referenceDate > expiresAt
+  ) {
+    return false;
+  }
+
+  if (!release.aluno_id || !input.studentId || release.aluno_id !== input.studentId) {
+    return false;
+  }
+
+  if (!release.turma_id) {
+    return true;
+  }
+
+  return Boolean(input.classId && release.turma_id === input.classId);
+}
+
+export function findMatchingExceptionalReleaseFromRows(
+  releases: ReleaseRow[],
+  input: ExceptionalReleaseCheckContext & {
+    authorizedUserId: string;
+    unitId?: string | null;
+    referenceAt?: string | null;
+  }
+) {
+  return [...releases]
+    .filter((release) => matchesExceptionalReleaseRow(release, input))
+    .sort((left, right) => {
+      const expiresDiff =
+        new Date(left.expira_em).getTime() - new Date(right.expira_em).getTime();
+
+      if (expiresDiff !== 0) {
+        return expiresDiff;
+      }
+
+      return right.created_at.localeCompare(left.created_at);
+    })[0] ?? null;
+}
+
+export function resolveExceptionalReleaseVisualNoticeFromRows(
+  releases: ReleaseRow[],
+  input: ExceptionalReleaseCheckContext & {
+    authorizedUserId: string;
+    unitId?: string | null;
+    referenceAt?: string | null;
+  }
+) {
+  const matchingRelease = findMatchingExceptionalReleaseFromRows(releases, input);
+
+  if (!matchingRelease) {
+    return null;
+  }
+
+  return buildExceptionalReleaseVisualNotice(
+    matchingRelease.expira_em,
+    matchingRelease.motivo
+  );
 }
 
 function buildEmptyState(title: string, description: string): ExceptionalReleaseManagementLoadResult {
@@ -172,10 +283,39 @@ function uniqueStringValues(values: Array<string | null | undefined>) {
   );
 }
 
+function isExceptionalReleaseEffectiveNow(
+  release: Pick<
+    ReleaseRow,
+    "ativo" | "encerrado_manualmente_em" | "utilizado_em" | "inicio_em" | "expira_em"
+  >,
+  referenceAt = new Date()
+) {
+  if (!release.ativo || release.encerrado_manualmente_em || release.utilizado_em) {
+    return false;
+  }
+
+  const startsAt = new Date(release.inicio_em);
+  const expiresAt = new Date(release.expira_em);
+
+  if (Number.isNaN(startsAt.getTime()) || Number.isNaN(expiresAt.getTime())) {
+    return false;
+  }
+
+  return referenceAt >= startsAt && referenceAt <= expiresAt;
+}
+
 function buildReleaseStatus(row: ReleaseRow) {
   const now = Date.now();
   const startsAt = new Date(row.inicio_em).getTime();
   const expiresAt = new Date(row.expira_em).getTime();
+
+  if (row.utilizado_em) {
+    return {
+      key: "utilizada" as const,
+      label: "Utilizada",
+      className: "status-concluida"
+    };
+  }
 
   if (!row.ativo || row.encerrado_manualmente_em) {
     return {
@@ -206,6 +346,16 @@ function buildReleaseStatus(row: ReleaseRow) {
     label: "Ativa",
     className: "status-ativo"
   };
+}
+
+function isManagedExceptionalReleaseType(type: ReleaseRow["tipo"]) {
+  return type === "avaliacao" || type === "ausencia";
+}
+
+function isStudentBoundExceptionalRelease(
+  release: ReleaseRow
+): release is ReleaseRow & { aluno_id: string } {
+  return Boolean(release.aluno_id);
 }
 
 function getRequiredUnitId(currentUser: SessionUser) {
@@ -265,7 +415,11 @@ export async function getCoordinatorExceptionalReleasePageData(
   const profileRows = (profileRowsResult.data ?? []) as ProfileRow[];
   const semesterRows = sortSemesters((semesterRowsResult.data ?? []) as SemesterRow[]);
   const unitUsers = (unitUsersResult.data ?? []) as UserRow[];
-  const releaseRows = (releaseRowsResult.data ?? []) as ReleaseRow[];
+  const releaseRows = ((releaseRowsResult.data ?? []) as ReleaseRow[]).filter(
+    (release) =>
+      isManagedExceptionalReleaseType(release.tipo) &&
+      isStudentBoundExceptionalRelease(release)
+  );
   const semesterIds = semesterRows.map((semester) => semester.id);
   const closedSemesterRows = semesterRows.filter(
     (semester) => semester.status === "encerrado"
@@ -459,8 +613,6 @@ export async function getCoordinatorExceptionalReleasePageData(
       id: release.id,
       type: release.tipo,
       typeLabel: exceptionalReleaseTypeLabels[release.tipo],
-      scope: release.escopo,
-      scopeLabel: exceptionalReleaseScopeLabels[release.escopo],
       semesterCode: semester?.codigo ?? "Semestre não identificado",
       semesterName: semester?.nome ?? "Semestre não identificado",
       classLabel: classGroup
@@ -481,6 +633,10 @@ export async function getCoordinatorExceptionalReleasePageData(
       startsAt: release.inicio_em,
       expiresAt: release.expira_em,
       manuallyClosedAt: release.encerrado_manualmente_em,
+      usedAt: release.utilizado_em,
+      usedByName: release.utilizado_por
+        ? userById.get(release.utilizado_por)?.nome_completo ?? "Usuário não identificado"
+        : null,
       createdAt: release.created_at,
       statusKey: status.key,
       statusLabel: status.label,
@@ -493,7 +649,10 @@ export async function getCoordinatorExceptionalReleasePageData(
     (entry) => entry.statusKey === "ativa" || entry.statusKey === "agendada"
   );
   const historicalEntries = releaseEntries.filter(
-    (entry) => entry.statusKey === "expirada" || entry.statusKey === "encerrada"
+    (entry) =>
+      entry.statusKey === "expirada" ||
+      entry.statusKey === "encerrada" ||
+      entry.statusKey === "utilizada"
   );
 
   return {
@@ -515,10 +674,160 @@ export async function getCoordinatorExceptionalReleasePageData(
         scheduledCount: releaseEntries.filter((entry) => entry.statusKey === "agendada")
           .length,
         expiredCount: releaseEntries.filter((entry) => entry.statusKey === "expirada").length,
+        usedCount: releaseEntries.filter((entry) => entry.statusKey === "utilizada").length,
         closedCount: releaseEntries.filter((entry) => entry.statusKey === "encerrada").length
       }
     },
     emptyState: null
+  };
+}
+
+export async function loadActiveExceptionalReleaseRowsForUser(
+  currentUser: SessionUser,
+  input: {
+    type: ExceptionalReleaseType;
+    semesterIds?: string[];
+    unitId?: string | null;
+  }
+) {
+  const supabase = await createSupabaseServerClient();
+  let query = supabase
+    .from("liberacoes_excepcionais")
+    .select("*")
+    .eq("usuario_autorizado_id", currentUser.id)
+    .eq("tipo", input.type)
+    .eq("ativo", true);
+
+  const scopedUnitId = input.unitId ?? currentUser.unitId ?? null;
+
+  if (scopedUnitId) {
+    query = query.eq("unidade_id", scopedUnitId);
+  }
+
+  if (input.semesterIds?.length) {
+    query = query.in("semestre_id", input.semesterIds);
+  }
+
+  const { data, error } = await query.order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(
+      "Não foi possível carregar as liberações excepcionais ativas deste usuário."
+    );
+  }
+
+  return ((data ?? []) as ReleaseRow[]).filter(
+    (release) => isStudentBoundExceptionalRelease(release)
+  );
+}
+
+export async function loadReleasedEnrollmentContextsForUser(
+  currentUser: SessionUser,
+  input: {
+    type: ExceptionalReleaseType;
+    semesterIds?: string[];
+    unitId?: string | null;
+  }
+): Promise<{
+  releaseRows: ReleaseRow[];
+  contexts: ExceptionalReleaseEnrollmentContext[];
+}> {
+  const releaseRows = await loadActiveExceptionalReleaseRowsForUser(currentUser, input);
+  const effectiveReleaseRows = releaseRows.filter((release) =>
+    isExceptionalReleaseEffectiveNow(release)
+  );
+
+  if (!effectiveReleaseRows.length) {
+    return {
+      releaseRows: [],
+      contexts: []
+    };
+  }
+
+  const semesterIds = uniqueStringValues(
+    effectiveReleaseRows.map((release) => release.semestre_id)
+  );
+
+  if (!semesterIds.length) {
+    return {
+      releaseRows: effectiveReleaseRows,
+      contexts: []
+    };
+  }
+
+  const adminSupabase = createSupabaseAdminClient();
+  const { data: classRowsData, error: classRowsError } = await adminSupabase
+    .from("turmas")
+    .select("id, semestre_id")
+    .in("semestre_id", semesterIds);
+
+  if (classRowsError) {
+    throw new Error(
+      "Não foi possível carregar as turmas vinculadas às liberações excepcionais ativas."
+    );
+  }
+
+  const classRows = (classRowsData ?? []) as Array<Pick<ClassRow, "id" | "semestre_id">>;
+  const classById = new Map(classRows.map((classGroup) => [classGroup.id, classGroup]));
+  const classIds = uniqueStringValues(classRows.map((classGroup) => classGroup.id));
+
+  if (!classIds.length) {
+    return {
+      releaseRows: effectiveReleaseRows,
+      contexts: []
+    };
+  }
+
+  const { data: enrollmentRowsData, error: enrollmentRowsError } = await adminSupabase
+    .from("matriculas_turma")
+    .select("id, turma_id, aluno_id")
+    .in("turma_id", classIds);
+
+  if (enrollmentRowsError) {
+    throw new Error(
+      "Não foi possível carregar as matrículas vinculadas às liberações excepcionais ativas."
+    );
+  }
+
+  const enrollmentRows = (enrollmentRowsData ?? []) as Array<
+    Pick<EnrollmentRow, "id" | "turma_id" | "aluno_id">
+  >;
+  const contextMap = new Map<string, ExceptionalReleaseEnrollmentContext>();
+
+  for (const enrollment of enrollmentRows) {
+    const classGroup = classById.get(enrollment.turma_id);
+
+    if (!classGroup) {
+      continue;
+    }
+
+    const matchingRelease = effectiveReleaseRows.find((release) => {
+      if (release.semestre_id !== classGroup.semestre_id) {
+        return false;
+      }
+
+      if (!release.aluno_id || release.aluno_id !== enrollment.aluno_id) {
+        return false;
+      }
+
+      return !release.turma_id || release.turma_id === enrollment.turma_id;
+    });
+
+    if (!matchingRelease) {
+      continue;
+    }
+
+    contextMap.set(enrollment.id, {
+      enrollmentId: enrollment.id,
+      classId: enrollment.turma_id,
+      semesterId: classGroup.semestre_id,
+      studentId: enrollment.aluno_id
+    });
+  }
+
+  return {
+    releaseRows: effectiveReleaseRows,
+    contexts: [...contextMap.values()]
   };
 }
 
@@ -562,10 +871,13 @@ export async function findActiveExceptionalRelease(
 
   const { data: releaseData, error: releaseError } = await supabase
     .from("liberacoes_excepcionais")
-    .select("id, expira_em")
+    .select("id, expira_em, motivo")
     .eq("id", releaseId)
     .maybeSingle();
-  const releaseRow = (releaseData ?? null) as Pick<ReleaseRow, "id" | "expira_em"> | null;
+  const releaseRow = (releaseData ?? null) as Pick<
+    ReleaseRow,
+    "id" | "expira_em" | "motivo"
+  > | null;
 
   if (releaseError || !releaseRow) {
     throw new Error(
@@ -576,6 +888,7 @@ export async function findActiveExceptionalRelease(
   return {
     releaseId,
     expiresAt: releaseRow.expira_em,
+    reason: releaseRow.motivo?.trim() ? releaseRow.motivo.trim() : null,
     noticeMessage: buildExceptionalReleaseNotice(releaseRow.expira_em)
   };
 }
@@ -612,7 +925,7 @@ export async function resolveExceptionalReleaseGate(
 
   if (!currentUser) {
     throw new Error(
-      "NÃ£o foi possÃ­vel verificar a liberaÃ§Ã£o excepcional sem um usuÃ¡rio autenticado."
+      "Não foi possível verificar a liberação excepcional sem um usuário autenticado."
     );
   }
 

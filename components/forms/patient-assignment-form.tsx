@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { createOrUpdateClinicalCaseAction } from "@/app/(app)/clinica-supervisionada/actions";
+import { ExceptionalReleaseNotice } from "@/components/common/exceptional-release-notice";
 import {
   createEmptyClinicalCaseSchedule,
   initialClinicalCaseActionState,
@@ -113,6 +114,11 @@ export function PatientAssignmentForm({
     [selectedAreaId, studentOptions]
   );
   const isSubmitDisabled = studentOptions.length === 0;
+  const selectedStudentOption = studentOptions.find(
+    (studentOption) => studentOption.enrollmentId === draft.enrollment_id
+  );
+  const exceptionalReleaseNotice =
+    selectedStudentOption?.exceptionalReleaseNotice ?? null;
 
   useEffect(() => {
     if (safeState.status !== "error" || !safeState.formValues) {
@@ -217,6 +223,9 @@ export function PatientAssignmentForm({
 
       {safeState.message ? (
         <div className="form-notice form-notice-error">{safeState.message}</div>
+      ) : null}
+      {exceptionalReleaseNotice ? (
+        <ExceptionalReleaseNotice notice={exceptionalReleaseNotice} compact />
       ) : null}
 
       {emptyHint ? <p className="field-help">{emptyHint}</p> : null}

@@ -1,8 +1,8 @@
 import { SectionCard } from "@/components/common/section-card";
 import { ExceptionalReleaseForm } from "@/components/forms/exceptional-release-form";
 import { ExceptionalReleaseTable } from "@/components/tables/exceptional-release-table";
-import { requireRole } from "@/lib/auth/session";
 import { closeExceptionalReleaseAction } from "@/app/(app)/coordenador/liberacoes-excepcionais/actions";
+import { requireRole } from "@/lib/auth/session";
 import { getCoordinatorExceptionalReleasePageData } from "@/services/exceptional-releases";
 
 export default async function ExceptionalReleaseManagementPage(props: {
@@ -25,8 +25,8 @@ export default async function ExceptionalReleaseManagementPage(props: {
         <p className="eyebrow">Governança operacional</p>
         <h1>Liberações excepcionais</h1>
         <p>
-          Gerencie desbloqueios temporários e auditáveis para ajustes após o
-          encerramento do período letivo, sempre no escopo da sua unidade.
+          Gerencie liberações temporárias, pontuais e auditáveis por aluno para
+          ajustes após o encerramento do período letivo, sempre dentro da sua unidade.
         </p>
         {notice ? (
           <p
@@ -55,6 +55,10 @@ export default async function ExceptionalReleaseManagementPage(props: {
               <strong>{pageData.summary.expiredCount}</strong>
             </div>
             <div className="report-mini-card">
+              <span>Utilizadas</span>
+              <strong>{pageData.summary.usedCount}</strong>
+            </div>
+            <div className="report-mini-card">
               <span>Encerradas manualmente</span>
               <strong>{pageData.summary.closedCount}</strong>
             </div>
@@ -62,7 +66,7 @@ export default async function ExceptionalReleaseManagementPage(props: {
 
           <SectionCard
             title="Nova liberação excepcional"
-            description="Escolha o tipo, defina o escopo e registre uma vigência temporária para um usuário da unidade."
+            description="Escolha o tipo, selecione semestre, turma e aluno, e registre uma vigência temporária para o usuário liberado."
             className="exceptional-release-form-card"
           >
             <ExceptionalReleaseForm
@@ -75,7 +79,7 @@ export default async function ExceptionalReleaseManagementPage(props: {
 
           <SectionCard
             title="Liberações ativas e agendadas"
-            description="Liberações que ainda podem ser utilizadas ou que já têm vigência futura programada."
+            description="Liberações por aluno que ainda podem ser utilizadas ou que já têm vigência futura programada."
           >
             <ExceptionalReleaseTable
               entries={pageData.activeEntries}
@@ -86,12 +90,12 @@ export default async function ExceptionalReleaseManagementPage(props: {
           </SectionCard>
 
           <SectionCard
-            title="Liberações expiradas e encerradas"
-            description="Histórico recente de vigências encerradas automaticamente por prazo ou manualmente pela coordenação."
+            title="Liberações expiradas, utilizadas e encerradas"
+            description="Histórico recente de vigências por aluno que expiraram, foram utilizadas em um lançamento excepcional ou encerradas manualmente pela coordenação."
           >
             <ExceptionalReleaseTable
               entries={pageData.historicalEntries}
-              emptyMessage="Nenhuma liberação expirada ou encerrada foi encontrada para a unidade."
+              emptyMessage="Nenhuma liberação expirada, utilizada ou encerrada foi encontrada para a unidade."
             />
           </SectionCard>
         </>

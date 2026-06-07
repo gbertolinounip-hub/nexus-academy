@@ -483,7 +483,7 @@ create policy avaliacoes_read_policy
 on public.avaliacoes
 for select
 to authenticated
-using (private.can_view_matricula(matricula_turma_id));
+using (private.can_view_evaluation_matricula(matricula_turma_id));
 
 drop policy if exists avaliacoes_insert_policy on public.avaliacoes;
 create policy avaliacoes_insert_policy
@@ -491,7 +491,7 @@ on public.avaliacoes
 for insert
 to authenticated
 with check (
-  private.can_manage_grades(matricula_turma_id)
+  private.can_manage_evaluation_matricula(matricula_turma_id)
   and (
     private.is_coordinator()
     or professor_id = (select auth.uid()::uuid)
@@ -503,8 +503,8 @@ create policy avaliacoes_update_policy
 on public.avaliacoes
 for update
 to authenticated
-using (private.can_manage_grades(matricula_turma_id))
-with check (private.can_manage_grades(matricula_turma_id));
+using (private.can_manage_evaluation_matricula(matricula_turma_id))
+with check (private.can_manage_evaluation_matricula(matricula_turma_id));
 
 drop policy if exists itens_avaliados_read_policy on public.itens_avaliados;
 create policy itens_avaliados_read_policy
@@ -516,7 +516,7 @@ using (
     select 1
     from public.avaliacoes a
     where a.id = itens_avaliados.avaliacao_id
-      and private.can_view_matricula(a.matricula_turma_id)
+      and private.can_view_evaluation_matricula(a.matricula_turma_id)
   )
 );
 
@@ -530,7 +530,7 @@ with check (
     select 1
     from public.avaliacoes a
     where a.id = itens_avaliados.avaliacao_id
-      and private.can_manage_grades(a.matricula_turma_id)
+      and private.can_manage_evaluation_matricula(a.matricula_turma_id)
   )
 );
 
@@ -544,7 +544,7 @@ using (
     select 1
     from public.avaliacoes a
     where a.id = itens_avaliados.avaliacao_id
-      and private.can_manage_grades(a.matricula_turma_id)
+      and private.can_manage_evaluation_matricula(a.matricula_turma_id)
   )
 )
 with check (
@@ -552,7 +552,7 @@ with check (
     select 1
     from public.avaliacoes a
     where a.id = itens_avaliados.avaliacao_id
-      and private.can_manage_grades(a.matricula_turma_id)
+      and private.can_manage_evaluation_matricula(a.matricula_turma_id)
   )
 );
 
@@ -561,7 +561,7 @@ create policy ausencias_read_policy
 on public.ausencias
 for select
 to authenticated
-using (private.can_view_matricula(matricula_turma_id));
+using (private.can_view_absence_matricula(matricula_turma_id));
 
 drop policy if exists ausencias_insert_policy on public.ausencias;
 create policy ausencias_insert_policy
@@ -569,7 +569,7 @@ on public.ausencias
 for insert
 to authenticated
 with check (
-  private.can_manage_grades(matricula_turma_id)
+  private.can_manage_absence_matricula(matricula_turma_id)
   and (
     private.is_coordinator()
     or registrado_por = (select auth.uid()::uuid)
@@ -581,8 +581,8 @@ create policy ausencias_update_policy
 on public.ausencias
 for update
 to authenticated
-using (private.can_manage_grades(matricula_turma_id))
-with check (private.can_manage_grades(matricula_turma_id));
+using (private.can_manage_absence_matricula(matricula_turma_id))
+with check (private.can_manage_absence_matricula(matricula_turma_id));
 
 drop policy if exists pacientes_clinica_select_policy on public.pacientes_clinica;
 create policy pacientes_clinica_select_policy

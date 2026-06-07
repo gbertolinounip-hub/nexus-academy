@@ -38,7 +38,6 @@ export function ExceptionalReleaseForm({
   const [draft, setDraft] = useState<ExceptionalReleaseFormValues>(
     createInitialExceptionalReleaseFormValues
   );
-  const [studentSearch, setStudentSearch] = useState("");
 
   useEffect(() => {
     if (safeState.status !== "error") {
@@ -54,40 +53,31 @@ export function ExceptionalReleaseForm({
     }
 
     setDraft(createInitialExceptionalReleaseFormValues());
-    setStudentSearch("");
     startTransition(() => {
       router.refresh();
     });
   }, [router, safeState.status, safeState.submittedAt]);
 
   const filteredClasses = useMemo(
-    () =>
-      classOptions.filter((classOption) => classOption.semesterId === draft.semestre_id),
+    () => classOptions.filter((classOption) => classOption.semesterId === draft.semestre_id),
     [classOptions, draft.semestre_id]
   );
 
-  const filteredStudents = useMemo(() => {
-    const normalizedSearch = studentSearch.trim().toLocaleLowerCase("pt-BR");
+  const filteredStudents = useMemo(
+    () =>
+      studentOptions.filter((studentOption) => {
+        if (studentOption.semesterId !== draft.semestre_id) {
+          return false;
+        }
 
-    return studentOptions.filter((studentOption) => {
-      if (studentOption.semesterId !== draft.semestre_id) {
-        return false;
-      }
+        if (!draft.turma_id) {
+          return false;
+        }
 
-      if (draft.turma_id && !studentOption.classIds.includes(draft.turma_id)) {
-        return false;
-      }
-
-      if (!normalizedSearch) {
-        return true;
-      }
-
-      const haystack = `${studentOption.name} ${studentOption.registration} ${studentOption.classLabel} ${studentOption.email}`
-        .toLocaleLowerCase("pt-BR");
-
-      return haystack.includes(normalizedSearch);
-    });
-  }, [draft.semestre_id, draft.turma_id, studentOptions, studentSearch]);
+        return studentOption.classIds.includes(draft.turma_id);
+      }),
+    [draft.semestre_id, draft.turma_id, studentOptions]
+  );
 
   useEffect(() => {
     if (draft.turma_id && !filteredClasses.some((classOption) => classOption.id === draft.turma_id)) {
@@ -113,25 +103,6 @@ export function ExceptionalReleaseForm({
     value: string
   ) {
     setDraft((currentDraft) => {
-      if (field === "escopo") {
-        if (value === "semestre") {
-          return {
-            ...currentDraft,
-            escopo: "semestre",
-            turma_id: "",
-            aluno_id: ""
-          };
-        }
-
-        if (value === "turma") {
-          return {
-            ...currentDraft,
-            escopo: "turma",
-            aluno_id: ""
-          };
-        }
-      }
-
       if (field === "semestre_id") {
         return {
           ...currentDraft,
@@ -180,9 +151,12 @@ export function ExceptionalReleaseForm({
         </div>
       ) : null}
 
-      <div className="form-grid exceptional-release-form-grid">
-        <label className={getFieldClassName("tipo")}>
-          <span>Tipo da liberação</span>
+      <div className="exceptional-release-form-layout">
+        <div className="exceptional-release-form-row exceptional-release-form-row-top">
+          <label
+            className={`${getFieldClassName("tipo")} exceptional-release-form-field exceptional-release-form-field-type`}
+          >
+          <span>Tipo de liberação</span>
           <select
             className={getInputClassName("tipo")}
             name="tipo"
@@ -190,31 +164,14 @@ export function ExceptionalReleaseForm({
             onChange={(event) => updateDraft("tipo", event.currentTarget.value)}
           >
             <option value="avaliacao">Avaliação</option>
-            <option value="ausencia">Ausência</option>
-            <option value="clinica_supervisionada">Clínica supervisionada</option>
+            <option value="ausencia">Ausências</option>
           </select>
           {fieldErrors.tipo ? <span className="field-error">{fieldErrors.tipo}</span> : null}
-        </label>
+          </label>
 
-        <label className={getFieldClassName("escopo")}>
-          <span>Escopo</span>
-          <select
-            className={getInputClassName("escopo")}
-            name="escopo"
-            value={draft.escopo}
-            onChange={(event) => updateDraft("escopo", event.currentTarget.value)}
+          <label
+            className={`${getFieldClassName("semestre_id")} exceptional-release-form-field exceptional-release-form-field-semester`}
           >
-            <option value="semestre">Semestre</option>
-            <option value="turma">Turma</option>
-            <option value="aluno">Aluno</option>
-          </select>
-          <span className="field-help">
-            O escopo define se a liberação vale para todo o semestre, uma turma ou um aluno específico.
-          </span>
-          {fieldErrors.escopo ? <span className="field-error">{fieldErrors.escopo}</span> : null}
-        </label>
-
-        <label className={getFieldClassName("semestre_id")}>
           <span>Semestre</span>
           <select
             className={getInputClassName("semestre_id")}
@@ -232,19 +189,21 @@ export function ExceptionalReleaseForm({
           {fieldErrors.semestre_id ? (
             <span className="field-error">{fieldErrors.semestre_id}</span>
           ) : null}
-        </label>
+          </label>
 
-        <label className={getFieldClassName("turma_id")}>
+          <label
+            className={`${getFieldClassName("turma_id")} exceptional-release-form-field exceptional-release-form-field-class`}
+          >
           <span>Turma</span>
           <select
             className={getInputClassName("turma_id")}
             name="turma_id"
             value={draft.turma_id}
-            disabled={!draft.semestre_id || draft.escopo === "semestre"}
+            disabled={!draft.semestre_id}
             onChange={(event) => updateDraft("turma_id", event.currentTarget.value)}
           >
             <option value="">
-              {draft.escopo === "semestre" ? "Não se aplica" : "Selecione"}
+              {draft.semestre_id ? "Selecione" : "Selecione um semestre"}
             </option>
             {filteredClasses.map((classOption) => (
               <option key={classOption.id} value={classOption.id}>
@@ -252,13 +211,48 @@ export function ExceptionalReleaseForm({
               </option>
             ))}
           </select>
-          <span className="field-help">
-            Para escopo por turma, selecione a turma liberada. Para escopo por aluno, a turma é opcional e ajuda a localizar o vínculo certo.
-          </span>
           {fieldErrors.turma_id ? <span className="field-error">{fieldErrors.turma_id}</span> : null}
-        </label>
+          </label>
+        </div>
 
-        <label className={getFieldClassName("usuario_autorizado_id")}>
+        <div className="exceptional-release-form-row exceptional-release-form-row-middle">
+          <label
+            className={`${getFieldClassName("aluno_id")} exceptional-release-form-field exceptional-release-form-field-student`}
+          >
+          <span>Aluno</span>
+          <select
+            className={getInputClassName("aluno_id")}
+            name="aluno_id"
+            value={draft.aluno_id}
+            disabled={!draft.semestre_id || !draft.turma_id}
+            onChange={(event) => updateDraft("aluno_id", event.currentTarget.value)}
+          >
+            <option value="">
+              {!draft.semestre_id
+                ? "Selecione um semestre"
+                : !draft.turma_id
+                  ? "Selecione uma turma"
+                  : "Selecione"}
+            </option>
+            {filteredStudents.map((student) => (
+              <option key={`${student.semesterId}-${student.id}`} value={student.id}>
+                {student.label}
+              </option>
+            ))}
+          </select>
+          <span className="field-help">
+            {!draft.semestre_id || !draft.turma_id
+              ? "Escolha semestre e turma para carregar os alunos elegíveis da unidade."
+              : filteredStudents.length
+                ? `${filteredStudents.length} aluno(s) compatíveis com o filtro atual.`
+                : "Nenhum aluno encontrado para a turma selecionada."}
+          </span>
+          {fieldErrors.aluno_id ? <span className="field-error">{fieldErrors.aluno_id}</span> : null}
+          </label>
+
+          <label
+            className={`${getFieldClassName("usuario_autorizado_id")} exceptional-release-form-field exceptional-release-form-field-recipient`}
+          >
           <span>Usuário liberado</span>
           <select
             className={getInputClassName("usuario_autorizado_id")}
@@ -278,9 +272,13 @@ export function ExceptionalReleaseForm({
           {fieldErrors.usuario_autorizado_id ? (
             <span className="field-error">{fieldErrors.usuario_autorizado_id}</span>
           ) : null}
-        </label>
+          </label>
+        </div>
 
-        <label className={getFieldClassName("inicio_em")}>
+        <div className="exceptional-release-form-row exceptional-release-form-row-dates">
+          <label
+            className={`${getFieldClassName("inicio_em")} exceptional-release-form-field exceptional-release-form-field-start`}
+          >
           <span>Início da vigência</span>
           <input
             className={getInputClassName("inicio_em")}
@@ -292,9 +290,11 @@ export function ExceptionalReleaseForm({
           {fieldErrors.inicio_em ? (
             <span className="field-error">{fieldErrors.inicio_em}</span>
           ) : null}
-        </label>
+          </label>
 
-        <label className={getFieldClassName("expira_em")}>
+          <label
+            className={`${getFieldClassName("expira_em")} exceptional-release-form-field exceptional-release-form-field-end`}
+          >
           <span>Expiração da vigência</span>
           <input
             className={getInputClassName("expira_em")}
@@ -306,51 +306,11 @@ export function ExceptionalReleaseForm({
           {fieldErrors.expira_em ? (
             <span className="field-error">{fieldErrors.expira_em}</span>
           ) : null}
-        </label>
-      </div>
-
-      {draft.escopo === "aluno" ? (
-        <div className="form-grid exceptional-release-form-grid">
-          <label className="field">
-            <span>Buscar aluno</span>
-            <input
-              className="input"
-              value={studentSearch}
-              onChange={(event) => setStudentSearch(event.currentTarget.value)}
-              placeholder="Nome, matrícula, turma ou e-mail"
-            />
-            <span className="field-help">
-              Filtre os alunos do semestre selecionado antes de escolher o aluno liberado.
-            </span>
-          </label>
-
-          <label className={getFieldClassName("aluno_id")}>
-            <span>Aluno</span>
-            <select
-              className={getInputClassName("aluno_id")}
-              name="aluno_id"
-              value={draft.aluno_id}
-              disabled={!draft.semestre_id}
-              onChange={(event) => updateDraft("aluno_id", event.currentTarget.value)}
-            >
-              <option value="">Selecione</option>
-              {filteredStudents.map((student) => (
-                <option key={`${student.semesterId}-${student.id}`} value={student.id}>
-                  {student.label}
-                </option>
-              ))}
-            </select>
-            <span className="field-help">
-              {filteredStudents.length
-                ? `${filteredStudents.length} aluno(s) compatíveis com o filtro atual.`
-                : "Nenhum aluno encontrado para o semestre, turma e busca informados."}
-            </span>
-            {fieldErrors.aluno_id ? <span className="field-error">{fieldErrors.aluno_id}</span> : null}
           </label>
         </div>
-      ) : null}
+      </div>
 
-      <label className={getFieldClassName("motivo")}>
+      <label className={`${getFieldClassName("motivo")} exceptional-release-form-field exceptional-release-form-field-reason`}>
         <span>Motivo obrigatório</span>
         <textarea
           className={`${getInputClassName("motivo")} textarea`}

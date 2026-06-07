@@ -1,8 +1,7 @@
-import type { ExceptionalReleaseScope, ExceptionalReleaseType } from "@/types/domain";
+import type { ExceptionalReleaseManagementType } from "@/types/domain";
 
 export interface ExceptionalReleaseFormValues {
-  tipo: ExceptionalReleaseType;
-  escopo: ExceptionalReleaseScope;
+  tipo: ExceptionalReleaseManagementType;
   semestre_id: string;
   turma_id: string;
   aluno_id: string;
@@ -31,7 +30,6 @@ export function createInitialExceptionalReleaseFormValues(): ExceptionalReleaseF
 
   return {
     tipo: "avaliacao",
-    escopo: "semestre",
     semestre_id: "",
     turma_id: "",
     aluno_id: "",

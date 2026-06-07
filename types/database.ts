@@ -48,6 +48,28 @@ export interface Database {
         };
         Returns: string;
       };
+      criar_ausencia: {
+        Args: {
+          p_matricula_turma_id: string;
+          p_data_ausencia: string;
+          p_horas: number;
+          p_justificada: boolean;
+          p_motivo?: string | null;
+          p_observacoes?: string | null;
+        };
+        Returns: string;
+      };
+      atualizar_ausencia: {
+        Args: {
+          p_ausencia_id: string;
+          p_data_ausencia: string;
+          p_horas: number;
+          p_justificada: boolean;
+          p_motivo?: string | null;
+          p_observacoes?: string | null;
+        };
+        Returns: string;
+      };
       registrar_acesso_sistema: {
         Args: Record<string, never>;
         Returns: string;
@@ -1200,6 +1222,8 @@ export interface Database {
           expira_em: string;
           ativo: boolean;
           encerrado_manualmente_em: string | null;
+          utilizado_em: string | null;
+          utilizado_por: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -1218,6 +1242,8 @@ export interface Database {
           expira_em: string;
           ativo?: boolean;
           encerrado_manualmente_em?: string | null;
+          utilizado_em?: string | null;
+          utilizado_por?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1236,6 +1262,8 @@ export interface Database {
           expira_em?: string;
           ativo?: boolean;
           encerrado_manualmente_em?: string | null;
+          utilizado_em?: string | null;
+          utilizado_por?: string | null;
           created_at?: string;
           updated_at?: string;
         };

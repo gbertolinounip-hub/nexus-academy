@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Route } from "next";
+import { ExceptionalReleaseNotice } from "@/components/common/exceptional-release-notice";
 import { SectionCard } from "@/components/common/section-card";
 import { requireRole } from "@/lib/auth/session";
 import {
@@ -72,6 +73,10 @@ export default async function ClinicalEvolutionIndexPage(props: {
           {pageData.caseItem.areaName}
         </p>
       </section>
+
+      {pageData.viewerRole === "professor" && pageData.exceptionalReleaseNotice ? (
+        <ExceptionalReleaseNotice notice={pageData.exceptionalReleaseNotice} />
+      ) : null}
 
       <SectionCard
         title="Resumo do caso"

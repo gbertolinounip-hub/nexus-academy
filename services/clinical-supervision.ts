@@ -1,6 +1,12 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatMaskedFirstName } from "@/lib/utils/format";
+import {
+  findActiveExceptionalRelease,
+  loadActiveExceptionalReleaseRowsForUser,
+  loadReleasedEnrollmentContextsForUser,
+  resolveExceptionalReleaseVisualNoticeFromRows
+} from "@/services/exceptional-releases";
 import type { Database } from "@/types/database";
 import type {
   ClinicalCaseSection,
@@ -22,6 +28,7 @@ import type {
   ClinicalStudentOption,
   ClinicalTreatmentPlanContent,
   ClinicalTreatmentPlanRecord,
+  ExceptionalReleaseVisualNotice,
   SessionUser
 } from "@/types/domain";
 
@@ -162,6 +169,7 @@ export interface ClinicalCaseFormPageData {
   currentCase: ClinicalCaseSummary | null;
   initialValues: ClinicalCaseFormInitialValues;
   emptyHint: string | null;
+  exceptionalReleaseNotice?: ExceptionalReleaseVisualNotice | null;
 }
 
 export interface ClinicalCaseFormLoadResult {
@@ -173,6 +181,7 @@ export interface ClinicalCaseDetailPageData {
   viewerRole: "professor" | "aluno" | ClinicalInstitutionalViewerRole;
   viewerName: string;
   caseItem: ClinicalCaseSummary;
+  exceptionalReleaseNotice?: ExceptionalReleaseVisualNotice | null;
   currentSection: ClinicalCaseSection;
   sections: Array<{
     key: Exclude<ClinicalCaseSection, "visao-geral">;
@@ -195,6 +204,7 @@ export interface ClinicalEvaluationPageData {
   viewerRole: "professor" | "aluno" | ClinicalInstitutionalViewerRole;
   viewerName: string;
   caseItem: ClinicalCaseSummary;
+  exceptionalReleaseNotice?: ExceptionalReleaseVisualNotice | null;
   evaluation: ClinicalEvaluationRecord | null;
   studentCanEdit: boolean;
   studentReadOnlyMessage: string | null;
@@ -209,6 +219,7 @@ export interface ClinicalTreatmentPlanPageData {
   viewerRole: "professor" | "aluno" | ClinicalInstitutionalViewerRole;
   viewerName: string;
   caseItem: ClinicalCaseSummary;
+  exceptionalReleaseNotice?: ExceptionalReleaseVisualNotice | null;
   treatmentPlan: ClinicalTreatmentPlanRecord | null;
   studentCanEdit: boolean;
   studentReadOnlyMessage: string | null;
@@ -223,6 +234,7 @@ export interface ClinicalEvolutionPageData {
   viewerRole: "professor" | "aluno" | ClinicalInstitutionalViewerRole;
   viewerName: string;
   caseItem: ClinicalCaseSummary;
+  exceptionalReleaseNotice?: ExceptionalReleaseVisualNotice | null;
   evolution: ClinicalEvolutionRecord | null;
   studentCanEdit: boolean;
   studentReadOnlyMessage: string | null;
@@ -237,6 +249,7 @@ export interface ClinicalEvolutionListPageData {
   viewerRole: "professor" | "aluno" | ClinicalInstitutionalViewerRole;
   viewerName: string;
   caseItem: ClinicalCaseSummary;
+  exceptionalReleaseNotice?: ExceptionalReleaseVisualNotice | null;
   evolutions: ClinicalEvolutionRecord[];
 }
 
@@ -948,6 +961,31 @@ async function loadProfessorClinicalContext(
     };
   }
 
+  let exceptionalReleaseRows: Awaited<
+    ReturnType<typeof loadReleasedEnrollmentContextsForUser>
+  >["releaseRows"] = [];
+  let releasedEnrollmentContexts: Awaited<
+    ReturnType<typeof loadReleasedEnrollmentContextsForUser>
+  >["contexts"] = [];
+
+  try {
+    const releasedContextResult = await loadReleasedEnrollmentContextsForUser(currentUser, {
+      type: "clinica_supervisionada",
+      unitId: currentUser.unitId ?? null
+    });
+
+    exceptionalReleaseRows = releasedContextResult.releaseRows;
+    releasedEnrollmentContexts = releasedContextResult.contexts;
+  } catch (_error) {
+    return {
+      context: null,
+      emptyState: buildEmptyState(
+        "Não foi possível carregar as liberações excepcionais",
+        "Houve um problema ao consultar os contextos clínicos liberados excepcionalmente para este professor."
+      )
+    };
+  }
+
   const { data: professorLinksData, error: linksError } = await supabase
     .from("vinculos_professor_aluno")
     .select("*")
@@ -969,7 +1007,7 @@ async function loadProfessorClinicalContext(
     (link) => !link.data_fim || link.data_fim >= today
   );
 
-  if (!professorLinks.length) {
+  if (!professorLinks.length && !releasedEnrollmentContexts.length) {
     return {
       context: {
         professor: {
@@ -986,10 +1024,16 @@ async function loadProfessorClinicalContext(
     };
   }
 
-  const enrollmentIds = uniqueStringValues(
-    professorLinks.map((link) => link.matricula_turma_id)
-  );
-  const { data: enrollmentRowsData, error: enrollmentError } = await supabase
+  const dataSupabase =
+    releasedEnrollmentContexts.length > 0
+      ? createSupabaseAdminClient()
+      : supabase;
+
+  const enrollmentIds = uniqueStringValues([
+    ...professorLinks.map((link) => link.matricula_turma_id),
+    ...releasedEnrollmentContexts.map((context) => context.enrollmentId)
+  ]);
+  const { data: enrollmentRowsData, error: enrollmentError } = await dataSupabase
     .from("matriculas_turma")
     .select("*")
     .in("id", enrollmentIds);
@@ -1004,11 +1048,12 @@ async function loadProfessorClinicalContext(
     };
   }
 
-  const enrollmentRows = ((enrollmentRowsData ?? []) as EnrollmentRow[]).filter(
+  const enrollmentRows = (enrollmentRowsData ?? []) as EnrollmentRow[];
+  const activeEnrollmentRows = enrollmentRows.filter(
     (enrollment) => enrollment.status === "ativa"
   );
 
-  if (!enrollmentRows.length) {
+  if (!activeEnrollmentRows.length && !releasedEnrollmentContexts.length) {
     return {
       context: {
         professor: {
@@ -1028,14 +1073,13 @@ async function loadProfessorClinicalContext(
   const classIds = uniqueStringValues(enrollmentRows.map((row) => row.turma_id));
   const studentIds = uniqueStringValues(enrollmentRows.map((row) => row.aluno_id));
   const [classRowsResult, studentRowsResult, studentUsersResult] = await Promise.all([
-    supabase.from("turmas").select("*").in("id", classIds),
-    supabase.from("alunos").select("*").in("usuario_id", studentIds),
-    supabase
+    dataSupabase.from("turmas").select("*").in("id", classIds),
+    dataSupabase.from("alunos").select("*").in("usuario_id", studentIds),
+    dataSupabase
       .from("usuarios")
       .select("*")
       .in("id", studentIds)
       .eq("unidade_id", currentUnitId)
-      .eq("ativo", true)
   ]);
 
   if (
@@ -1054,12 +1098,11 @@ async function loadProfessorClinicalContext(
 
   let classRows = (classRowsResult.data ?? []) as ClassRow[];
   const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
-  const studentUsers = filterActiveStudentUsers(
-    (studentUsersResult.data ?? []) as UserRow[]
-  );
+  const allStudentUsers = (studentUsersResult.data ?? []) as UserRow[];
+  const studentUsers = filterActiveStudentUsers(allStudentUsers);
   const semesterIds = uniqueStringValues(classRows.map((classGroup) => classGroup.semestre_id));
   const { data: semesterRowsData, error: semesterError } = semesterIds.length
-    ? await supabase.from("semestres").select("*").in("id", semesterIds)
+    ? await dataSupabase.from("semestres").select("*").in("id", semesterIds)
     : { data: [], error: null };
 
   if (semesterError) {
@@ -1077,13 +1120,26 @@ async function loadProfessorClinicalContext(
     currentUser
   );
   classRows = filterClassesToSemesters(classRows, semesterRows);
+  const activeEnrollmentIdSet = new Set(
+    professorLinks.map((link) => link.matricula_turma_id)
+  );
+  const releasedEnrollmentIdSet = new Set(
+    releasedEnrollmentContexts.map((context) => context.enrollmentId)
+  );
   const activeStudentIdSet = new Set(studentUsers.map((studentUser) => studentUser.id));
   const visibleEnrollments = filterEnrollmentsToStudentIds(
-    filterEnrollmentsToClasses(enrollmentRows, classRows),
+    filterEnrollmentsToClasses(
+      activeEnrollmentRows.filter((enrollment) => activeEnrollmentIdSet.has(enrollment.id)),
+      classRows
+    ),
     activeStudentIdSet
   );
+  const releasedEnrollments = filterEnrollmentsToClasses(
+    enrollmentRows.filter((enrollment) => releasedEnrollmentIdSet.has(enrollment.id)),
+    classRows
+  );
 
-  if (!visibleEnrollments.length) {
+  if (!visibleEnrollments.length && !releasedEnrollments.length) {
     return {
       context: {
         professor: {
@@ -1104,7 +1160,7 @@ async function loadProfessorClinicalContext(
     classRows.map((classGroup) => classGroup.area_estagio_id)
   );
   const { data: areaRowsData, error: areaError } = areaIds.length
-    ? await supabase.from("areas_estagio").select("*").in("id", areaIds)
+    ? await dataSupabase.from("areas_estagio").select("*").in("id", areaIds)
     : { data: [], error: null };
 
   if (areaError) {
@@ -1119,11 +1175,12 @@ async function loadProfessorClinicalContext(
 
   const studentRowMap = new Map(studentRows.map((row) => [row.usuario_id, row]));
   const studentUserMap = new Map(studentUsers.map((row) => [row.id, row]));
+  const allStudentUserMap = new Map(allStudentUsers.map((row) => [row.id, row]));
   const classMap = new Map(classRows.map((row) => [row.id, row]));
   const semesterMap = new Map(semesterRows.map((row) => [row.id, row]));
   const areaMap = new Map(((areaRowsData ?? []) as AreaRow[]).map((row) => [row.id, row]));
 
-  const studentOptions = visibleEnrollments
+  const baseStudentOptions = visibleEnrollments
     .map((enrollment) => {
       const studentRow = studentRowMap.get(enrollment.aluno_id);
       const studentUser = studentUserMap.get(enrollment.aluno_id);
@@ -1146,10 +1203,13 @@ async function loadProfessorClinicalContext(
         studentId: studentUser.id,
         studentName,
         registration: studentRow.matricula,
+        classId: classGroup.id,
         className: classGroup.nome,
+        semesterId: semester.id,
         semesterCode: semester.codigo,
         areaId: area?.id ?? classGroup.area_estagio_id,
         areaName,
+        exceptionalReleaseNotice: null,
         label: `${studentName} · ${studentRow.matricula} · ${areaName} · ${classGroup.nome} · ${semester.codigo}`
       } satisfies ClinicalStudentOption;
     })
@@ -1157,6 +1217,40 @@ async function loadProfessorClinicalContext(
     .sort((left, right) =>
       left!.studentName.localeCompare(right!.studentName, "pt-BR")
     ) as ClinicalStudentOption[];
+
+  const releasedStudentOptions = releasedEnrollments
+    .map((enrollment) =>
+      buildClinicalStudentOption({
+        enrollment,
+        studentRowsById: studentRowMap,
+        studentUsersById: allStudentUserMap,
+        classRowsById: classMap,
+        semestersById: semesterMap,
+        areasById: areaMap
+      })
+    )
+    .filter(Boolean)
+    .sort((left, right) =>
+      left!.studentName.localeCompare(right!.studentName, "pt-BR")
+    ) as ClinicalStudentOption[];
+
+  const studentOptionsMap = new Map<string, ClinicalStudentOption>();
+
+  for (const studentOption of baseStudentOptions) {
+    studentOptionsMap.set(studentOption.enrollmentId, studentOption);
+  }
+
+  for (const studentOption of releasedStudentOptions) {
+    studentOptionsMap.set(studentOption.enrollmentId, studentOption);
+  }
+
+  const studentOptions = await applyProfessorClinicalExceptionalReleaseNotices(
+    currentUser,
+    [...studentOptionsMap.values()].sort((left, right) =>
+      left.studentName.localeCompare(right.studentName, "pt-BR")
+    ),
+    exceptionalReleaseRows
+  );
 
   return {
     context: {
@@ -1198,6 +1292,130 @@ function buildClinicalOperatorContext(
     ),
     emptyHint
   };
+}
+
+function buildClinicalStudentOption(input: {
+  enrollment: Pick<EnrollmentRow, "id" | "aluno_id" | "turma_id">;
+  studentRowsById: Map<string, StudentRow>;
+  studentUsersById: Map<string, UserRow>;
+  classRowsById: Map<string, ClassRow>;
+  semestersById: Map<string, SemesterRow>;
+  areasById: Map<string, AreaRow>;
+  professorName?: string | null;
+}) {
+  const studentRow = input.studentRowsById.get(input.enrollment.aluno_id);
+  const studentUser = input.studentUsersById.get(input.enrollment.aluno_id);
+  const classGroup = input.classRowsById.get(input.enrollment.turma_id);
+  const semester = classGroup
+    ? input.semestersById.get(classGroup.semestre_id)
+    : undefined;
+  const area =
+    classGroup?.area_estagio_id ? input.areasById.get(classGroup.area_estagio_id) : undefined;
+
+  if (!studentRow || !studentUser || !classGroup || !semester) {
+    return null;
+  }
+
+  const studentName = studentRow.nome_social ?? studentUser.nome_completo;
+  const areaName = area?.nome ?? classGroup.area_estagio;
+  const professorLabel = input.professorName
+    ? ` · Supervisor: ${input.professorName}`
+    : "";
+
+  return {
+    enrollmentId: input.enrollment.id,
+    studentId: studentUser.id,
+    studentName,
+    registration: studentRow.matricula,
+    classId: classGroup.id,
+    className: classGroup.nome,
+    semesterId: semester.id,
+    semesterCode: semester.codigo,
+    areaId: area?.id ?? classGroup.area_estagio_id,
+    areaName,
+    professorName: input.professorName ?? null,
+    exceptionalReleaseNotice: null,
+    label: `${studentName} · ${studentRow.matricula} · ${areaName} · ${classGroup.nome} · ${semester.codigo}${professorLabel}`
+  } satisfies ClinicalStudentOption;
+}
+
+async function applyProfessorClinicalExceptionalReleaseNotices(
+  currentUser: SessionUser,
+  studentOptions: ClinicalStudentOption[],
+  preloadedReleaseRows?: Awaited<
+    ReturnType<typeof loadReleasedEnrollmentContextsForUser>
+  >["releaseRows"]
+) {
+  if (currentUser.role !== "professor" || !studentOptions.length) {
+    return studentOptions;
+  }
+
+  const closedSemesterIds = [...new Set(
+    studentOptions
+      .map((studentOption) => studentOption.semesterId)
+      .filter(Boolean)
+  )];
+
+  if (!closedSemesterIds.length) {
+    return studentOptions;
+  }
+
+  const releaseRows =
+    preloadedReleaseRows ??
+    (await loadActiveExceptionalReleaseRowsForUser(currentUser, {
+      type: "clinica_supervisionada",
+      semesterIds: closedSemesterIds,
+      unitId: currentUser.unitId ?? null
+    }));
+
+  if (!releaseRows.length) {
+    return studentOptions;
+  }
+
+  return studentOptions.map((studentOption) => ({
+    ...studentOption,
+    exceptionalReleaseNotice: resolveExceptionalReleaseVisualNoticeFromRows(releaseRows, {
+      type: "clinica_supervisionada",
+      semesterId: studentOption.semesterId,
+      classId: studentOption.classId,
+      studentId: studentOption.studentId,
+      authorizedUserId: currentUser.id,
+      unitId: currentUser.unitId ?? null
+    })
+  }));
+}
+
+async function resolveProfessorClinicalExceptionalReleaseNotice(
+  currentUser: SessionUser,
+  caseItem: ClinicalCaseSummary,
+  semesterStatus?: SemesterRow["status"] | null
+) {
+  if (currentUser.role !== "professor" || semesterStatus !== "encerrado") {
+    return null;
+  }
+
+  const release = await findActiveExceptionalRelease(
+    {
+      type: "clinica_supervisionada",
+      semesterId: caseItem.semesterId,
+      classId: caseItem.classId,
+      studentId: caseItem.studentId,
+      authorizedUserId: currentUser.id,
+      unitId: caseItem.unitId ?? currentUser.unitId ?? null
+    },
+    currentUser
+  );
+
+  if (!release) {
+    return null;
+  }
+
+  return {
+    title: "Liberação excepcional ativa",
+    message: release.noticeMessage,
+    reason: release.reason,
+    expiresAt: release.expiresAt
+  } satisfies ExceptionalReleaseVisualNotice;
 }
 
 function selectInstitutionalProfessorLink(professorLinks: ProfessorLinkRow[]) {
@@ -1448,7 +1666,7 @@ async function loadClinicalOperatorContext(
     professorLinksByEnrollmentId.set(professorLink.matricula_turma_id, enrollmentLinks);
   }
 
-  const studentOptions = visibleEnrollments
+  const baseStudentOptions = visibleEnrollments
     .map((enrollment) => {
       const studentRow = studentRowMap.get(enrollment.aluno_id);
       const studentUser = studentUserMap.get(enrollment.aluno_id);
@@ -1477,11 +1695,14 @@ async function loadClinicalOperatorContext(
         studentId: studentUser.id,
         studentName,
         registration: studentRow.matricula,
+        classId: classGroup.id,
         className: classGroup.nome,
+        semesterId: semester.id,
         semesterCode: semester.codigo,
         areaId: area?.id ?? classGroup.area_estagio_id,
         areaName,
         professorName,
+        exceptionalReleaseNotice: null,
         label: `${studentName} · ${studentRow.matricula} · ${areaName} · ${classGroup.nome} · ${semester.codigo} · Supervisor: ${professorName}`
       } satisfies ClinicalStudentOption;
     })
@@ -1489,6 +1710,11 @@ async function loadClinicalOperatorContext(
     .sort((left, right) =>
       left!.studentName.localeCompare(right!.studentName, "pt-BR")
     ) as ClinicalStudentOption[];
+
+  const studentOptions = await applyProfessorClinicalExceptionalReleaseNotices(
+    currentUser,
+    baseStudentOptions
+  );
 
   return {
     context: buildClinicalOperatorContext(
@@ -2335,10 +2561,13 @@ export async function getProfessorClinicalCaseFormPageData(
         studentId: currentCase.studentId,
         studentName: currentCase.studentName,
         registration: currentCase.registration,
+        classId: currentCase.classId,
         className: currentCase.className,
+        semesterId: currentCase.semesterId,
         semesterCode: currentCase.semesterCode,
         areaId: currentCase.areaId,
         areaName: currentCase.areaName,
+        exceptionalReleaseNotice: null,
         label: `${currentCase.studentName} · ${currentCase.registration} · ${currentCase.areaName} · ${currentCase.className} · ${currentCase.semesterCode}`
       });
     }
@@ -3454,6 +3683,13 @@ export async function getClinicalCaseDetailPageData(
       };
     }
 
+    const semesterStatus = bundle.semestersById.get(caseItem.semesterId)?.status ?? null;
+    const exceptionalReleaseNotice = await resolveProfessorClinicalExceptionalReleaseNotice(
+      currentUser,
+      caseItem,
+      semesterStatus
+    );
+
     const [recordResult, notificationResult] = await Promise.all([
       supabase
         .from("registros_clinicos")
@@ -3500,6 +3736,7 @@ export async function getClinicalCaseDetailPageData(
         viewerRole: currentUser.role,
         viewerName: currentUser.name,
         caseItem,
+        exceptionalReleaseNotice,
         currentSection: normalizeSection(requestedSection),
         sections: [
           {
@@ -3590,6 +3827,7 @@ export async function getClinicalEvaluationPageData(
   const caseRow = caseRowData as ClinicalCaseRow;
 
   let caseItem: ClinicalCaseSummary | null = null;
+  let semesterStatus: SemesterRow["status"] | null = null;
 
   try {
     const bundle = await loadClinicalReferenceBundle([caseRow], currentUser);
@@ -3597,6 +3835,9 @@ export async function getClinicalEvaluationPageData(
       mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null,
       currentUser
     );
+    semesterStatus = caseItem
+      ? bundle.semestersById.get(caseItem.semesterId)?.status ?? null
+      : null;
   } catch {
     return {
       pageData: null,
@@ -3616,6 +3857,12 @@ export async function getClinicalEvaluationPageData(
       )
     };
   }
+
+  const exceptionalReleaseNotice = await resolveProfessorClinicalExceptionalReleaseNotice(
+    currentUser,
+    caseItem,
+    semesterStatus
+  );
 
   const { data: recordRowData, error: recordError } = await supabase
     .from("registros_clinicos")
@@ -3664,6 +3911,7 @@ export async function getClinicalEvaluationPageData(
       viewerRole: currentUser.role,
       viewerName: currentUser.name,
       caseItem,
+      exceptionalReleaseNotice,
       evaluation,
       studentCanEdit,
       studentReadOnlyMessage
@@ -3714,6 +3962,7 @@ export async function getClinicalTreatmentPlanPageData(
   const caseRow = caseRowData as ClinicalCaseRow;
 
   let caseItem: ClinicalCaseSummary | null = null;
+  let semesterStatus: SemesterRow["status"] | null = null;
 
   try {
     const bundle = await loadClinicalReferenceBundle([caseRow], currentUser);
@@ -3721,6 +3970,9 @@ export async function getClinicalTreatmentPlanPageData(
       mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null,
       currentUser
     );
+    semesterStatus = caseItem
+      ? bundle.semestersById.get(caseItem.semesterId)?.status ?? null
+      : null;
   } catch {
     return {
       pageData: null,
@@ -3740,6 +3992,12 @@ export async function getClinicalTreatmentPlanPageData(
       )
     };
   }
+
+  const exceptionalReleaseNotice = await resolveProfessorClinicalExceptionalReleaseNotice(
+    currentUser,
+    caseItem,
+    semesterStatus
+  );
 
   const { data: recordRowData, error: recordError } = await supabase
     .from("registros_clinicos")
@@ -3788,6 +4046,7 @@ export async function getClinicalTreatmentPlanPageData(
       viewerRole: currentUser.role,
       viewerName: currentUser.name,
       caseItem,
+      exceptionalReleaseNotice,
       treatmentPlan,
       studentCanEdit,
       studentReadOnlyMessage
@@ -3838,6 +4097,7 @@ export async function getClinicalEvolutionListPageData(
   const caseRow = caseRowData as ClinicalCaseRow;
 
   let caseItem: ClinicalCaseSummary | null = null;
+  let semesterStatus: SemesterRow["status"] | null = null;
 
   try {
     const bundle = await loadClinicalReferenceBundle([caseRow], currentUser);
@@ -3845,6 +4105,9 @@ export async function getClinicalEvolutionListPageData(
       mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null,
       currentUser
     );
+    semesterStatus = caseItem
+      ? bundle.semestersById.get(caseItem.semesterId)?.status ?? null
+      : null;
   } catch {
     return {
       pageData: null,
@@ -3864,6 +4127,12 @@ export async function getClinicalEvolutionListPageData(
       )
     };
   }
+
+  const exceptionalReleaseNotice = await resolveProfessorClinicalExceptionalReleaseNotice(
+    currentUser,
+    caseItem,
+    semesterStatus
+  );
 
   const { data: recordRowsData, error: recordError } = await supabase
     .from("registros_clinicos")
@@ -3901,6 +4170,7 @@ export async function getClinicalEvolutionListPageData(
       viewerRole: currentUser.role,
       viewerName: currentUser.name,
       caseItem,
+      exceptionalReleaseNotice,
       evolutions
     },
     emptyState: null
@@ -3950,6 +4220,7 @@ export async function getClinicalEvolutionPageData(
   const caseRow = caseRowData as ClinicalCaseRow;
 
   let caseItem: ClinicalCaseSummary | null = null;
+  let semesterStatus: SemesterRow["status"] | null = null;
 
   try {
     const bundle = await loadClinicalReferenceBundle([caseRow], currentUser);
@@ -3957,6 +4228,9 @@ export async function getClinicalEvolutionPageData(
       mapClinicalCaseSummaries([caseRow], bundle)[0] ?? null,
       currentUser
     );
+    semesterStatus = caseItem
+      ? bundle.semestersById.get(caseItem.semesterId)?.status ?? null
+      : null;
   } catch {
     return {
       pageData: null,
@@ -3976,6 +4250,12 @@ export async function getClinicalEvolutionPageData(
       )
     };
   }
+
+  const exceptionalReleaseNotice = await resolveProfessorClinicalExceptionalReleaseNotice(
+    currentUser,
+    caseItem,
+    semesterStatus
+  );
 
   let evolution: ClinicalEvolutionRecord | null = null;
 
@@ -4028,6 +4308,7 @@ export async function getClinicalEvolutionPageData(
       viewerRole: currentUser.role,
       viewerName: currentUser.name,
       caseItem,
+      exceptionalReleaseNotice,
       evolution,
       studentCanEdit,
       studentReadOnlyMessage

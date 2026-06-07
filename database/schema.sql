@@ -876,6 +876,8 @@ create table if not exists public.liberacoes_excepcionais (
   expira_em timestamptz not null,
   ativo boolean not null default true,
   encerrado_manualmente_em timestamptz,
+  utilizado_em timestamptz,
+  utilizado_por uuid references public.usuarios (id) on delete restrict,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint liberacoes_excepcionais_tipo_check
@@ -892,6 +894,20 @@ create table if not exists public.liberacoes_excepcionais (
       or (
         encerrado_manualmente_em >= inicio_em
         and ativo = false
+      )
+    ),
+  constraint liberacoes_excepcionais_utilizacao_consistencia_check
+    check (
+      (
+        utilizado_em is null
+        and utilizado_por is null
+      )
+      or (
+        utilizado_em is not null
+        and utilizado_por is not null
+        and utilizado_em >= inicio_em
+        and ativo = false
+        and encerrado_manualmente_em is null
       )
     ),
   constraint liberacoes_excepcionais_escopo_consistencia_check
@@ -934,6 +950,12 @@ create index if not exists idx_liberacoes_excepcionais_turma
 create index if not exists idx_liberacoes_excepcionais_aluno
   on public.liberacoes_excepcionais (aluno_id, tipo, ativo, expira_em desc)
   where aluno_id is not null;
+
+alter table public.liberacoes_excepcionais
+  add column if not exists utilizado_em timestamptz;
+
+alter table public.liberacoes_excepcionais
+  add column if not exists utilizado_por uuid references public.usuarios (id) on delete restrict;
 
 create table if not exists public.historico_alteracoes (
   id bigserial primary key,
@@ -1035,6 +1057,10 @@ begin
   end if;
 
   if new.encerrado_manualmente_em is not null then
+    new.ativo := false;
+  end if;
+
+  if new.utilizado_em is not null then
     new.ativo := false;
   end if;
 
@@ -1156,34 +1182,19 @@ as $$
     and le.tipo = p_tipo
     and le.ativo = true
     and le.encerrado_manualmente_em is null
+    and le.utilizado_em is null
     and c.referencia_em >= le.inicio_em
     and c.referencia_em <= le.expira_em
+    and c.aluno_id is not null
+    and le.aluno_id = c.aluno_id
     and (
-      le.escopo = 'semestre'
+      le.turma_id is null
       or (
-        le.escopo = 'turma'
-        and c.turma_id is not null
+        c.turma_id is not null
         and le.turma_id = c.turma_id
-      )
-      or (
-        le.escopo = 'aluno'
-        and c.aluno_id is not null
-        and le.aluno_id = c.aluno_id
-        and (
-          le.turma_id is null
-          or (
-            c.turma_id is not null
-            and le.turma_id = c.turma_id
-          )
-        )
       )
     )
   order by
-    case le.escopo
-      when 'aluno' then 3
-      when 'turma' then 2
-      else 1
-    end desc,
     le.expira_em asc,
     le.created_at desc
   limit 1;
@@ -1218,7 +1229,7 @@ $$;
 create or replace function public.vincular_liberacao_excepcional_auditoria(
   p_liberacao_excepcional_id uuid,
   p_tabela text,
-  p_registro_ids uuid[]
+  p_registro_ids text[]
 )
 returns integer
 language plpgsql
@@ -1249,19 +1260,37 @@ begin
     raise exception 'A liberação excepcional informada não pertence ao usuário autenticado.';
   end if;
 
+  with audit_targets as (
+    select distinct on (h.registro_id)
+      h.id
+    from public.historico_alteracoes h
+    where h.tabela = p_tabela
+      and h.registro_id::text = any(p_registro_ids)
+      and (h.usuario_id = auth.uid() or h.usuario_id is null)
+      and h.liberacao_excepcional_id is null
+    order by h.registro_id, h.created_at desc, h.id desc
+  )
   update public.historico_alteracoes h
   set liberacao_excepcional_id = p_liberacao_excepcional_id
-  where h.tabela = p_tabela
-    and h.registro_id = any(p_registro_ids)
-    and (h.usuario_id = auth.uid() or h.usuario_id is null)
-    and h.liberacao_excepcional_id is null
-    and h.created_at >= now() - interval '15 minutes';
+  where h.id in (select id from audit_targets);
 
   get diagnostics updated_count = row_count;
 
   return updated_count;
 end;
 $$;
+
+revoke all on function public.vincular_liberacao_excepcional_auditoria(
+  uuid,
+  text,
+  text[]
+) from public;
+
+grant execute on function public.vincular_liberacao_excepcional_auditoria(
+  uuid,
+  text,
+  text[]
+) to authenticated;
 
 create or replace function private.resolve_audit_unit_id(
   p_table_name text,
@@ -2008,6 +2037,348 @@ as $$
     );
 $$;
 
+create or replace function private.has_active_exceptional_release_for_matricula_type(
+  p_matricula_turma_id uuid,
+  p_tipo text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    private.current_user_is_active()
+    and exists (
+      select 1
+      from public.matriculas_turma m
+      join public.turmas t on t.id = m.turma_id
+      join public.semestres s on s.id = t.semestre_id
+      where m.id = p_matricula_turma_id
+        and public.tem_liberacao_excepcional_ativa(
+          p_tipo => p_tipo,
+          p_semestre_id => s.id,
+          p_turma_id => t.id,
+          p_aluno_id => m.aluno_id,
+          p_usuario_id => (select auth.uid()),
+          p_unidade_id => s.unidade_id,
+          p_referencia_em => now()
+        )
+    );
+$$;
+
+create or replace function private.can_view_evaluation_matricula(
+  p_matricula_turma_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    private.can_view_matricula(p_matricula_turma_id)
+    or (
+      private.current_profile_code() = 'professor'
+      and private.has_active_exceptional_release_for_matricula_type(
+        p_matricula_turma_id,
+        'avaliacao'
+      )
+    );
+$$;
+
+create or replace function private.can_manage_evaluation_matricula(
+  p_matricula_turma_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    private.can_manage_grades(p_matricula_turma_id)
+    or (
+      private.current_profile_code() = 'professor'
+      and private.has_active_exceptional_release_for_matricula_type(
+        p_matricula_turma_id,
+        'avaliacao'
+      )
+    );
+$$;
+
+create or replace function private.can_view_absence_matricula(
+  p_matricula_turma_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    private.can_view_matricula(p_matricula_turma_id)
+    or (
+      private.current_profile_code() = 'professor'
+      and private.has_active_exceptional_release_for_matricula_type(
+        p_matricula_turma_id,
+        'ausencia'
+      )
+    );
+$$;
+
+create or replace function private.can_manage_absence_matricula(
+  p_matricula_turma_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    private.can_manage_grades(p_matricula_turma_id)
+    or (
+      private.current_profile_code() = 'professor'
+      and private.has_active_exceptional_release_for_matricula_type(
+        p_matricula_turma_id,
+        'ausencia'
+      )
+    );
+$$;
+
+create or replace function private.consume_active_exceptional_release_for_matricula_type(
+  p_matricula_turma_id uuid,
+  p_tipo text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  release_id uuid;
+  release_semester_id uuid;
+  release_class_id uuid;
+  release_student_id uuid;
+  release_unit_id uuid;
+begin
+  if auth.uid() is null then
+    return null;
+  end if;
+
+  select
+    s.id,
+    t.id,
+    m.aluno_id,
+    s.unidade_id
+  into
+    release_semester_id,
+    release_class_id,
+    release_student_id,
+    release_unit_id
+  from public.matriculas_turma m
+  join public.turmas t on t.id = m.turma_id
+  join public.semestres s on s.id = t.semestre_id
+  where m.id = p_matricula_turma_id
+  limit 1;
+
+  if release_semester_id is null then
+    return null;
+  end if;
+
+  select public.obter_liberacao_excepcional_ativa(
+    p_tipo => p_tipo,
+    p_semestre_id => release_semester_id,
+    p_turma_id => release_class_id,
+    p_aluno_id => release_student_id,
+    p_usuario_id => (select auth.uid()),
+    p_unidade_id => release_unit_id,
+    p_referencia_em => now()
+  )
+  into release_id;
+
+  if release_id is null then
+    return null;
+  end if;
+
+  update public.liberacoes_excepcionais
+  set
+    ativo = false,
+    utilizado_em = now(),
+    utilizado_por = auth.uid()
+  where id = release_id
+    and usuario_autorizado_id = auth.uid()
+    and tipo = p_tipo
+    and ativo = true
+    and encerrado_manualmente_em is null
+    and utilizado_em is null;
+
+  if not found then
+    return null;
+  end if;
+
+  return release_id;
+end;
+$$;
+
+create or replace function public.criar_ausencia(
+  p_matricula_turma_id uuid,
+  p_data_ausencia date,
+  p_horas numeric,
+  p_justificada boolean,
+  p_motivo text default null,
+  p_observacoes text default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_ausencia_id uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'Usuario autenticado nao encontrado para registrar a falta.';
+  end if;
+
+  if not private.can_manage_absence_matricula(p_matricula_turma_id) then
+    raise exception 'Usuario sem permissao para registrar falta neste contexto.';
+  end if;
+
+  if p_data_ausencia is null then
+    raise exception 'A data da falta e obrigatoria.';
+  end if;
+
+  if p_horas is null or p_horas <= 0 or p_horas > 24 then
+    raise exception 'A quantidade de horas da falta deve ser maior que zero e de no maximo 24.';
+  end if;
+
+  insert into public.ausencias (
+    matricula_turma_id,
+    registrado_por,
+    data_ausencia,
+    horas,
+    justificada,
+    motivo,
+    observacoes
+  )
+  values (
+    p_matricula_turma_id,
+    auth.uid(),
+    p_data_ausencia,
+    p_horas,
+    coalesce(p_justificada, false),
+    nullif(trim(coalesce(p_motivo, '')), ''),
+    nullif(trim(coalesce(p_observacoes, '')), '')
+  )
+  returning id into v_ausencia_id;
+
+  perform private.consume_active_exceptional_release_for_matricula_type(
+    p_matricula_turma_id,
+    'ausencia'
+  );
+
+  return v_ausencia_id;
+end;
+$$;
+
+revoke all on function public.criar_ausencia(
+  uuid,
+  date,
+  numeric,
+  boolean,
+  text,
+  text
+) from public;
+
+grant execute on function public.criar_ausencia(
+  uuid,
+  date,
+  numeric,
+  boolean,
+  text,
+  text
+) to authenticated;
+
+create or replace function public.atualizar_ausencia(
+  p_ausencia_id uuid,
+  p_data_ausencia date,
+  p_horas numeric,
+  p_justificada boolean,
+  p_motivo text default null,
+  p_observacoes text default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_ausencia public.ausencias%rowtype;
+begin
+  if auth.uid() is null then
+    raise exception 'Usuario autenticado nao encontrado para atualizar a falta.';
+  end if;
+
+  select *
+  into v_ausencia
+  from public.ausencias
+  where id = p_ausencia_id
+  limit 1;
+
+  if v_ausencia.id is null then
+    raise exception 'Falta nao encontrada.';
+  end if;
+
+  if not private.can_manage_absence_matricula(v_ausencia.matricula_turma_id) then
+    raise exception 'Usuario sem permissao para atualizar a falta informada.';
+  end if;
+
+  if p_data_ausencia is null then
+    raise exception 'A data da falta e obrigatoria.';
+  end if;
+
+  if p_horas is null or p_horas <= 0 or p_horas > 24 then
+    raise exception 'A quantidade de horas da falta deve ser maior que zero e de no maximo 24.';
+  end if;
+
+  update public.ausencias
+  set
+    data_ausencia = p_data_ausencia,
+    horas = p_horas,
+    justificada = coalesce(p_justificada, false),
+    motivo = nullif(trim(coalesce(p_motivo, '')), ''),
+    observacoes = nullif(trim(coalesce(p_observacoes, '')), '')
+  where id = p_ausencia_id;
+
+  perform private.consume_active_exceptional_release_for_matricula_type(
+    v_ausencia.matricula_turma_id,
+    'ausencia'
+  );
+
+  return p_ausencia_id;
+end;
+$$;
+
+revoke all on function public.atualizar_ausencia(
+  uuid,
+  date,
+  numeric,
+  boolean,
+  text,
+  text
+) from public;
+
+grant execute on function public.atualizar_ausencia(
+  uuid,
+  date,
+  numeric,
+  boolean,
+  text,
+  text
+) to authenticated;
+
 create or replace function private.can_assign_clinical_case(
   p_unidade_id uuid,
   p_matricula_turma_id uuid,
@@ -2265,8 +2636,8 @@ begin
     raise exception 'Apenas professores podem criar avaliações por esta função.';
   end if;
 
-  if not private.can_manage_grades(p_matricula_turma_id) then
-    raise exception 'Professor sem vínculo ativo com a matrícula informada.';
+  if not private.can_manage_evaluation_matricula(p_matricula_turma_id) then
+    raise exception 'Professor sem permissao para lancar avaliacao neste contexto.';
   end if;
 
   if p_tipo_lancamento not in ('parcial', 'revisao', 'fechamento') then
@@ -2359,6 +2730,13 @@ begin
     );
   end loop;
 
+  if p_status = 'publicado' then
+    perform private.consume_active_exceptional_release_for_matricula_type(
+      p_matricula_turma_id,
+      'avaliacao'
+    );
+  end if;
+
   return v_avaliacao_id;
 end;
 $$;
@@ -2429,8 +2807,8 @@ begin
     raise exception 'A revisao incremental so pode partir de um lancamento publicado.';
   end if;
 
-  if not private.can_manage_grades(v_origem.matricula_turma_id) then
-    raise exception 'Professor sem vinculo ativo com a matricula informada.';
+  if not private.can_manage_evaluation_matricula(v_origem.matricula_turma_id) then
+    raise exception 'Professor sem permissao para revisar a matricula informada.';
   end if;
 
   if p_status not in ('rascunho', 'publicado') then
@@ -2540,6 +2918,13 @@ begin
     );
   end loop;
 
+  if p_status = 'publicado' then
+    perform private.consume_active_exceptional_release_for_matricula_type(
+      v_origem.matricula_turma_id,
+      'avaliacao'
+    );
+  end if;
+
   return v_avaliacao_id;
 end;
 $$;
@@ -2602,8 +2987,8 @@ begin
     raise exception 'O lancamento informado nao pertence ao professor autenticado.';
   end if;
 
-  if not private.can_manage_grades(v_avaliacao.matricula_turma_id) then
-    raise exception 'Professor sem vinculo ativo com a matricula informada.';
+  if not private.can_manage_evaluation_matricula(v_avaliacao.matricula_turma_id) then
+    raise exception 'Professor sem permissao para atualizar o lancamento informado.';
   end if;
 
   if v_avaliacao.status <> 'rascunho' then
@@ -2682,6 +3067,13 @@ begin
       v_feedback
     );
   end loop;
+
+  if p_status = 'publicado' then
+    perform private.consume_active_exceptional_release_for_matricula_type(
+      v_avaliacao.matricula_turma_id,
+      'avaliacao'
+    );
+  end if;
 
   return p_avaliacao_id;
 end;

@@ -1,7 +1,12 @@
 ﻿import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { formatLaunchIdentity, resolveLaunchIdentity } from "@/lib/utils/format";
+import {
+  loadReleasedEnrollmentContextsForUser,
+  resolveExceptionalReleaseVisualNoticeFromRows
+} from "@/services/exceptional-releases";
 import type { Database } from "@/types/database";
-import type { SessionUser } from "@/types/domain";
+import type { ExceptionalReleaseVisualNotice, SessionUser } from "@/types/domain";
 
 type UserRow = Database["public"]["Tables"]["usuarios"]["Row"];
 type StudentRow = Database["public"]["Tables"]["alunos"]["Row"];
@@ -20,8 +25,11 @@ export interface EvaluationStudentOption {
   studentId: string;
   studentName: string;
   registration: string;
+  classId: string;
   className: string;
+  semesterId: string;
   semesterCode: string;
+  exceptionalReleaseNotice?: ExceptionalReleaseVisualNotice | null;
   label: string;
 }
 
@@ -244,6 +252,41 @@ function filterEnrollmentsToStudentIds(
   studentIds: Set<string>
 ) {
   return enrollments.filter((enrollment) => studentIds.has(enrollment.aluno_id));
+}
+
+function buildEvaluationStudentOption(input: {
+  enrollment: Pick<EnrollmentRow, "id" | "aluno_id" | "turma_id">;
+  studentRowsById: Map<string, StudentRow>;
+  studentUsersById: Map<string, UserRow>;
+  classRowsById: Map<string, ClassRow>;
+  semestersById: Map<string, SemesterRow>;
+}) {
+  const studentRow = input.studentRowsById.get(input.enrollment.aluno_id);
+  const studentUser = input.studentUsersById.get(input.enrollment.aluno_id);
+  const classGroup = input.classRowsById.get(input.enrollment.turma_id);
+  const semester = classGroup
+    ? input.semestersById.get(classGroup.semestre_id)
+    : undefined;
+
+  if (!studentRow || !studentUser || !classGroup || !semester) {
+    return null;
+  }
+
+  const studentName = studentRow.nome_social ?? studentUser.nome_completo;
+  const label = `${studentName} · ${studentRow.matricula} · ${classGroup.nome} · ${semester.codigo}`;
+
+  return {
+    enrollmentId: input.enrollment.id,
+    studentId: studentUser.id,
+    studentName,
+    registration: studentRow.matricula,
+    classId: classGroup.id,
+    className: classGroup.nome,
+    semesterId: semester.id,
+    semesterCode: semester.codigo,
+    exceptionalReleaseNotice: null,
+    label
+  } satisfies EvaluationStudentOption;
 }
 
 function safeSortableTimestamp(value?: string | null) {
@@ -652,6 +695,32 @@ async function loadProfessorEvaluationContext(
     };
   }
 
+  let exceptionalReleaseRows: Awaited<
+    ReturnType<typeof loadReleasedEnrollmentContextsForUser>
+  >["releaseRows"] = [];
+  let releasedEnrollmentContexts: Awaited<
+    ReturnType<typeof loadReleasedEnrollmentContextsForUser>
+  >["contexts"] = [];
+
+  try {
+    const releasedContextResult = await loadReleasedEnrollmentContextsForUser(currentUser, {
+      type: "avaliacao",
+      unitId: currentUser.unitId ?? null
+    });
+
+    exceptionalReleaseRows = releasedContextResult.releaseRows;
+    releasedEnrollmentContexts = releasedContextResult.contexts;
+  } catch (_error) {
+    return {
+      context: null,
+      emptyState: {
+        title: "Não foi possível carregar as liberações excepcionais",
+        description:
+          "Houve um problema ao consultar os contextos liberados excepcionalmente para este professor."
+      }
+    };
+  }
+
   const { data: professorLinksData, error: linksError } = await supabase
     .from("vinculos_professor_aluno")
     .select("*")
@@ -674,7 +743,7 @@ async function loadProfessorEvaluationContext(
     (link) => !link.data_fim || link.data_fim >= today
   );
 
-  if (!professorLinks.length) {
+  if (!professorLinks.length && !releasedEnrollmentContexts.length) {
     return {
       context: null,
       emptyState: {
@@ -685,11 +754,19 @@ async function loadProfessorEvaluationContext(
     };
   }
 
+  const dataSupabase =
+    releasedEnrollmentContexts.length > 0
+      ? createSupabaseAdminClient()
+      : supabase;
+
   const enrollmentIds = [
-    ...new Set(professorLinks.map((link) => link.matricula_turma_id))
+    ...new Set([
+      ...professorLinks.map((link) => link.matricula_turma_id),
+      ...releasedEnrollmentContexts.map((context) => context.enrollmentId)
+    ])
   ];
 
-  const { data: enrollmentRowsData, error: enrollmentError } = await supabase
+  const { data: enrollmentRowsData, error: enrollmentError } = await dataSupabase
     .from("matriculas_turma")
     .select("*")
     .in("id", enrollmentIds);
@@ -705,11 +782,12 @@ async function loadProfessorEvaluationContext(
     };
   }
 
-  const enrollmentRows = ((enrollmentRowsData ?? []) as EnrollmentRow[]).filter(
+  const enrollmentRows = (enrollmentRowsData ?? []) as EnrollmentRow[];
+  const activeEnrollmentRows = enrollmentRows.filter(
     (enrollment) => enrollment.status === "ativa"
   );
 
-  if (!enrollmentRows.length) {
+  if (!activeEnrollmentRows.length && !releasedEnrollmentContexts.length) {
     return {
       context: null,
       emptyState: {
@@ -724,16 +802,15 @@ async function loadProfessorEvaluationContext(
   const classIds = [...new Set(enrollmentRows.map((row) => row.turma_id))];
 
   const [studentRowsResult, studentUsersResult, classRowsResult] = await Promise.all([
-    supabase.from("alunos").select("*").in("usuario_id", studentIds),
+    dataSupabase.from("alunos").select("*").in("usuario_id", studentIds),
     currentUser.unitId
-      ? supabase
+      ? dataSupabase
           .from("usuarios")
           .select("*")
           .in("id", studentIds)
           .eq("unidade_id", currentUser.unitId)
-          .eq("ativo", true)
-      : supabase.from("usuarios").select("*").in("id", studentIds).eq("ativo", true),
-    supabase.from("turmas").select("*").in("id", classIds)
+      : dataSupabase.from("usuarios").select("*").in("id", studentIds),
+    dataSupabase.from("turmas").select("*").in("id", classIds)
   ]);
 
   if (studentRowsResult.error || studentUsersResult.error || classRowsResult.error) {
@@ -748,14 +825,13 @@ async function loadProfessorEvaluationContext(
   }
 
   const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
-  const studentUsers = filterActiveStudentUsers(
-    (studentUsersResult.data ?? []) as UserRow[]
-  );
+  const allStudentUsers = (studentUsersResult.data ?? []) as UserRow[];
+  const studentUsers = filterActiveStudentUsers(allStudentUsers);
   let classRows = (classRowsResult.data ?? []) as ClassRow[];
   const semesterIds = [...new Set(classRows.map((row) => row.semestre_id))];
 
   const { data: semesterRowsData, error: semesterError } = semesterIds.length
-    ? await supabase.from("semestres").select("*").in("id", semesterIds)
+    ? await dataSupabase.from("semestres").select("*").in("id", semesterIds)
     : { data: [], error: null };
 
   if (semesterError) {
@@ -774,13 +850,30 @@ async function loadProfessorEvaluationContext(
     currentUser
   );
   classRows = filterClassesToSemesters(classRows, semesterRows);
+  const activeEnrollmentIdSet = new Set(
+    professorLinks.map((link) => link.matricula_turma_id)
+  );
+  const releasedEnrollmentIdSet = new Set(
+    releasedEnrollmentContexts.map((context) => context.enrollmentId)
+  );
   const activeStudentIdSet = new Set(studentUsers.map((studentUser) => studentUser.id));
   const visibleEnrollmentRows = filterEnrollmentsToStudentIds(
-    filterEnrollmentsToClasses(enrollmentRows, classRows),
+    filterEnrollmentsToClasses(
+      activeEnrollmentRows.filter((enrollment) => activeEnrollmentIdSet.has(enrollment.id)),
+      classRows
+    ),
     activeStudentIdSet
   );
 
-  if (!visibleEnrollmentRows.length || !classRows.length || !semesterRows.length) {
+  const releasedEnrollmentRows = filterEnrollmentsToClasses(
+    enrollmentRows.filter((enrollment) => releasedEnrollmentIdSet.has(enrollment.id)),
+    classRows
+  );
+
+  if (
+    !visibleEnrollmentRows.length &&
+    !releasedEnrollmentRows.length
+  ) {
     return {
       context: null,
       emptyState: {
@@ -793,39 +886,53 @@ async function loadProfessorEvaluationContext(
 
   const studentRowMap = new Map(studentRows.map((row) => [row.usuario_id, row]));
   const studentUserMap = new Map(studentUsers.map((row) => [row.id, row]));
+  const allStudentUserMap = new Map(allStudentUsers.map((row) => [row.id, row]));
   const classMap = new Map(classRows.map((row) => [row.id, row]));
   const semesterMap = new Map(semesterRows.map((row) => [row.id, row]));
 
-  const studentOptions = visibleEnrollmentRows
-    .map((enrollment) => {
-      const studentRow = studentRowMap.get(enrollment.aluno_id);
-      const studentUser = studentUserMap.get(enrollment.aluno_id);
-      const classGroup = classMap.get(enrollment.turma_id);
-      const semester = classGroup
-        ? semesterMap.get(classGroup.semestre_id)
-        : undefined;
-
-      if (!studentRow || !studentUser || !classGroup || !semester) {
-        return null;
-      }
-
-      const studentName = studentRow.nome_social ?? studentUser.nome_completo;
-      const label = `${studentName} · ${studentRow.matricula} · ${classGroup.nome} · ${semester.codigo}`;
-
-      return {
-        enrollmentId: enrollment.id,
-        studentId: studentUser.id,
-        studentName,
-        registration: studentRow.matricula,
-        className: classGroup.nome,
-        semesterCode: semester.codigo,
-        label
-      } satisfies EvaluationStudentOption;
-    })
+  const baseStudentOptions = visibleEnrollmentRows
+    .map((enrollment) =>
+      buildEvaluationStudentOption({
+        enrollment,
+        studentRowsById: studentRowMap,
+        studentUsersById: studentUserMap,
+        classRowsById: classMap,
+        semestersById: semesterMap
+      })
+    )
     .filter(Boolean)
     .sort((left, right) =>
       left!.studentName.localeCompare(right!.studentName, "pt-BR")
     ) as EvaluationStudentOption[];
+
+  const releasedStudentOptions = releasedEnrollmentRows
+    .map((enrollment) =>
+      buildEvaluationStudentOption({
+        enrollment,
+        studentRowsById: studentRowMap,
+        studentUsersById: allStudentUserMap,
+        classRowsById: classMap,
+        semestersById: semesterMap
+      })
+    )
+    .filter(Boolean)
+    .sort((left, right) =>
+      left!.studentName.localeCompare(right!.studentName, "pt-BR")
+    ) as EvaluationStudentOption[];
+
+  const studentOptionsMap = new Map<string, EvaluationStudentOption>();
+
+  for (const studentOption of baseStudentOptions) {
+    studentOptionsMap.set(studentOption.enrollmentId, studentOption);
+  }
+
+  for (const studentOption of releasedStudentOptions) {
+    studentOptionsMap.set(studentOption.enrollmentId, studentOption);
+  }
+
+  let studentOptions = [...studentOptionsMap.values()].sort((left, right) =>
+    left.studentName.localeCompare(right.studentName, "pt-BR")
+  );
 
   if (!studentOptions.length) {
     return {
@@ -836,6 +943,29 @@ async function loadProfessorEvaluationContext(
           "Os vínculos existem, mas faltam dados de aluno, turma ou semestre para montar as opcoes do formulario."
       }
     };
+  }
+
+  const closedSemesterIds = [...new Set(
+    studentOptions
+      .filter((studentOption) => semesterMap.get(studentOption.semesterId)?.status === "encerrado")
+      .map((studentOption) => studentOption.semesterId)
+  )];
+
+  if (closedSemesterIds.length && exceptionalReleaseRows.length) {
+    studentOptions = studentOptions.map((studentOption) => ({
+      ...studentOption,
+      exceptionalReleaseNotice:
+        semesterMap.get(studentOption.semesterId)?.status === "encerrado"
+          ? resolveExceptionalReleaseVisualNoticeFromRows(exceptionalReleaseRows, {
+              type: "avaliacao",
+              semesterId: studentOption.semesterId,
+              classId: studentOption.classId,
+              studentId: studentOption.studentId,
+              authorizedUserId: currentUser.id,
+              unitId: currentUser.unitId ?? null
+            })
+          : null
+    }));
   }
 
   let rubricGroupsWithCriteria: EvaluationRubricGroup[] = [];
