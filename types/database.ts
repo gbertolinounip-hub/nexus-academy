@@ -116,7 +116,8 @@ export interface Database {
             | "professor"
             | "secretaria"
             | "coordenador"
-            | "coordenador_master";
+            | "coordenador_master"
+            | "master_curso";
           nome: string;
           descricao: string | null;
           created_at: string;
@@ -128,7 +129,8 @@ export interface Database {
             | "professor"
             | "secretaria"
             | "coordenador"
-            | "coordenador_master";
+            | "coordenador_master"
+            | "master_curso";
           nome: string;
           descricao?: string | null;
           created_at?: string;
@@ -140,16 +142,378 @@ export interface Database {
             | "professor"
             | "secretaria"
             | "coordenador"
-            | "coordenador_master";
+            | "coordenador_master"
+            | "master_curso";
           nome?: string;
           descricao?: string | null;
           created_at?: string;
         };
         Relationships: [];
       };
+      instituicoes: {
+        Row: {
+          id: string;
+          nome: string;
+          sigla: string | null;
+          slug: string;
+          cnpj: string | null;
+          ativo: boolean;
+          metadata: Record<string, unknown>;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          nome: string;
+          sigla?: string | null;
+          slug: string;
+          cnpj?: string | null;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          nome?: string;
+          sigla?: string | null;
+          slug?: string;
+          cnpj?: string | null;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      cursos: {
+        Row: {
+          id: string;
+          instituicao_id: string;
+          codigo: string;
+          nome: string;
+          slug: string;
+          ativo: boolean;
+          metadata: Record<string, unknown>;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          instituicao_id: string;
+          codigo: string;
+          nome: string;
+          slug: string;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          instituicao_id?: string;
+          codigo?: string;
+          nome?: string;
+          slug?: string;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      ofertas_curso_unidade: {
+        Row: {
+          id: string;
+          instituicao_id: string;
+          unidade_id: string;
+          curso_id: string;
+          codigo: string | null;
+          nome_exibicao: string | null;
+          ativo: boolean;
+          metadata: Record<string, unknown>;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          instituicao_id: string;
+          unidade_id: string;
+          curso_id: string;
+          codigo?: string | null;
+          nome_exibicao?: string | null;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          instituicao_id?: string;
+          unidade_id?: string;
+          curso_id?: string;
+          codigo?: string | null;
+          nome_exibicao?: string | null;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      usuarios_papeis_contexto: {
+        Row: {
+          id: string;
+          usuario_id: string;
+          perfil_id: number;
+          instituicao_id: string | null;
+          curso_id: string | null;
+          oferta_curso_unidade_id: string | null;
+          principal: boolean;
+          ativo: boolean;
+          inicio_em: string | null;
+          fim_em: string | null;
+          metadata: Record<string, unknown>;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          usuario_id: string;
+          perfil_id: number;
+          instituicao_id?: string | null;
+          curso_id?: string | null;
+          oferta_curso_unidade_id?: string | null;
+          principal?: boolean;
+          ativo?: boolean;
+          inicio_em?: string | null;
+          fim_em?: string | null;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          usuario_id?: string;
+          perfil_id?: number;
+          instituicao_id?: string | null;
+          curso_id?: string | null;
+          oferta_curso_unidade_id?: string | null;
+          principal?: boolean;
+          ativo?: boolean;
+          inicio_em?: string | null;
+          fim_em?: string | null;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      modelos_avaliacao_curso: {
+        Row: {
+          id: string;
+          curso_id: string;
+          codigo: string;
+          nome: string;
+          descricao: string | null;
+          versao: number;
+          ativo: boolean;
+          metadata: Record<string, unknown>;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          curso_id: string;
+          codigo: string;
+          nome: string;
+          descricao?: string | null;
+          versao?: number;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          curso_id?: string;
+          codigo?: string;
+          nome?: string;
+          descricao?: string | null;
+          versao?: number;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      grupos_modelo_avaliacao: {
+        Row: {
+          id: string;
+          modelo_avaliacao_curso_id: string;
+          codigo: string;
+          nome: string;
+          ordem: number;
+          peso_percentual: number;
+          ativo: boolean;
+          metadata: Record<string, unknown>;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          modelo_avaliacao_curso_id: string;
+          codigo: string;
+          nome: string;
+          ordem: number;
+          peso_percentual: number;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          modelo_avaliacao_curso_id?: string;
+          codigo?: string;
+          nome?: string;
+          ordem?: number;
+          peso_percentual?: number;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      criterios_modelo_avaliacao: {
+        Row: {
+          id: string;
+          grupo_modelo_avaliacao_id: string;
+          codigo: string;
+          nome: string;
+          descricao: string | null;
+          ordem: number;
+          peso_percentual: number;
+          escala_maxima: number;
+          ativo: boolean;
+          metadata: Record<string, unknown>;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          grupo_modelo_avaliacao_id: string;
+          codigo: string;
+          nome: string;
+          descricao?: string | null;
+          ordem: number;
+          peso_percentual: number;
+          escala_maxima?: number;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          grupo_modelo_avaliacao_id?: string;
+          codigo?: string;
+          nome?: string;
+          descricao?: string | null;
+          ordem?: number;
+          peso_percentual?: number;
+          escala_maxima?: number;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      tipos_documento: {
+        Row: {
+          id: string;
+          codigo: string;
+          nome: string;
+          descricao: string | null;
+          ativo: boolean;
+          metadata: Record<string, unknown>;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          codigo: string;
+          nome: string;
+          descricao?: string | null;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          codigo?: string;
+          nome?: string;
+          descricao?: string | null;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      documentos_obrigatorios_curso: {
+        Row: {
+          id: string;
+          curso_id: string;
+          tipo_documento_id: string;
+          codigo: string | null;
+          nome_exibicao: string | null;
+          descricao: string | null;
+          obrigatorio: boolean;
+          ordem: number | null;
+          ativo: boolean;
+          metadata: Record<string, unknown>;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          curso_id: string;
+          tipo_documento_id: string;
+          codigo?: string | null;
+          nome_exibicao?: string | null;
+          descricao?: string | null;
+          obrigatorio?: boolean;
+          ordem?: number | null;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          curso_id?: string;
+          tipo_documento_id?: string;
+          codigo?: string | null;
+          nome_exibicao?: string | null;
+          descricao?: string | null;
+          obrigatorio?: boolean;
+          ordem?: number | null;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       unidades: {
         Row: {
           id: string;
+          instituicao_id: string | null;
           nome: string;
           sigla: string;
           slug: string;
@@ -161,6 +525,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
+          instituicao_id?: string | null;
           nome: string;
           sigla: string;
           slug: string;
@@ -172,6 +537,7 @@ export interface Database {
         };
         Update: {
           id?: string;
+          instituicao_id?: string | null;
           nome?: string;
           sigla?: string;
           slug?: string;
@@ -188,6 +554,7 @@ export interface Database {
           id: string;
           perfil_id: number;
           unidade_id: string | null;
+          contexto_padrao_id: string | null;
           email: string;
           nome_completo: string;
           ativo: boolean;
@@ -198,6 +565,7 @@ export interface Database {
           id: string;
           perfil_id: number;
           unidade_id?: string | null;
+          contexto_padrao_id?: string | null;
           email: string;
           nome_completo: string;
           ativo?: boolean;
@@ -208,6 +576,7 @@ export interface Database {
           id?: string;
           perfil_id?: number;
           unidade_id?: string | null;
+          contexto_padrao_id?: string | null;
           email?: string;
           nome_completo?: string;
           ativo?: boolean;
@@ -222,6 +591,8 @@ export interface Database {
           unidade_id: string | null;
           matricula: string;
           curso: string;
+          curso_id: string | null;
+          oferta_curso_unidade_id: string | null;
           celular: string | null;
           nome_social: string | null;
           data_ingresso: string | null;
@@ -233,6 +604,8 @@ export interface Database {
           unidade_id?: string | null;
           matricula: string;
           curso?: string;
+          curso_id?: string | null;
+          oferta_curso_unidade_id?: string | null;
           celular?: string | null;
           nome_social?: string | null;
           data_ingresso?: string | null;
@@ -244,6 +617,8 @@ export interface Database {
           unidade_id?: string | null;
           matricula?: string;
           curso?: string;
+          curso_id?: string | null;
+          oferta_curso_unidade_id?: string | null;
           celular?: string | null;
           nome_social?: string | null;
           data_ingresso?: string | null;
@@ -328,6 +703,7 @@ export interface Database {
         Row: {
           id: string;
           unidade_id: string | null;
+          oferta_curso_unidade_id: string | null;
           codigo: string;
           nome: string;
           data_inicio: string;
@@ -339,6 +715,7 @@ export interface Database {
         Insert: {
           id?: string;
           unidade_id?: string | null;
+          oferta_curso_unidade_id?: string | null;
           codigo: string;
           nome: string;
           data_inicio: string;
@@ -350,6 +727,7 @@ export interface Database {
         Update: {
           id?: string;
           unidade_id?: string | null;
+          oferta_curso_unidade_id?: string | null;
           codigo?: string;
           nome?: string;
           data_inicio?: string;
@@ -391,6 +769,7 @@ export interface Database {
         Row: {
           id: string;
           bloco_id: number;
+          oferta_curso_unidade_id: string | null;
           codigo: string;
           nome: string;
           ordem: number;
@@ -401,6 +780,7 @@ export interface Database {
         Insert: {
           id?: string;
           bloco_id: number;
+          oferta_curso_unidade_id?: string | null;
           codigo: string;
           nome: string;
           ordem: number;
@@ -411,6 +791,7 @@ export interface Database {
         Update: {
           id?: string;
           bloco_id?: number;
+          oferta_curso_unidade_id?: string | null;
           codigo?: string;
           nome?: string;
           ordem?: number;
@@ -424,6 +805,7 @@ export interface Database {
         Row: {
           id: string;
           semestre_id: string;
+          oferta_curso_unidade_id: string | null;
           codigo: string;
           nome: string;
           area_estagio: string;
@@ -437,6 +819,7 @@ export interface Database {
         Insert: {
           id?: string;
           semestre_id: string;
+          oferta_curso_unidade_id?: string | null;
           codigo: string;
           nome: string;
           area_estagio: string;
@@ -450,6 +833,7 @@ export interface Database {
         Update: {
           id?: string;
           semestre_id?: string;
+          oferta_curso_unidade_id?: string | null;
           codigo?: string;
           nome?: string;
           area_estagio?: string;
@@ -467,6 +851,7 @@ export interface Database {
           id: string;
           turma_id: string;
           aluno_id: string;
+          oferta_curso_unidade_id: string | null;
           numero_chamada: number | null;
           status: "ativa" | "trancada" | "cancelada" | "concluida";
           created_at: string;
@@ -476,6 +861,7 @@ export interface Database {
           id?: string;
           turma_id: string;
           aluno_id: string;
+          oferta_curso_unidade_id?: string | null;
           numero_chamada?: number | null;
           status?: "ativa" | "trancada" | "cancelada" | "concluida";
           created_at?: string;
@@ -485,6 +871,7 @@ export interface Database {
           id?: string;
           turma_id?: string;
           aluno_id?: string;
+          oferta_curso_unidade_id?: string | null;
           numero_chamada?: number | null;
           status?: "ativa" | "trancada" | "cancelada" | "concluida";
           created_at?: string;
@@ -636,6 +1023,8 @@ export interface Database {
           matricula_turma_id: string;
           professor_id: string;
           semestre_id: string;
+          oferta_curso_unidade_id: string | null;
+          modelo_avaliacao_curso_id: string | null;
           tipo_lancamento: "parcial" | "revisao" | "fechamento";
           referencia: string;
           observacoes: string | null;
@@ -651,6 +1040,8 @@ export interface Database {
           matricula_turma_id: string;
           professor_id: string;
           semestre_id: string;
+          oferta_curso_unidade_id?: string | null;
+          modelo_avaliacao_curso_id?: string | null;
           tipo_lancamento: "parcial" | "revisao" | "fechamento";
           referencia: string;
           observacoes?: string | null;
@@ -666,6 +1057,8 @@ export interface Database {
           matricula_turma_id?: string;
           professor_id?: string;
           semestre_id?: string;
+          oferta_curso_unidade_id?: string | null;
+          modelo_avaliacao_curso_id?: string | null;
           tipo_lancamento?: "parcial" | "revisao" | "fechamento";
           referencia?: string;
           observacoes?: string | null;
@@ -719,6 +1112,7 @@ export interface Database {
           id: string;
           matricula_turma_id: string;
           registrado_por: string;
+          oferta_curso_unidade_id: string | null;
           data_ausencia: string;
           horas: number;
           justificada: boolean;
@@ -731,6 +1125,7 @@ export interface Database {
           id?: string;
           matricula_turma_id: string;
           registrado_por: string;
+          oferta_curso_unidade_id?: string | null;
           data_ausencia: string;
           horas: number;
           justificada?: boolean;
@@ -743,6 +1138,7 @@ export interface Database {
           id?: string;
           matricula_turma_id?: string;
           registrado_por?: string;
+          oferta_curso_unidade_id?: string | null;
           data_ausencia?: string;
           horas?: number;
           justificada?: boolean;
@@ -1041,6 +1437,8 @@ export interface Database {
           unidade_id: string | null;
           aluno_id: string;
           matricula_turma_id: string | null;
+          oferta_curso_unidade_id: string | null;
+          documento_obrigatorio_curso_id: string | null;
           area_estagio_id: string | null;
           tipo: "carteira_vacinacao" | "tce";
           status: "enviado" | "aprovado" | "reprovado";
@@ -1064,6 +1462,8 @@ export interface Database {
           unidade_id?: string | null;
           aluno_id: string;
           matricula_turma_id?: string | null;
+          oferta_curso_unidade_id?: string | null;
+          documento_obrigatorio_curso_id?: string | null;
           area_estagio_id?: string | null;
           tipo: "carteira_vacinacao" | "tce";
           status?: "enviado" | "aprovado" | "reprovado";
@@ -1087,6 +1487,8 @@ export interface Database {
           unidade_id?: string | null;
           aluno_id?: string;
           matricula_turma_id?: string | null;
+          oferta_curso_unidade_id?: string | null;
+          documento_obrigatorio_curso_id?: string | null;
           area_estagio_id?: string | null;
           tipo?: "carteira_vacinacao" | "tce";
           status?: "enviado" | "aprovado" | "reprovado";
@@ -1168,6 +1570,7 @@ export interface Database {
             | "secretaria"
             | "coordenador"
             | "coordenador_master"
+            | "master_curso"
             | null;
           acessado_em: string;
           created_at: string;
@@ -1184,6 +1587,7 @@ export interface Database {
             | "secretaria"
             | "coordenador"
             | "coordenador_master"
+            | "master_curso"
             | null;
           acessado_em?: string;
           created_at?: string;
@@ -1200,6 +1604,7 @@ export interface Database {
             | "secretaria"
             | "coordenador"
             | "coordenador_master"
+            | "master_curso"
             | null;
           acessado_em?: string;
           created_at?: string;
@@ -1213,6 +1618,7 @@ export interface Database {
           semestre_id: string;
           turma_id: string | null;
           aluno_id: string | null;
+          oferta_curso_unidade_id: string | null;
           usuario_autorizado_id: string;
           tipo: "avaliacao" | "ausencia" | "clinica_supervisionada";
           escopo: "semestre" | "turma" | "aluno";
@@ -1233,6 +1639,7 @@ export interface Database {
           semestre_id: string;
           turma_id?: string | null;
           aluno_id?: string | null;
+          oferta_curso_unidade_id?: string | null;
           usuario_autorizado_id: string;
           tipo: "avaliacao" | "ausencia" | "clinica_supervisionada";
           escopo: "semestre" | "turma" | "aluno";
@@ -1253,6 +1660,7 @@ export interface Database {
           semestre_id?: string;
           turma_id?: string | null;
           aluno_id?: string | null;
+          oferta_curso_unidade_id?: string | null;
           usuario_autorizado_id?: string;
           tipo?: "avaliacao" | "ausencia" | "clinica_supervisionada";
           escopo?: "semestre" | "turma" | "aluno";

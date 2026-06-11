@@ -1,11 +1,5 @@
 ﻿import type { Metadata } from "next";
-import { Public_Sans } from "next/font/google";
 import "./globals.css";
-
-const publicSans = Public_Sans({
-  subsets: ["latin"],
-  variable: "--font-public-sans"
-});
 
 export const metadata: Metadata = {
   title: "Nexus Academy",
@@ -19,8 +13,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR">
-      <body className={publicSans.variable}>{children}</body>
+    <html lang="pt-BR" suppressHydrationWarning>
+      <body>{children}</body>
     </html>
   );
 }

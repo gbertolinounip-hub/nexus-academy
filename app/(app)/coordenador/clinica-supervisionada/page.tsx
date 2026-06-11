@@ -65,7 +65,11 @@ export default async function ClinicalInstitutionalDashboardPage(props: {
       printBasePath={"/coordenador/clinica-supervisionada/impressao" as Route}
       heroEyebrow="Gestão clínica"
       heroTitle="Clínica Supervisionada"
-      heroDescription="Visão institucional da unidade para acompanhar pacientes, casos, pendências clínicas e distribuição acadêmico-assistencial."
+      heroDescription={
+        pageData.filterOptions.units.length > 0
+          ? "Visão institucional do curso para acompanhar pacientes, casos, pendências clínicas e distribuição acadêmico-assistencial por unidade."
+          : "Visão institucional da unidade para acompanhar pacientes, casos, pendências clínicas e distribuição acadêmico-assistencial."
+      }
       secondaryActions={[
         {
           href: "/pacientes" as Route,

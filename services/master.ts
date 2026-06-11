@@ -19,6 +19,8 @@ type AuditHistoryRow = Database["public"]["Tables"]["historico_alteracoes"]["Row
 type ProfileRow = Database["public"]["Tables"]["perfis"]["Row"];
 type StudentRow = Database["public"]["Tables"]["alunos"]["Row"];
 type ProfessorRow = Database["public"]["Tables"]["professores"]["Row"];
+type InstitutionalContextRow = Database["public"]["Tables"]["usuarios_papeis_contexto"]["Row"];
+type CourseOfferRow = Database["public"]["Tables"]["ofertas_curso_unidade"]["Row"];
 type JsonRecord = Record<string, unknown>;
 
 type VisibleProfileCode = Exclude<ProfileCode, "coordenador_master">;
@@ -31,14 +33,25 @@ const visibleInstitutionalProfiles: VisibleProfileCode[] = [
 
 export interface MasterUnitOption {
   id: string;
+  institutionId: string | null;
+  institutionName: string;
   name: string;
   acronym: string;
   slug: string;
   isActive: boolean;
 }
 
+export interface MasterInstitutionOption {
+  id: string;
+  name: string;
+  slug: string;
+  isActive: boolean;
+}
+
 export interface MasterUnitSummary {
   id: string;
+  institutionId: string | null;
+  institutionName: string;
   name: string;
   acronym: string;
   slug: string;
@@ -65,12 +78,15 @@ export interface MasterDashboardData {
   totalActiveUnits: number;
   totalLinkedCoordinators: number;
   totalActiveSemesters: number;
+  institutions: MasterInstitutionOption[];
   units: MasterUnitSummary[];
 }
 
 export interface MasterCoordinatorsPageData {
+  institutions: MasterInstitutionOption[];
   units: MasterUnitOption[];
   filters: {
+    institutionId: string;
     unitId: string;
     status: "ativos" | "inativos" | "todos";
     query: string;
@@ -95,8 +111,10 @@ export interface MasterCoordinatorDirectoryEntry {
 }
 
 export interface MasterUsersPageData {
+  institutions: MasterInstitutionOption[];
   units: MasterUnitOption[];
   filters: {
+    institutionId: string;
     unitId: string;
     role: VisibleProfileCode | "todos";
     status: "ativos" | "inativos" | "todos";
@@ -119,6 +137,8 @@ export interface MasterUsersPageData {
 export interface MasterUnitDetailPageData {
   unit: {
     id: string;
+    institutionId: string | null;
+    institutionName: string;
     name: string;
     acronym: string;
     slug: string;
@@ -181,8 +201,10 @@ export interface MasterGlobalAuditEntry {
 }
 
 export interface MasterGlobalAuditPageData {
+  institutions: MasterInstitutionOption[];
   units: MasterUnitOption[];
   filters: {
+    institutionId: string;
     unitId: string;
     role: VisibleProfileCode | "todos";
     period: "7" | "30" | "90" | "365" | "all";
@@ -221,15 +243,33 @@ function roleLabel(role: VisibleProfileCode) {
   }
 }
 
-function buildUnitOptions(units: UnitRow[]): MasterUnitOption[] {
+function buildUnitOptions(
+  units: UnitRow[],
+  institutionMap?: Map<string, Pick<Database["public"]["Tables"]["instituicoes"]["Row"], "id" | "nome" | "slug" | "ativo">>
+): MasterUnitOption[] {
   return [...units]
     .sort((left, right) => left.nome.localeCompare(right.nome, "pt-BR"))
     .map((unit) => ({
       id: unit.id,
+      institutionId: unit.instituicao_id,
+      institutionName: unit.instituicao_id
+        ? institutionMap?.get(unit.instituicao_id)?.nome ?? "Instituicao nao identificada"
+        : "Instituicao nao identificada",
       name: unit.nome,
       acronym: unit.sigla,
       slug: unit.slug,
       isActive: unit.ativo
+    }));
+}
+
+function buildInstitutionOptions(institutions: Array<Pick<Database["public"]["Tables"]["instituicoes"]["Row"], "id" | "nome" | "slug" | "ativo">>): MasterInstitutionOption[] {
+  return [...institutions]
+    .sort((left, right) => left.nome.localeCompare(right.nome, "pt-BR"))
+    .map((institution) => ({
+      id: institution.id,
+      name: institution.nome,
+      slug: institution.slug,
+      isActive: institution.ativo
     }));
 }
 
@@ -454,11 +494,21 @@ async function loadProfiles() {
 
 async function loadMasterBaseData() {
   const supabase = createSupabaseAdminClient();
-  const [unitsResult, coordinatorsResult, semestersResult] = await Promise.all([
+  const [institutionsResult, unitsResult, coordinatorsResult, semestersResult] = await Promise.all([
+    supabase.from("instituicoes").select("id, nome, slug, ativo").order("nome"),
     supabase.from("unidades").select("*").order("nome"),
     supabase.from("coordenadores").select("*").order("created_at", { ascending: false }),
     supabase.from("semestres").select("*").order("data_inicio", { ascending: false })
   ]);
+
+  if (institutionsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Nao foi possivel carregar as instituicoes das unidades.",
+        institutionsResult.error
+      )
+    );
+  }
 
   if (unitsResult.error) {
     throw new Error(
@@ -488,6 +538,9 @@ async function loadMasterBaseData() {
   }
 
   const units = (unitsResult.data ?? []) as UnitRow[];
+  const institutions = (institutionsResult.data ?? []) as Array<
+    Pick<Database["public"]["Tables"]["instituicoes"]["Row"], "id" | "nome" | "slug" | "ativo">
+  >;
   const coordinators = (coordinatorsResult.data ?? []) as CoordinatorRow[];
   const semesters = (semestersResult.data ?? []) as SemesterRow[];
   const coordinatorUserIds = [...new Set(coordinators.map((row) => row.usuario_id))];
@@ -512,6 +565,7 @@ async function loadMasterBaseData() {
   >;
 
   return {
+    institutions,
     units,
     coordinators,
     semesters,
@@ -522,6 +576,7 @@ async function loadMasterBaseData() {
 }
 
 function buildUnitSummaries(input: {
+  institutions: Array<Pick<Database["public"]["Tables"]["instituicoes"]["Row"], "id" | "nome" | "slug" | "ativo">>;
   units: UnitRow[];
   coordinators: CoordinatorRow[];
   semesters: SemesterRow[];
@@ -529,6 +584,9 @@ function buildUnitSummaries(input: {
 }) {
   const coordinatorsByUnit = new Map<string, CoordinatorRow[]>();
   const semestersByUnit = new Map<string, SemesterRow[]>();
+  const institutionMap = new Map(
+    input.institutions.map((institution) => [institution.id, institution])
+  );
 
   for (const coordinator of input.coordinators) {
     if (!coordinator.unidade_id) {
@@ -553,6 +611,9 @@ function buildUnitSummaries(input: {
   return [...input.units]
     .sort((left, right) => left.nome.localeCompare(right.nome, "pt-BR"))
     .map((unit) => {
+      const institution = unit.instituicao_id
+        ? institutionMap.get(unit.instituicao_id) ?? null
+        : null;
       const linkedCoordinators = sortCoordinatorRows(
         coordinatorsByUnit.get(unit.id) ?? [],
         input.coordinatorUserMap
@@ -571,6 +632,12 @@ function buildUnitSummaries(input: {
         pendingItems.push("Unidade inativa no cadastro institucional.");
       }
 
+      if (!institution) {
+        pendingItems.push("Unidade sem instituicao vinculada.");
+      } else if (!institution.ativo) {
+        pendingItems.push("Instituicao vinculada esta inativa.");
+      }
+
       if (!linkedCoordinators.some((coordinator) =>
         input.coordinatorUserMap.get(coordinator.usuario_id)?.ativo
       )) {
@@ -585,6 +652,8 @@ function buildUnitSummaries(input: {
 
       return {
         id: unit.id,
+        institutionId: unit.instituicao_id,
+        institutionName: institution?.nome ?? "Instituicao nao identificada",
         name: unit.nome,
         acronym: unit.sigla,
         slug: unit.slug,
@@ -622,28 +691,53 @@ export async function getMasterDashboardPageData(
     totalActiveSemesters: baseData.semesters.filter(
       (semester) => semester.status === "ativo"
     ).length,
+    institutions: buildInstitutionOptions(baseData.institutions),
     units: unitSummaries
   };
 }
 
 export async function getMasterUnitsPageData() {
   const baseData = await loadMasterBaseData();
+  const institutions = buildInstitutionOptions(baseData.institutions);
+  const institutionMap = new Map(
+    baseData.institutions.map((institution) => [institution.id, institution])
+  );
+
   return {
     units: buildUnitSummaries(baseData),
-    unitOptions: buildUnitOptions(baseData.units)
+    unitOptions: buildUnitOptions(baseData.units, institutionMap),
+    institutions
   };
 }
 
 export async function getMasterCoordinatorsPageData(input?: {
+  institutionId?: string | string[];
   unitId?: string | string[];
   status?: string | string[];
   query?: string | string[];
 }): Promise<MasterCoordinatorsPageData> {
   const baseData = await loadMasterBaseData();
-  const units = buildUnitOptions(baseData.units);
+  const institutionMap = new Map(
+    baseData.institutions.map((institution) => [institution.id, institution])
+  );
+  const units = buildUnitOptions(baseData.units, institutionMap);
+  const institutions = buildInstitutionOptions(baseData.institutions);
+  const requestedInstitutionId = normalizeFilterValue(input?.institutionId);
   const requestedUnitId = normalizeFilterValue(input?.unitId);
   const requestedStatus = normalizeFilterValue(input?.status);
   const requestedQuery = normalizeFilterValue(input?.query).trim();
+  const validInstitutionId = institutions.some(
+    (institution) => institution.id === requestedInstitutionId
+  )
+    ? requestedInstitutionId
+    : "";
+  const validUnitId = units.some(
+    (unit) =>
+      unit.id === requestedUnitId &&
+      (!validInstitutionId || unit.institutionId === validInstitutionId)
+  )
+    ? requestedUnitId
+    : "";
   const statusFilter: MasterCoordinatorsPageData["filters"]["status"] =
     requestedStatus === "ativos" || requestedStatus === "inativos"
       ? requestedStatus
@@ -687,7 +781,13 @@ export async function getMasterCoordinatorsPageData(input?: {
   });
 
   const filteredEntries = entries.filter((entry) => {
-    if (requestedUnitId && entry.unitId !== requestedUnitId) {
+    const unit = units.find((item) => item.id === entry.unitId) ?? null;
+
+    if (validInstitutionId && unit?.institutionId !== validInstitutionId) {
+      return false;
+    }
+
+    if (validUnitId && entry.unitId !== validUnitId) {
       return false;
     }
 
@@ -717,9 +817,11 @@ export async function getMasterCoordinatorsPageData(input?: {
   });
 
   return {
+    institutions,
     units,
     filters: {
-      unitId: requestedUnitId,
+      institutionId: validInstitutionId,
+      unitId: validUnitId,
       status: statusFilter,
       query: requestedQuery
     },
@@ -730,13 +832,26 @@ export async function getMasterCoordinatorsPageData(input?: {
 }
 
 export async function getMasterUsersPageData(input?: {
+  institutionId?: string | string[];
   unitId?: string | string[];
   role?: string | string[];
   status?: string | string[];
 }): Promise<MasterUsersPageData> {
   const supabase = createSupabaseAdminClient();
   const { byCode: profilesByCode, byId: profilesById } = await loadProfiles();
-  const unitsResult = await supabase.from("unidades").select("*").order("nome");
+  const [institutionsResult, unitsResult] = await Promise.all([
+    supabase.from("instituicoes").select("id, nome, slug, ativo").order("nome"),
+    supabase.from("unidades").select("*").order("nome")
+  ]);
+
+  if (institutionsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Nao foi possivel carregar as instituicoes para a visao de usuarios.",
+        institutionsResult.error
+      )
+    );
+  }
 
   if (unitsResult.error) {
     throw new Error(
@@ -747,11 +862,29 @@ export async function getMasterUsersPageData(input?: {
     );
   }
 
+  const institutions = (institutionsResult.data ?? []) as Array<
+    Pick<Database["public"]["Tables"]["instituicoes"]["Row"], "id" | "nome" | "slug" | "ativo">
+  >;
   const units = (unitsResult.data ?? []) as UnitRow[];
-  const unitOptions = buildUnitOptions(units);
+  const institutionMap = new Map(institutions.map((institution) => [institution.id, institution]));
+  const institutionOptions = buildInstitutionOptions(institutions);
+  const unitOptions = buildUnitOptions(units, institutionMap);
+  const requestedInstitutionId = normalizeFilterValue(input?.institutionId);
   const requestedUnitId = normalizeFilterValue(input?.unitId);
   const requestedRole = normalizeFilterValue(input?.role);
   const requestedStatus = normalizeFilterValue(input?.status);
+  const validInstitutionId = institutionOptions.some(
+    (institution) => institution.id === requestedInstitutionId
+  )
+    ? requestedInstitutionId
+    : "";
+  const validUnitId = unitOptions.some(
+    (unit) =>
+      unit.id === requestedUnitId &&
+      (!validInstitutionId || unit.institutionId === validInstitutionId)
+  )
+    ? requestedUnitId
+    : "";
   const roleFilter: MasterUsersPageData["filters"]["role"] =
     visibleInstitutionalProfiles.includes(requestedRole as VisibleProfileCode)
       ? (requestedRole as VisibleProfileCode)
@@ -770,10 +903,6 @@ export async function getMasterUsersPageData(input?: {
     .select("*")
     .in("perfil_id", visibleProfileIds)
     .order("nome_completo");
-
-  if (requestedUnitId) {
-    usersQuery = usersQuery.eq("unidade_id", requestedUnitId);
-  }
 
   if (statusFilter === "ativos") {
     usersQuery = usersQuery.eq("ativo", true);
@@ -804,7 +933,12 @@ export async function getMasterUsersPageData(input?: {
 
   const users = (usersResult.data ?? []) as UserRow[];
   const userIds = users.map((user) => user.id);
-  const [studentRowsResult, professorRowsResult, coordinatorRowsResult] = await Promise.all([
+  const [
+    studentRowsResult,
+    professorRowsResult,
+    coordinatorRowsResult,
+    contextRowsResult
+  ] = await Promise.all([
     userIds.length
       ? supabase.from("alunos").select("*").in("usuario_id", userIds)
       : Promise.resolve({ data: [], error: null }),
@@ -813,38 +947,78 @@ export async function getMasterUsersPageData(input?: {
       : Promise.resolve({ data: [], error: null }),
     userIds.length
       ? supabase.from("coordenadores").select("*").in("usuario_id", userIds)
+      : Promise.resolve({ data: [], error: null }),
+    userIds.length
+      ? supabase.from("usuarios_papeis_contexto").select("*").in("usuario_id", userIds)
       : Promise.resolve({ data: [], error: null })
   ]);
 
-  if (studentRowsResult.error || professorRowsResult.error || coordinatorRowsResult.error) {
+  if (
+    studentRowsResult.error ||
+    professorRowsResult.error ||
+    coordinatorRowsResult.error ||
+    contextRowsResult.error
+  ) {
     throw new Error(
       formatSupabaseErrorMessage(
         "NÃ£o foi possÃ­vel carregar os vÃ­nculos institucionais dos usuÃ¡rios.",
         studentRowsResult.error ??
           professorRowsResult.error ??
-          coordinatorRowsResult.error
+          coordinatorRowsResult.error ??
+          contextRowsResult.error
       )
     );
   }
 
   const unitMap = new Map(units.map((unit) => [unit.id, unit]));
-  const studentMap = new Map(
-    ((studentRowsResult.data ?? []) as StudentRow[]).map((student) => [
-      student.usuario_id,
-      student
-    ])
-  );
-  const professorMap = new Map(
-    ((professorRowsResult.data ?? []) as ProfessorRow[]).map((professor) => [
-      professor.usuario_id,
-      professor
-    ])
-  );
+  const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
+  const professorRows = (professorRowsResult.data ?? []) as ProfessorRow[];
+  const coordinatorRows = (coordinatorRowsResult.data ?? []) as CoordinatorRow[];
+  const contextRows = (contextRowsResult.data ?? []) as InstitutionalContextRow[];
+  const studentMap = new Map(studentRows.map((student) => [student.usuario_id, student]));
+  const professorMap = new Map(professorRows.map((professor) => [professor.usuario_id, professor]));
   const coordinatorMap = new Map(
-    ((coordinatorRowsResult.data ?? []) as CoordinatorRow[]).map((coordinator) => [
-      coordinator.usuario_id,
-      coordinator
-    ])
+    coordinatorRows.map((coordinator) => [coordinator.usuario_id, coordinator])
+  );
+  const contextsByUserId = new Map<string, InstitutionalContextRow[]>();
+  const relatedOfferIds = new Set<string>();
+
+  for (const contextRow of contextRows) {
+    const currentRows = contextsByUserId.get(contextRow.usuario_id) ?? [];
+    currentRows.push(contextRow);
+    contextsByUserId.set(contextRow.usuario_id, currentRows);
+
+    if (contextRow.oferta_curso_unidade_id) {
+      relatedOfferIds.add(contextRow.oferta_curso_unidade_id);
+    }
+  }
+
+  for (const studentRow of studentRows) {
+    if (studentRow.oferta_curso_unidade_id) {
+      relatedOfferIds.add(studentRow.oferta_curso_unidade_id);
+    }
+  }
+
+  const offerRowsResult = relatedOfferIds.size
+    ? await supabase
+        .from("ofertas_curso_unidade")
+        .select("id, instituicao_id, unidade_id")
+        .in("id", [...relatedOfferIds])
+    : { data: [], error: null };
+
+  if (offerRowsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Nao foi possivel carregar as ofertas relacionadas aos usuarios institucionais.",
+        offerRowsResult.error
+      )
+    );
+  }
+
+  const offerMap = new Map(
+    ((offerRowsResult.data ?? []) as Array<
+      Pick<CourseOfferRow, "id" | "instituicao_id" | "unidade_id">
+    >).map((offer) => [offer.id, offer])
   );
 
   const entries = users.map((user) => {
@@ -888,16 +1062,114 @@ export async function getMasterUsersPageData(input?: {
     };
   });
 
+  const userScopeById = new Map(
+    users.map((user) => {
+      const student = studentMap.get(user.id) ?? null;
+      const professor = professorMap.get(user.id) ?? null;
+      const coordinator = coordinatorMap.get(user.id) ?? null;
+      const userContexts = contextsByUserId.get(user.id) ?? [];
+      const studentOffer =
+        student?.oferta_curso_unidade_id
+          ? offerMap.get(student.oferta_curso_unidade_id) ?? null
+          : null;
+      const contextOffers = userContexts
+        .map((contextRow) =>
+          contextRow.oferta_curso_unidade_id
+            ? offerMap.get(contextRow.oferta_curso_unidade_id) ?? null
+            : null
+        )
+        .filter(Boolean) as Array<Pick<CourseOfferRow, "id" | "instituicao_id" | "unidade_id">>;
+      const relatedUnitIds = new Set<string>();
+      const relatedInstitutionIds = new Set<string>();
+
+      const appendInstitutionId = (institutionId: string | null | undefined) => {
+        if (institutionId) {
+          relatedInstitutionIds.add(institutionId);
+        }
+      };
+
+      const appendUnitId = (unitId: string | null | undefined) => {
+        if (!unitId) {
+          return;
+        }
+
+        relatedUnitIds.add(unitId);
+        appendInstitutionId(unitMap.get(unitId)?.instituicao_id ?? null);
+      };
+
+      appendUnitId(user.unidade_id);
+      appendUnitId(coordinator?.unidade_id);
+      appendUnitId(professor?.unidade_id);
+      appendUnitId(student?.unidade_id);
+      appendUnitId(studentOffer?.unidade_id);
+      appendInstitutionId(studentOffer?.instituicao_id);
+
+      for (const contextRow of userContexts) {
+        appendInstitutionId(contextRow.instituicao_id);
+      }
+
+      for (const contextOffer of contextOffers) {
+        appendUnitId(contextOffer.unidade_id);
+        appendInstitutionId(contextOffer.instituicao_id);
+      }
+
+      return [
+        user.id,
+        {
+          relatedUnitIds,
+          relatedInstitutionIds,
+          resolvedUnitId:
+            user.unidade_id ??
+            coordinator?.unidade_id ??
+            professor?.unidade_id ??
+            student?.unidade_id ??
+            studentOffer?.unidade_id ??
+            contextOffers[0]?.unidade_id ??
+            null
+        }
+      ] as const;
+    })
+  );
+
+  const filteredEntries = entries
+    .filter((entry) => {
+      const userScope = userScopeById.get(entry.userId);
+
+      if (validInstitutionId && !userScope?.relatedInstitutionIds.has(validInstitutionId)) {
+        return false;
+      }
+
+      if (validUnitId && !userScope?.relatedUnitIds.has(validUnitId)) {
+        return false;
+      }
+
+      return true;
+    })
+    .map((entry) => {
+      const userScope = userScopeById.get(entry.userId);
+      const resolvedUnitId = userScope?.resolvedUnitId ?? entry.unitId;
+
+      return {
+        ...entry,
+        unitId: resolvedUnitId,
+        unitName: resolvedUnitId
+          ? unitMap.get(resolvedUnitId)?.nome ?? entry.unitName
+          : entry.unitName
+      };
+    });
+
   return {
+    institutions: institutionOptions,
     units: unitOptions,
     filters: {
-      unitId: requestedUnitId,
+      institutionId: validInstitutionId,
+      unitId: validUnitId,
       role: roleFilter,
       status: statusFilter
     },
-    totalUsers: entries.length,
-    activeUsers: entries.filter((entry) => entry.isActive).length,
-    entries
+    totalUsers: filteredEntries.length,
+    activeUsers: filteredEntries.filter((entry) => entry.isActive).length,
+    entries: filteredEntries
   };
 }
 
@@ -927,6 +1199,27 @@ export async function getMasterUnitDetailPageData(
   if (!unit) {
     return null;
   }
+
+  const institutionResult = unit.instituicao_id
+    ? await supabase
+        .from("instituicoes")
+        .select("id, nome")
+        .eq("id", unit.instituicao_id)
+        .maybeSingle()
+    : { data: null, error: null };
+
+  if (institutionResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Nao foi possivel carregar a instituicao da unidade.",
+        institutionResult.error
+      )
+    );
+  }
+
+  const institution = institutionResult.data as
+    | Pick<Database["public"]["Tables"]["instituicoes"]["Row"], "id" | "nome">
+    | null;
 
   const [profiles, coordinatorsResult, usersResult, auditFeed] = await Promise.all([
     loadProfiles(),
@@ -1020,6 +1313,8 @@ export async function getMasterUnitDetailPageData(
   return {
     unit: {
       id: unit.id,
+      institutionId: unit.instituicao_id,
+      institutionName: institution?.nome ?? "Instituicao nao identificada",
       name: unit.nome,
       acronym: unit.sigla,
       slug: unit.slug,
@@ -1075,15 +1370,26 @@ export async function getMasterUnitDetailPageData(
   };
 }
 export async function getMasterGlobalAuditPageData(input?: {
+  institutionId?: string | string[];
   unitId?: string | string[];
   role?: string | string[];
   period?: string | string[];
 }): Promise<MasterGlobalAuditPageData> {
   const supabase = createSupabaseAdminClient();
-  const [unitsResult, profiles] = await Promise.all([
+  const [institutionsResult, unitsResult, profiles] = await Promise.all([
+    supabase.from("instituicoes").select("id, nome, slug, ativo").order("nome"),
     supabase.from("unidades").select("*").order("nome"),
     loadProfiles()
   ]);
+
+  if (institutionsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Não foi possível carregar as instituições para a auditoria global.",
+        institutionsResult.error
+      )
+    );
+  }
 
   if (unitsResult.error) {
     throw new Error(
@@ -1094,10 +1400,24 @@ export async function getMasterGlobalAuditPageData(input?: {
     );
   }
 
+  const institutions = (institutionsResult.data ?? []) as Array<
+    Pick<Database["public"]["Tables"]["instituicoes"]["Row"], "id" | "nome" | "slug" | "ativo">
+  >;
   const units = (unitsResult.data ?? []) as UnitRow[];
+  const institutionsById = new Map(institutions.map((institution) => [institution.id, institution]));
+  const requestedInstitutionId = normalizeFilterValue(input?.institutionId);
   const requestedUnitId = normalizeFilterValue(input?.unitId);
   const requestedRole = normalizeFilterValue(input?.role);
   const requestedPeriod = normalizeFilterValue(input?.period);
+  const validInstitutionId = institutionsById.has(requestedInstitutionId)
+    ? requestedInstitutionId
+    : "";
+  const requestedUnit = units.find((unit) => unit.id === requestedUnitId) ?? null;
+  const validUnitId =
+    requestedUnit &&
+    (!validInstitutionId || requestedUnit.instituicao_id === validInstitutionId)
+      ? requestedUnitId
+      : "";
   const roleFilter: MasterGlobalAuditPageData["filters"]["role"] =
     visibleInstitutionalProfiles.includes(requestedRole as VisibleProfileCode)
       ? (requestedRole as VisibleProfileCode)
@@ -1109,7 +1429,7 @@ export async function getMasterGlobalAuditPageData(input?: {
     requestedPeriod === "365"
       ? requestedPeriod
       : "all";
-  const auditRowLimit = requestedUnitId ? 1200 : 400;
+  const auditRowLimit = validUnitId ? 1200 : validInstitutionId ? 1200 : 400;
 
   let auditQuery = supabase
     .from("historico_alteracoes")
@@ -1337,6 +1657,9 @@ export async function getMasterGlobalAuditPageData(input?: {
 
       return {
         id: String(entry.id),
+        institutionId: resolvedUnitId
+          ? unitMap.get(resolvedUnitId)?.instituicao_id ?? null
+          : null,
         unitName: resolvedUnitId
           ? unitMap.get(resolvedUnitId)?.nome ?? "Unidade não identificada"
           : "Sem unidade",
@@ -1352,7 +1675,11 @@ export async function getMasterGlobalAuditPageData(input?: {
       };
     })
     .filter((entry) => {
-      if (requestedUnitId && entry.unitId !== requestedUnitId) {
+      if (validInstitutionId && entry.institutionId !== validInstitutionId) {
+        return false;
+      }
+
+      if (validUnitId && entry.unitId !== validUnitId) {
         return false;
       }
 
@@ -1364,9 +1691,11 @@ export async function getMasterGlobalAuditPageData(input?: {
     });
 
   return {
-    units: buildUnitOptions(units),
+    institutions: buildInstitutionOptions(institutions),
+    units: buildUnitOptions(units, institutionsById),
     filters: {
-      unitId: requestedUnitId,
+      institutionId: validInstitutionId,
+      unitId: validUnitId,
       role: roleFilter,
       period: periodFilter
     },

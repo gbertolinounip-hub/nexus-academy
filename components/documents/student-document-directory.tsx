@@ -7,6 +7,7 @@ interface StudentDocumentDirectoryProps {
   emptyMessage: string;
   basePath: string;
   showUnitColumn?: boolean;
+  tableScrollClassName?: string;
 }
 
 function renderVaccinationStatus(entry: StudentDocumentDirectoryEntry) {
@@ -43,7 +44,8 @@ export function StudentDocumentDirectory({
   entries,
   emptyMessage,
   basePath,
-  showUnitColumn = false
+  showUnitColumn = false,
+  tableScrollClassName
 }: StudentDocumentDirectoryProps) {
   if (!entries.length) {
     return <p className="empty-message">{emptyMessage}</p>;
@@ -51,7 +53,11 @@ export function StudentDocumentDirectory({
 
   return (
     <div className="student-document-directory">
-      <div className="table-wrap student-document-directory-table-wrap">
+      <div
+        className={`table-wrap student-document-directory-table-wrap ${
+          tableScrollClassName ?? ""
+        }`.trim()}
+      >
         <table className="table student-document-directory-table">
           <thead>
             <tr>
@@ -100,9 +106,7 @@ export function StudentDocumentDirectory({
                 <td className="student-document-directory-cell-actions">
                   <div className="actions-row">
                     <Link
-                      href={
-                        `${basePath}/${encodeURIComponent(entry.studentId)}` as Route
-                      }
+                      href={`${basePath}/${encodeURIComponent(entry.studentId)}` as Route}
                       className="button button-secondary button-small"
                     >
                       Ver documentos
@@ -172,9 +176,7 @@ export function StudentDocumentDirectory({
 
             <div className="actions-row">
               <Link
-                href={
-                  `${basePath}/${encodeURIComponent(entry.studentId)}` as Route
-                }
+                href={`${basePath}/${encodeURIComponent(entry.studentId)}` as Route}
                 className="button button-secondary button-small"
               >
                 Ver documentos

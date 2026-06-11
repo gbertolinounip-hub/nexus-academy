@@ -1,5 +1,5 @@
-﻿import { DashboardShell } from "@/components/dashboard/dashboard-shell";
-import { getNavigationForRole } from "@/lib/auth/navigation";
+import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { getNavigationForUser } from "@/lib/auth/navigation";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getAuthenticatedStudentDashboardPageData } from "@/services/dashboard";
 import { getClinicalUnreadNotificationCount } from "@/services/clinical-supervision";
@@ -39,7 +39,7 @@ export default async function AppLayout({
               : "Supervisor ainda não vinculado"
         })) ?? []
       : [];
-  const navigationItems = getNavigationForRole(currentUser.role).map((item) =>
+  const navigationItems = getNavigationForUser(currentUser).map((item) =>
     String(item.href) === "/clinica-supervisionada"
       ? {
           ...item,
@@ -56,7 +56,7 @@ export default async function AppLayout({
                 ? studentDocumentUnreadNotificationCount
                 : undefined
           }
-      : item
+        : item
   );
 
   return (
@@ -81,5 +81,3 @@ export default async function AppLayout({
     </DashboardShell>
   );
 }
-
-

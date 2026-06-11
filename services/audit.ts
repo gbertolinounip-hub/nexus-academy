@@ -1,5 +1,6 @@
 ﻿import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
+import { loadScopedOperationalGraph } from "@/lib/auth/data-scope";
 import type { AuditEntry, SessionUser } from "@/types/domain";
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 
@@ -193,19 +194,22 @@ function buildUnitAuditFilterState(input?: {
   };
 }
 
-async function loadAuditRowsForUnit(input: {
+async function loadAuditRowsForUnits(input: {
   supabase: SupabaseDatabaseClient;
-  unitId: string;
+  unitIds: string[];
   limit: number;
   filters: UnitAuditFilterState;
 }) {
   const hasExplicitFilters = Boolean(
     input.filters.startDate || input.filters.endDate || input.filters.areaId
   );
-  let unitScopedQuery = input.supabase
-    .from("historico_alteracoes")
-    .select("*")
-    .eq("unidade_id", input.unitId);
+  let unitScopedQuery = input.supabase.from("historico_alteracoes").select("*");
+
+  if (input.unitIds.length === 1) {
+    unitScopedQuery = unitScopedQuery.eq("unidade_id", input.unitIds[0]);
+  } else {
+    unitScopedQuery = unitScopedQuery.in("unidade_id", input.unitIds);
+  }
 
   if (input.filters.startDate) {
     unitScopedQuery = unitScopedQuery.gte(
@@ -884,7 +888,10 @@ function buildSummary(entry: AuditHistoryRow, payload: JsonRecord, context: Audi
 
 export async function loadUnitAuditFeed(input: {
   supabase: SupabaseDatabaseClient;
-  unitId: string;
+  unitId?: string;
+  unitIds?: string[];
+  semesterRows?: SemesterRow[];
+  classRows?: ClassRow[];
   limit?: number;
   filters?: {
     startDate?: string | string[] | null;
@@ -894,43 +901,41 @@ export async function loadUnitAuditFeed(input: {
 }): Promise<UnitAuditFeed> {
   const filters = buildUnitAuditFilterState(input.filters);
   const limit = input.limit ?? 200;
-  const semesterRowsResult = await input.supabase
-    .from("semestres")
-    .select("*")
-    .eq("unidade_id", input.unitId)
-    .order("data_inicio", { ascending: false });
-
-  if (semesterRowsResult.error) {
-    throw new Error(
-      formatSupabaseErrorMessage(
-        "Não foi possível carregar os semestres da unidade para a auditoria.",
-        semesterRowsResult.error
-      )
+  const unitIds = input.unitIds ?? (input.unitId ? [input.unitId] : []);
+  const loadedSemesterRows =
+    input.semesterRows ??
+    (
+      unitIds.length
+        ? (((
+            await input.supabase
+              .from("semestres")
+              .select("*")
+              .in("unidade_id", unitIds)
+          ).data ?? []) as SemesterRow[])
+        : []
     );
-  }
-
-  const semesterRows = (semesterRowsResult.data ?? []) as SemesterRow[];
+  const loadedClassRows =
+    input.classRows ??
+    (
+      loadedSemesterRows.length
+        ? (((
+            await input.supabase
+              .from("turmas")
+              .select("*")
+              .in(
+                "semestre_id",
+                loadedSemesterRows.map((semester) => semester.id)
+              )
+          ).data ?? []) as ClassRow[])
+        : []
+    );
+  const semesterRows = [...loadedSemesterRows].sort((left, right) =>
+    new Date(right.data_inicio).getTime() - new Date(left.data_inicio).getTime()
+  );
   const visibleSemesterIds = new Set(semesterRows.map((semester) => semester.id));
-  const classRowsResult = semesterRows.length
-    ? await input.supabase
-        .from("turmas")
-        .select("*")
-        .in(
-          "semestre_id",
-          semesterRows.map((semester) => semester.id)
-        )
-    : { data: [], error: null };
-
-  if (classRowsResult.error) {
-    throw new Error(
-      formatSupabaseErrorMessage(
-        "Não foi possível carregar as turmas da unidade para a auditoria.",
-        classRowsResult.error
-      )
-    );
-  }
-
-  const classRows = (classRowsResult.data ?? []) as ClassRow[];
+  const classRows = loadedClassRows.filter((classGroup) =>
+    visibleSemesterIds.has(classGroup.semestre_id)
+  );
   const areaIds = [
     ...new Set(classRows.map((classGroup) => classGroup.area_estagio_id).filter(Boolean))
   ] as string[];
@@ -995,9 +1000,9 @@ export async function loadUnitAuditFeed(input: {
     return left.blockName.localeCompare(right.blockName, "pt-BR");
   });
 
-  const auditRowsLoadResult = await loadAuditRowsForUnit({
+  const auditRowsLoadResult = await loadAuditRowsForUnits({
     supabase: input.supabase,
-    unitId: input.unitId,
+    unitIds,
     limit,
     filters
   });
@@ -1260,20 +1265,30 @@ export async function getAuthenticatedAuditEntries(
     areaId?: string | string[] | null;
   }
 ): Promise<AuditPageLoadResult> {
-  if (!currentUser.unitId) {
+  const supabase = await createSupabaseServerClient();
+  const scopedGraph = await loadScopedOperationalGraph(currentUser, {
+    supabase
+  });
+  const scope = scopedGraph.scope;
+
+  if (
+    scope.scopeKind === "none" ||
+    (!scope.restrictToCourse && scope.unitIds.length === 0) ||
+    (scope.restrictToCourse && scopedGraph.semesterRows.length === 0)
+  ) {
     return buildAuditEmptyState(
-      "Unidade operacional não identificada",
-      "O coordenador autenticado precisa estar vinculado a uma unidade para acessar a auditoria."
+      "Contexto de auditoria não identificado",
+      "O usuário autenticado precisa estar vinculado a uma oferta, curso ou unidade válida para acessar a auditoria."
     );
   }
-
-  const supabase = await createSupabaseServerClient();
   let auditFeed: UnitAuditFeed;
 
   try {
     auditFeed = await loadUnitAuditFeed({
       supabase,
-      unitId: currentUser.unitId,
+      unitIds: scope.unitIds,
+      semesterRows: scopedGraph.semesterRows,
+      classRows: scopedGraph.classRows,
       limit: 200,
       filters: requestedFilters
     });
@@ -1357,17 +1372,31 @@ export async function getAuthenticatedClosedSemesterAreaDetail(
   semesterId: string,
   classId: string
 ): Promise<ClosedSemesterAreaAuditDetail | null> {
-  if (!currentUser.unitId) {
+  const supabase = await createSupabaseServerClient();
+  const scopedGraph = await loadScopedOperationalGraph(currentUser, {
+    supabase
+  });
+  const scope = scopedGraph.scope;
+
+  if (
+    scope.scopeKind === "none" ||
+    (!scope.restrictToCourse && scope.unitIds.length === 0) ||
+    (scope.restrictToCourse && scopedGraph.semesterRows.length === 0)
+  ) {
+    return null;
+  }
+  const visibleSemesterIds = new Set(scopedGraph.semesterRows.map((semester) => semester.id));
+  const visibleClassIds = new Set(scopedGraph.classRows.map((classGroup) => classGroup.id));
+
+  if (!visibleSemesterIds.has(semesterId) || !visibleClassIds.has(classId)) {
     return null;
   }
 
-  const supabase = await createSupabaseServerClient();
   const [semesterResult, classResult, closureRowsResult] = await Promise.all([
     supabase
       .from("semestres")
       .select("*")
       .eq("id", semesterId)
-      .eq("unidade_id", currentUser.unitId)
       .maybeSingle(),
     supabase.from("turmas").select("*").eq("id", classId).maybeSingle(),
     supabase

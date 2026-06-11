@@ -1,3 +1,4 @@
+import { resolveScopedDataAccess } from "@/lib/auth/data-scope";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDate, formatDateTime, formatTime } from "@/lib/utils/format";
@@ -103,6 +104,12 @@ export async function getCoordinatorAccessLogExport(
   }
 ): Promise<CoordinatorAccessLogExportData | null> {
   if (currentUser.role !== "coordenador" || !currentUser.unitId) {
+    return null;
+  }
+
+  const scope = await resolveScopedDataAccess(currentUser);
+
+  if (scope.restrictToCourse) {
     return null;
   }
 

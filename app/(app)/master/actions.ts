@@ -24,6 +24,7 @@ type CoordinatorInsert = Database["public"]["Tables"]["coordenadores"]["Insert"]
 
 const unitSchema = z.object({
   unit_id: z.string().trim(),
+  instituicao_id: z.string().uuid("Selecione uma instituicao valida."),
   nome: z
     .string()
     .trim()
@@ -135,6 +136,7 @@ function readStringField(formData: FormData, name: string) {
 function buildUnitFormValues(formData: FormData): UnitFormValues {
   return {
     unit_id: readStringField(formData, "unit_id"),
+    instituicao_id: readStringField(formData, "instituicao_id"),
     nome: readStringField(formData, "nome"),
     sigla: readStringField(formData, "sigla"),
     slug: readStringField(formData, "slug").toLowerCase(),
@@ -175,6 +177,7 @@ function buildMasterUserProfileFormValues(formData: FormData): MasterUserProfile
 
 function revalidateMasterPaths(unitId?: string) {
   revalidatePath("/master");
+  revalidatePath("/master/instituicoes");
   revalidatePath("/master/unidades");
   revalidatePath("/master/coordenadores");
   revalidatePath("/master/usuarios");
@@ -254,6 +257,21 @@ async function ensureUniqueUnitFields(input: {
   }
 
   return fieldErrors;
+}
+
+async function ensureInstitutionExistsForUnit(institutionId: string) {
+  const adminClient = createSupabaseAdminClient();
+  const { data, error } = await adminClient
+    .from("instituicoes")
+    .select("id, nome, ativo")
+    .eq("id", institutionId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data as Pick<Database["public"]["Tables"]["instituicoes"]["Row"], "id" | "nome" | "ativo">;
 }
 
 async function loadUnitCoordinatorRoster(unitId: string) {
@@ -515,21 +533,57 @@ export async function upsertUnitAction(
     );
   }
 
+  const institution = await ensureInstitutionExistsForUnit(parsedData.data.instituicao_id);
+
+  if (!institution) {
+    return buildMasterActionState(
+      "error",
+      "Nao foi possivel localizar a instituicao selecionada.",
+      { instituicao_id: "Selecione uma instituicao valida." },
+      submittedFormValues
+    );
+  }
+
+  if (!institution.ativo && !parsedData.data.unit_id) {
+    return buildMasterActionState(
+      "error",
+      "Nao e possivel criar unidade em instituicao inativa.",
+      { instituicao_id: "Selecione uma instituicao ativa." },
+      submittedFormValues
+    );
+  }
+
   const adminClient = createSupabaseAdminClient();
 
   try {
     if (parsedData.data.unit_id) {
       const { data: existingUnit, error: existingUnitError } = await adminClient
         .from("unidades")
-        .select("id")
+        .select("id, instituicao_id")
         .eq("id", parsedData.data.unit_id)
         .maybeSingle();
+      const existingUnitRow = (existingUnit ?? null) as Pick<
+        UnitRow,
+        "id" | "instituicao_id"
+      > | null;
 
-      if (existingUnitError || !existingUnit) {
+      if (existingUnitError || !existingUnitRow) {
         return buildMasterActionState(
           "error",
           "Não foi possível localizar a unidade para edição.",
           {},
+          submittedFormValues
+        );
+      }
+
+      if (existingUnitRow.instituicao_id !== parsedData.data.instituicao_id) {
+        return buildMasterActionState(
+          "error",
+          "A instituicao da unidade nao pode ser alterada nesta etapa.",
+          {
+            instituicao_id:
+              "A instituicao vinculada esta bloqueada para evitar impacto em cursos, ofertas e semestres."
+          },
           submittedFormValues
         );
       }
@@ -561,6 +615,7 @@ export async function upsertUnitAction(
     }
 
     const unitInsertPayload: UnitInsert = {
+      instituicao_id: parsedData.data.instituicao_id,
       nome: parsedData.data.nome,
       sigla: parsedData.data.sigla.toUpperCase(),
       slug: parsedData.data.slug,

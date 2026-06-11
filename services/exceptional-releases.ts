@@ -1,6 +1,7 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { loadScopedOperationalGraph, resolveScopedDataAccess } from "@/lib/auth/data-scope";
 import { getCurrentAppUser } from "@/lib/auth/session";
-import { roleLabels } from "@/lib/auth/roles";
+import { contextRoleLabels, roleLabels } from "@/lib/auth/roles";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 import type {
@@ -19,6 +20,8 @@ type EnrollmentRow = Database["public"]["Tables"]["matriculas_turma"]["Row"];
 type StudentRow = Database["public"]["Tables"]["alunos"]["Row"];
 type UserRow = Database["public"]["Tables"]["usuarios"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["perfis"]["Row"];
+type ProfessorLinkRow =
+  Database["public"]["Tables"]["vinculos_professor_aluno"]["Row"];
 type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 
 interface EmptyState {
@@ -30,7 +33,10 @@ export interface ExceptionalReleaseRecipientOption {
   id: string;
   name: string;
   email: string;
-  role: Exclude<Database["public"]["Tables"]["perfis"]["Row"]["codigo"], "aluno" | "coordenador_master">;
+  role: Exclude<
+    Database["public"]["Tables"]["perfis"]["Row"]["codigo"],
+    "aluno" | "coordenador_master" | "master_curso"
+  >;
   roleLabel: string;
   label: string;
 }
@@ -359,12 +365,324 @@ function isStudentBoundExceptionalRelease(
 }
 
 function getRequiredUnitId(currentUser: SessionUser) {
-  return currentUser.unitId ?? null;
+  return currentUser.unitId ?? "";
 }
 
 export async function getCoordinatorExceptionalReleasePageData(
   currentUser: SessionUser
 ): Promise<ExceptionalReleaseManagementLoadResult> {
+  {
+  const supabase = await createSupabaseServerClient();
+  const scopedGraph = await loadScopedOperationalGraph(currentUser, {
+    supabase
+  });
+  const scope = scopedGraph.scope;
+
+  if (
+    scope.scopeKind === "none" ||
+    (scope.restrictToCourse &&
+      scope.offerIds.length === 0 &&
+      scopedGraph.semesterRows.length === 0)
+  ) {
+    return buildEmptyState(
+      "Contexto acadÃªmico nÃ£o identificado",
+      "O usuÃ¡rio autenticado precisa estar vinculado a uma oferta, curso ou unidade vÃ¡lida para gerenciar liberaÃ§Ãµes excepcionais."
+    );
+  }
+
+  const semesterRows = sortSemesters(scopedGraph.semesterRows);
+  const classRows = scopedGraph.classRows;
+  const enrollmentRows = scopedGraph.enrollmentRows;
+  const semesterIds = semesterRows.map((semester) => semester.id);
+  const classIds = classRows.map((classGroup) => classGroup.id);
+  const enrollmentIds = enrollmentRows.map((enrollment) => enrollment.id);
+  const studentUserIds = uniqueStringValues(
+    enrollmentRows.map((enrollment) => enrollment.aluno_id)
+  );
+  const [profileRowsResult, releaseRowsResult, studentRowsResult, professorLinksResult] =
+    await Promise.all([
+      supabase
+        .from("perfis")
+        .select("*")
+        .in("codigo", [
+          "aluno",
+          "professor",
+          "secretaria",
+          "coordenador",
+          "coordenador_master"
+        ]),
+      semesterIds.length
+        ? supabase
+            .from("liberacoes_excepcionais")
+            .select("*")
+            .in("semestre_id", semesterIds)
+            .order("created_at", { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
+      studentUserIds.length
+        ? supabase.from("alunos").select("*").in("usuario_id", studentUserIds)
+        : Promise.resolve({ data: [], error: null }),
+      enrollmentIds.length
+        ? supabase
+            .from("vinculos_professor_aluno")
+            .select("*")
+            .eq("ativo", true)
+            .in("matricula_turma_id", enrollmentIds)
+        : Promise.resolve({ data: [], error: null })
+    ]);
+
+  if (
+    profileRowsResult.error ||
+    releaseRowsResult.error ||
+    studentRowsResult.error ||
+    professorLinksResult.error
+  ) {
+    return buildEmptyState(
+      "NÃ£o foi possÃ­vel carregar as liberaÃ§Ãµes excepcionais",
+      "Houve um problema ao consultar perfis, semestres, matrÃ­culas ou liberaÃ§Ãµes do contexto visÃ­vel."
+    );
+  }
+
+  const closedSemesterRows = semesterRows.filter(
+    (semester) => semester.status === "encerrado"
+  );
+  const profileRows = (profileRowsResult.data ?? []) as ProfileRow[];
+  const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
+  const professorLinks = (professorLinksResult.data ?? []) as ProfessorLinkRow[];
+  const professorIds = uniqueStringValues(
+    professorLinks.map((link) => link.professor_id)
+  );
+  const baseRecipientIds = scope.restrictToCourse
+    ? professorIds
+    : [];
+  const releaseRows = ((releaseRowsResult.data ?? []) as ReleaseRow[]).filter(
+    (release) =>
+      isManagedExceptionalReleaseType(release.tipo) &&
+      isStudentBoundExceptionalRelease(release) &&
+      classIds.includes(release.turma_id ?? "") &&
+      studentUserIds.includes(release.aluno_id ?? "")
+  );
+  const relatedUserIds = uniqueStringValues([
+    ...studentUserIds,
+    ...baseRecipientIds,
+    ...releaseRows.map((release) => release.usuario_autorizado_id),
+    ...releaseRows.map((release) => release.criado_por),
+    ...releaseRows.map((release) => release.utilizado_por)
+  ]);
+  const unitScopedUsersResult =
+    !scope.restrictToCourse && scope.unitIds.length
+      ? await supabase.from("usuarios").select("*").in("unidade_id", scope.unitIds)
+      : { data: [], error: null };
+  const relatedUsersResult = relatedUserIds.length
+    ? await supabase.from("usuarios").select("*").in("id", relatedUserIds)
+    : { data: [], error: null };
+
+  if (unitScopedUsersResult.error || relatedUsersResult.error) {
+    return buildEmptyState(
+      "NÃ£o foi possÃ­vel carregar as liberaÃ§Ãµes excepcionais",
+      "Houve um problema ao consultar os usuÃ¡rios visÃ­veis no contexto institucional."
+    );
+  }
+
+  const unitUsers = (unitScopedUsersResult.data ?? []) as UserRow[];
+  const relatedUsers = (relatedUsersResult.data ?? []) as UserRow[];
+  const profileById = new Map(profileRows.map((profile) => [profile.id, profile.codigo]));
+  const semesterById = new Map(semesterRows.map((semester) => [semester.id, semester]));
+  const classById = new Map(classRows.map((classGroup) => [classGroup.id, classGroup]));
+  const userById = new Map(
+    [...unitUsers, ...relatedUsers].map((user) => [user.id, user])
+  );
+  const studentById = new Map(studentRows.map((student) => [student.usuario_id, student]));
+  const studentOptionMap = new Map<
+    string,
+    {
+      id: string;
+      semesterId: string;
+      name: string;
+      registration: string;
+      email: string;
+      classIds: Set<string>;
+      classLabels: Set<string>;
+    }
+  >();
+
+  for (const enrollment of enrollmentRows) {
+    const classGroup = classById.get(enrollment.turma_id) ?? null;
+    const semester = classGroup ? semesterById.get(classGroup.semestre_id) : null;
+    const studentUser = userById.get(enrollment.aluno_id);
+    const student = studentById.get(enrollment.aluno_id);
+
+    if (!classGroup || !semester || semester.status !== "encerrado" || !studentUser || !student) {
+      continue;
+    }
+
+    const optionKey = `${semester.id}:${student.usuario_id}`;
+    const currentOption =
+      studentOptionMap.get(optionKey) ?? {
+        id: student.usuario_id,
+        semesterId: semester.id,
+        name: studentUser.nome_completo,
+        registration: student.matricula,
+        email: studentUser.email,
+        classIds: new Set<string>(),
+        classLabels: new Set<string>()
+      };
+
+    currentOption.classIds.add(classGroup.id);
+    currentOption.classLabels.add(`${classGroup.codigo} Â· ${classGroup.nome}`);
+    studentOptionMap.set(optionKey, currentOption);
+  }
+
+  const semesterOptions: ExceptionalReleaseSemesterOption[] = closedSemesterRows.map(
+    (semester) => ({
+      id: semester.id,
+      code: semester.codigo,
+      name: semester.nome,
+      status: semester.status,
+      label: `${semester.codigo} Â· ${semester.nome}`
+    })
+  );
+  const classOptions: ExceptionalReleaseClassOption[] = classRows
+    .filter((classGroup) => semesterById.get(classGroup.semestre_id)?.status === "encerrado")
+    .map((classGroup) => ({
+      id: classGroup.id,
+      semesterId: classGroup.semestre_id,
+      code: classGroup.codigo,
+      name: classGroup.nome,
+      areaName: classGroup.area_estagio,
+      label: `${classGroup.codigo} Â· ${classGroup.nome} Â· ${classGroup.area_estagio}`
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label, "pt-BR"));
+  const studentOptions: ExceptionalReleaseStudentOption[] = Array.from(
+    studentOptionMap.values()
+  )
+    .map((studentOption) => {
+      const classLabel = Array.from(studentOption.classLabels)
+        .sort((left, right) => left.localeCompare(right, "pt-BR"))
+        .join(" | ");
+
+      return {
+        id: studentOption.id,
+        semesterId: studentOption.semesterId,
+        classIds: Array.from(studentOption.classIds),
+        name: studentOption.name,
+        registration: studentOption.registration,
+        email: studentOption.email,
+        classLabel,
+        label: `${studentOption.name} Â· ${studentOption.registration} Â· ${classLabel}`
+      };
+    })
+    .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+  const recipientSourceUsers = scope.restrictToCourse ? relatedUsers : unitUsers;
+  const recipientOptions: ExceptionalReleaseRecipientOption[] = recipientSourceUsers
+    .filter((user) => {
+      if (!user.ativo) {
+        return false;
+      }
+
+      const profileCode = profileById.get(user.perfil_id);
+      return (
+        profileCode === "professor" ||
+        (!scope.restrictToCourse &&
+          (profileCode === "secretaria" || profileCode === "coordenador"))
+      );
+    })
+    .map((user) => {
+      const profileCode =
+        (profileById.get(user.perfil_id) as ExceptionalReleaseRecipientOption["role"]) ??
+        "professor";
+
+      return {
+        id: user.id,
+        name: user.nome_completo,
+        email: user.email,
+        role: profileCode,
+        roleLabel: contextRoleLabels[profileCode],
+        label: `${user.nome_completo} Â· ${contextRoleLabels[profileCode]} Â· ${user.email}`
+      };
+    })
+    .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+  const releaseEntries: ExceptionalReleaseListEntry[] = releaseRows.map((release) => {
+    const status = buildReleaseStatus(release);
+    const semester = semesterById.get(release.semestre_id);
+    const classGroup = release.turma_id ? classById.get(release.turma_id) ?? null : null;
+    const student = release.aluno_id ? studentById.get(release.aluno_id) ?? null : null;
+    const studentUser = release.aluno_id ? userById.get(release.aluno_id) ?? null : null;
+    const authorizedUser = userById.get(release.usuario_autorizado_id) ?? null;
+    const creatorUser = userById.get(release.criado_por) ?? null;
+    const authorizedRoleCode = authorizedUser
+      ? profileById.get(authorizedUser.perfil_id) ?? null
+      : null;
+
+    return {
+      id: release.id,
+      type: release.tipo,
+      typeLabel: exceptionalReleaseTypeLabels[release.tipo],
+      semesterCode: semester?.codigo ?? "Semestre nÃ£o identificado",
+      semesterName: semester?.nome ?? "Semestre nÃ£o identificado",
+      classLabel: classGroup ? `${classGroup.codigo} Â· ${classGroup.nome}` : null,
+      studentLabel:
+        student && studentUser
+          ? `${studentUser.nome_completo} Â· ${student.matricula}`
+          : null,
+      authorizedUserName: authorizedUser?.nome_completo ?? "UsuÃ¡rio nÃ£o identificado",
+      authorizedUserEmail: authorizedUser?.email ?? "Sem e-mail visÃ­vel",
+      authorizedUserRoleLabel:
+        authorizedRoleCode && authorizedRoleCode in contextRoleLabels
+          ? contextRoleLabels[authorizedRoleCode]
+          : "Perfil nÃ£o identificado",
+      createdByName: creatorUser?.nome_completo ?? "AutorizaÃ§Ã£o institucional",
+      reason: release.motivo,
+      startsAt: release.inicio_em,
+      expiresAt: release.expira_em,
+      manuallyClosedAt: release.encerrado_manualmente_em,
+      usedAt: release.utilizado_em,
+      usedByName: release.utilizado_por
+        ? userById.get(release.utilizado_por)?.nome_completo ?? "UsuÃ¡rio nÃ£o identificado"
+        : null,
+      createdAt: release.created_at,
+      statusKey: status.key,
+      statusLabel: status.label,
+      statusClassName: status.className,
+      canManualClose: status.key === "ativa" || status.key === "agendada"
+    };
+  });
+
+  return {
+    pageData: {
+      coordinator: {
+        id: currentUser.id,
+        name: currentUser.name,
+        unitId: scope.unitIds[0] ?? currentUser.unitId ?? "sem-unidade",
+        unitName: currentUser.unitName ?? null
+      },
+      semesterOptions,
+      classOptions,
+      studentOptions,
+      recipientOptions,
+      activeEntries: releaseEntries.filter(
+        (entry) => entry.statusKey === "ativa" || entry.statusKey === "agendada"
+      ),
+      historicalEntries: releaseEntries.filter(
+        (entry) =>
+          entry.statusKey === "expirada" ||
+          entry.statusKey === "encerrada" ||
+          entry.statusKey === "utilizada"
+      ),
+      summary: {
+        activeCount: releaseEntries.filter((entry) => entry.statusKey === "ativa").length,
+        scheduledCount: releaseEntries.filter((entry) => entry.statusKey === "agendada")
+          .length,
+        expiredCount: releaseEntries.filter((entry) => entry.statusKey === "expirada")
+          .length,
+        usedCount: releaseEntries.filter((entry) => entry.statusKey === "utilizada").length,
+        closedCount: releaseEntries.filter((entry) => entry.statusKey === "encerrada")
+          .length
+      }
+    },
+    emptyState: null
+  };
+  }
+
   const currentUnitId = getRequiredUnitId(currentUser);
 
   if (!currentUnitId) {
@@ -484,24 +802,33 @@ export async function getCoordinatorExceptionalReleasePageData(
   >();
 
   for (const enrollment of enrollmentRows) {
-    const classGroup = classById.get(enrollment.turma_id);
+    const classGroupCandidate = classById.get(enrollment.turma_id);
 
-    if (!classGroup) {
+    if (!classGroupCandidate) {
       continue;
     }
 
-    const semester = semesterById.get(classGroup.semestre_id);
+    const classGroup = classGroupCandidate!;
+    const semesterCandidate = semesterById.get(classGroup.semestre_id);
 
-    if (!semester || semester.status !== "encerrado") {
+    if (!semesterCandidate) {
       continue;
     }
 
-    const studentUser = userById.get(enrollment.aluno_id);
-    const student = studentById.get(enrollment.aluno_id);
+    const semester = semesterCandidate!;
 
-    if (!studentUser || !student) {
+    if (semester.status !== "encerrado") {
       continue;
     }
+    const studentUserCandidate = userById.get(enrollment.aluno_id);
+    const studentCandidate = studentById.get(enrollment.aluno_id);
+
+    if (!studentUserCandidate || !studentCandidate) {
+      continue;
+    }
+
+    const studentUser = studentUserCandidate!;
+    const student = studentCandidate!;
 
     const optionKey = `${semester.id}:${student.usuario_id}`;
     const currentOption =
@@ -584,7 +911,7 @@ export async function getCoordinatorExceptionalReleasePageData(
       const profileCode =
         (profileById.get(user.perfil_id) as ExceptionalReleaseRecipientOption["role"]) ??
         "professor";
-      const roleLabel = roleLabels[profileCode];
+      const roleLabel = contextRoleLabels[profileCode];
 
       return {
         id: user.id,
@@ -625,8 +952,8 @@ export async function getCoordinatorExceptionalReleasePageData(
       authorizedUserName: authorizedUser?.nome_completo ?? "Usuário não identificado",
       authorizedUserEmail: authorizedUser?.email ?? "Sem e-mail visível",
       authorizedUserRoleLabel:
-        authorizedRoleCode && authorizedRoleCode in roleLabels
-          ? roleLabels[authorizedRoleCode]
+        authorizedRoleCode && authorizedRoleCode in contextRoleLabels
+          ? contextRoleLabels[authorizedRoleCode]
           : "Perfil não identificado",
       createdByName: creatorUser?.nome_completo ?? "Autorização institucional",
       reason: release.motivo,

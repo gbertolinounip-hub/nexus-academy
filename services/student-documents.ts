@@ -1,6 +1,7 @@
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { resolveScopedDataAccess } from "@/lib/auth/data-scope";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   formatStudentDocumentReviewerRole,
@@ -22,7 +23,9 @@ import type {
 
 type UserRow = Database["public"]["Tables"]["usuarios"]["Row"];
 type StudentRow = Database["public"]["Tables"]["alunos"]["Row"];
+type InstitutionRow = Database["public"]["Tables"]["instituicoes"]["Row"];
 type UnitRow = Database["public"]["Tables"]["unidades"]["Row"];
+type OfferRow = Database["public"]["Tables"]["ofertas_curso_unidade"]["Row"];
 type DocumentRow = Database["public"]["Tables"]["documentos_aluno"]["Row"];
 type DocumentNotificationRow =
   Database["public"]["Tables"]["notificacoes_documentos_aluno"]["Row"];
@@ -33,6 +36,12 @@ type AreaRow = Database["public"]["Tables"]["areas_estagio"]["Row"];
 type BlockRow = Database["public"]["Tables"]["blocos_estagio"]["Row"];
 type ProfessorLinkRow =
   Database["public"]["Tables"]["vinculos_professor_aluno"]["Row"];
+type DocumentTypeRow = Database["public"]["Tables"]["tipos_documento"]["Row"];
+type RequiredCourseDocumentRow =
+  Database["public"]["Tables"]["documentos_obrigatorios_curso"]["Row"];
+type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
+type SupabaseAdminClient = ReturnType<typeof createSupabaseAdminClient>;
+type StudentDocumentReadClient = SupabaseServerClient | SupabaseAdminClient;
 
 export const STUDENT_DOCUMENTS_BUCKET = "student-documents";
 const STUDENT_DOCUMENTS_S3_SCHEME = "s3://";
@@ -48,6 +57,34 @@ export const STUDENT_DOCUMENT_ACCEPTED_MIME_TYPES = [
   "image/jpeg",
   "image/png"
 ] as const;
+
+const STUDENT_DOCUMENT_TYPE_COMPATIBILITY_CODES = {
+  carteira_vacinacao: ["CARTEIRA_VACINACAO", "carteira_vacinacao"],
+  tce: ["TCE", "tce"]
+} as const satisfies Record<StudentDocumentType, readonly string[]>;
+
+interface ResolvedStudentDocumentUploadContext {
+  student: StudentRow;
+  enrollment: EnrollmentRow | null;
+  classRow: ClassRow | null;
+  semester: SemesterRow | null;
+  offer: OfferRow;
+  requiredCourseDocument: RequiredCourseDocumentRow;
+}
+
+interface ResolvedStudentDocumentReviewContext {
+  document: DocumentRow;
+  student: StudentRow | null;
+  enrollment: EnrollmentRow | null;
+  classRow: ClassRow | null;
+  semester: SemesterRow | null;
+  offer: OfferRow | null;
+  requiredCourseDocument: RequiredCourseDocumentRow | null;
+  resolvedOfferId: string | null;
+  resolvedCourseId: string | null;
+  resolvedUnitId: string | null;
+  resolvedInstitutionId: string | null;
+}
 
 interface StudentDocumentsS3Config {
   region: string;
@@ -269,6 +306,443 @@ export async function removeStudentDocumentBinary(storagePath: string) {
   await adminClient.storage.from(STUDENT_DOCUMENTS_BUCKET).remove([storagePath]);
 }
 
+async function loadOfferRowById(
+  client: StudentDocumentReadClient,
+  offerId: string
+) {
+  const { data, error } = await client
+    .from("ofertas_curso_unidade")
+    .select("*")
+    .eq("id", offerId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      "Nao foi possivel carregar a oferta do curso vinculada ao documento."
+    );
+  }
+
+  return (data ?? null) as OfferRow | null;
+}
+
+async function loadEnrollmentOfferContext(
+  client: StudentDocumentReadClient,
+  enrollment: EnrollmentRow
+) {
+  let classRow: ClassRow | null = null;
+  let semester: SemesterRow | null = null;
+  let offerId = enrollment.oferta_curso_unidade_id ?? null;
+
+  if (!offerId) {
+    const { data: classRowData, error: classRowError } = await client
+      .from("turmas")
+      .select("*")
+      .eq("id", enrollment.turma_id)
+      .maybeSingle();
+
+    if (classRowError) {
+      throw new Error(
+        "Nao foi possivel consultar a turma vinculada ao documento do aluno."
+      );
+    }
+
+    classRow = (classRowData ?? null) as ClassRow | null;
+    offerId = classRow?.oferta_curso_unidade_id ?? null;
+
+    if (!offerId && classRow?.semestre_id) {
+      const { data: semesterData, error: semesterError } = await client
+        .from("semestres")
+        .select("*")
+        .eq("id", classRow.semestre_id)
+        .maybeSingle();
+
+      if (semesterError) {
+        throw new Error(
+          "Nao foi possivel consultar o semestre vinculado ao documento do aluno."
+        );
+      }
+
+      semester = (semesterData ?? null) as SemesterRow | null;
+      offerId = semester?.oferta_curso_unidade_id ?? null;
+    }
+  }
+
+  return {
+    classRow,
+    semester,
+    offer: offerId ? await loadOfferRowById(client, offerId) : null
+  };
+}
+
+async function loadRequiredCourseDocumentForType(
+  client: StudentDocumentReadClient,
+  courseId: string,
+  documentType: StudentDocumentType
+) {
+  const compatibilityCodes = STUDENT_DOCUMENT_TYPE_COMPATIBILITY_CODES[documentType];
+  const { data: documentTypeRowsData, error: documentTypeRowsError } = await client
+    .from("tipos_documento")
+    .select("*")
+    .in("codigo", [...compatibilityCodes])
+    .eq("ativo", true);
+
+  if (documentTypeRowsError) {
+    throw new Error(
+      "Nao foi possivel carregar a configuracao dos tipos documentais do curso."
+    );
+  }
+
+  const documentTypeRows = (documentTypeRowsData ?? []) as DocumentTypeRow[];
+
+  if (!documentTypeRows.length) {
+    return {
+      requiredCourseDocument: null,
+      hasAmbiguity: false
+    } as const;
+  }
+
+  const { data: requiredCourseDocumentRowsData, error: requiredCourseDocumentRowsError } =
+    await client
+      .from("documentos_obrigatorios_curso")
+      .select("*")
+      .eq("curso_id", courseId)
+      .eq("ativo", true)
+      .eq("obrigatorio", true)
+      .in(
+        "tipo_documento_id",
+        documentTypeRows.map((row) => row.id)
+      )
+      .order("ordem", { ascending: true })
+      .order("created_at", { ascending: true });
+
+  if (requiredCourseDocumentRowsError) {
+    throw new Error(
+      "Nao foi possivel carregar os documentos obrigatorios configurados para o curso."
+    );
+  }
+
+  const requiredCourseDocuments =
+    (requiredCourseDocumentRowsData ?? []) as RequiredCourseDocumentRow[];
+
+  return {
+    requiredCourseDocument:
+      requiredCourseDocuments.length === 1 ? requiredCourseDocuments[0] : null,
+    hasAmbiguity: requiredCourseDocuments.length > 1
+  } as const;
+}
+
+export async function resolveStudentDocumentUploadContext(input: {
+  currentUser: SessionUser;
+  documentType: StudentDocumentType;
+  enrollmentId?: string | null;
+}) {
+  const supabase = await createSupabaseServerClient();
+  const { data: studentRowData, error: studentRowError } = await supabase
+    .from("alunos")
+    .select("*")
+    .eq("usuario_id", input.currentUser.id)
+    .maybeSingle();
+
+  if (studentRowError) {
+    throw new Error(
+      "Nao foi possivel localizar o cadastro academico do aluno para este envio."
+    );
+  }
+
+  const student = (studentRowData ?? null) as StudentRow | null;
+
+  if (!student) {
+    throw new Error(
+      "Nao foi possivel localizar o cadastro academico do aluno para este envio."
+    );
+  }
+
+  let enrollment: EnrollmentRow | null = null;
+  let classRow: ClassRow | null = null;
+  let semester: SemesterRow | null = null;
+  let offer: OfferRow | null = null;
+
+  if (input.enrollmentId) {
+    const { data: enrollmentRowData, error: enrollmentRowError } = await supabase
+      .from("matriculas_turma")
+      .select("*")
+      .eq("id", input.enrollmentId)
+      .eq("aluno_id", input.currentUser.id)
+      .maybeSingle();
+
+    if (enrollmentRowError || !enrollmentRowData) {
+      throw new Error(
+        "Nao foi possivel identificar a matricula vinculada a este documento. Procure a coordenacao."
+      );
+    }
+
+    enrollment = enrollmentRowData as EnrollmentRow;
+
+    const enrollmentOfferContext = await loadEnrollmentOfferContext(
+      supabase,
+      enrollment
+    );
+    classRow = enrollmentOfferContext.classRow;
+    semester = enrollmentOfferContext.semester;
+    offer = enrollmentOfferContext.offer;
+
+    if (!offer) {
+      throw new Error(
+        "Nao foi possivel identificar a oferta do curso vinculada a este documento. Procure a coordenacao."
+      );
+    }
+  } else {
+    const fallbackOfferIds = uniqueStringValues([
+      student.oferta_curso_unidade_id,
+      input.currentUser.contextoAtivo?.ofertaCursoUnidadeId ?? null,
+      input.currentUser.ofertaCursoUnidadeId ?? null
+    ]);
+
+    if (fallbackOfferIds.length !== 1) {
+      throw new Error(
+        "Nao foi possivel identificar a oferta do curso vinculada a este documento. Procure a coordenacao."
+      );
+    }
+
+    offer = await loadOfferRowById(supabase, fallbackOfferIds[0]);
+
+    if (!offer) {
+      throw new Error(
+        "Nao foi possivel identificar a oferta do curso vinculada a este documento. Procure a coordenacao."
+      );
+    }
+  }
+
+  const requiredCourseDocumentResolution =
+    await loadRequiredCourseDocumentForType(
+      supabase,
+      offer.curso_id,
+      input.documentType
+    );
+
+  if (requiredCourseDocumentResolution.hasAmbiguity) {
+    throw new Error(
+      "Foi encontrada mais de uma configuracao obrigatoria ativa para este tipo de documento no curso. Procure a coordenacao."
+    );
+  }
+
+  if (!requiredCourseDocumentResolution.requiredCourseDocument) {
+    throw new Error(
+      "Este documento ainda nao esta configurado como obrigatorio para o curso. Procure a coordenacao."
+    );
+  }
+
+  return {
+    student,
+    enrollment,
+    classRow,
+    semester,
+    offer,
+    requiredCourseDocument:
+      requiredCourseDocumentResolution.requiredCourseDocument
+  } satisfies ResolvedStudentDocumentUploadContext;
+}
+
+async function resolveStudentDocumentReviewContext(documentId: string) {
+  const adminClient = createSupabaseAdminClient();
+  const { data: documentRowData, error: documentRowError } = await adminClient
+    .from("documentos_aluno")
+    .select("*")
+    .eq("id", documentId)
+    .maybeSingle();
+
+  if (documentRowError) {
+    throw new Error(
+      "Nao foi possivel localizar o documento solicitado para validacao."
+    );
+  }
+
+  const document = (documentRowData ?? null) as DocumentRow | null;
+
+  if (!document) {
+    return null;
+  }
+
+  const [
+    studentRowResult,
+    enrollmentRowResult,
+    requiredCourseDocumentResult
+  ] = await Promise.all([
+    adminClient
+      .from("alunos")
+      .select("*")
+      .eq("usuario_id", document.aluno_id)
+      .maybeSingle(),
+    document.matricula_turma_id
+      ? adminClient
+          .from("matriculas_turma")
+          .select("*")
+          .eq("id", document.matricula_turma_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    document.documento_obrigatorio_curso_id
+      ? adminClient
+          .from("documentos_obrigatorios_curso")
+          .select("*")
+          .eq("id", document.documento_obrigatorio_curso_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null })
+  ]);
+
+  if (
+    studentRowResult.error ||
+    enrollmentRowResult.error ||
+    requiredCourseDocumentResult.error
+  ) {
+    throw new Error(
+      "Nao foi possivel carregar o contexto institucional do documento selecionado."
+    );
+  }
+
+  const student = (studentRowResult.data ?? null) as StudentRow | null;
+  const enrollment = (enrollmentRowResult.data ?? null) as EnrollmentRow | null;
+  const requiredCourseDocument = (requiredCourseDocumentResult.data ?? null) as
+    | RequiredCourseDocumentRow
+    | null;
+
+  let classRow: ClassRow | null = null;
+  let semester: SemesterRow | null = null;
+  let offer: OfferRow | null = null;
+
+  if (document.oferta_curso_unidade_id) {
+    offer = await loadOfferRowById(adminClient, document.oferta_curso_unidade_id);
+  } else if (enrollment) {
+    const enrollmentOfferContext = await loadEnrollmentOfferContext(
+      adminClient,
+      enrollment
+    );
+    classRow = enrollmentOfferContext.classRow;
+    semester = enrollmentOfferContext.semester;
+    offer = enrollmentOfferContext.offer;
+  } else if (student?.oferta_curso_unidade_id) {
+    offer = await loadOfferRowById(adminClient, student.oferta_curso_unidade_id);
+  }
+
+  return {
+    document,
+    student,
+    enrollment,
+    classRow,
+    semester,
+    offer,
+    requiredCourseDocument,
+    resolvedOfferId: offer?.id ?? document.oferta_curso_unidade_id ?? student?.oferta_curso_unidade_id ?? null,
+    resolvedCourseId:
+      offer?.curso_id ?? requiredCourseDocument?.curso_id ?? student?.curso_id ?? null,
+    resolvedUnitId:
+      offer?.unidade_id ?? document.unidade_id ?? student?.unidade_id ?? null,
+    resolvedInstitutionId: offer?.instituicao_id ?? null
+  } satisfies ResolvedStudentDocumentReviewContext;
+}
+
+function canCoordinatorReviewResolvedDocument(
+  scope: Awaited<ReturnType<typeof resolveScopedDataAccess>>,
+  context: ResolvedStudentDocumentReviewContext
+) {
+  if (scope.isGlobalMaster) {
+    return true;
+  }
+
+  if (scope.scopeKind === "none") {
+    return false;
+  }
+
+  const courseId = context.resolvedCourseId ?? context.student?.curso_id ?? null;
+  const unitId = context.resolvedUnitId ?? context.student?.unidade_id ?? null;
+  const offerId = context.resolvedOfferId;
+
+  if (scope.scopeKind === "course_manager") {
+    if (!scope.cursoId || courseId !== scope.cursoId) {
+      return false;
+    }
+
+    if (
+      scope.instituicaoId &&
+      context.resolvedInstitutionId &&
+      context.resolvedInstitutionId !== scope.instituicaoId
+    ) {
+      return false;
+    }
+
+    if (offerId && scope.offerIds.length > 0) {
+      return scope.offerIds.includes(offerId);
+    }
+
+    if (unitId && scope.unitIds.length > 0) {
+      return scope.unitIds.includes(unitId);
+    }
+
+    return false;
+  }
+
+  if (
+    scope.restrictToCourse &&
+    scope.cursoId &&
+    courseId !== scope.cursoId
+  ) {
+    return false;
+  }
+
+  if (offerId && scope.offerIds.length > 0) {
+    return scope.offerIds.includes(offerId);
+  }
+
+  if (unitId && scope.unitIds.length > 0) {
+    return scope.unitIds.includes(unitId);
+  }
+
+  return false;
+}
+
+export async function assertCanReviewStudentDocument(
+  currentUser: SessionUser,
+  documentId: string
+) {
+  const context = await resolveStudentDocumentReviewContext(documentId);
+
+  if (!context) {
+    throw new Error(
+      "O documento solicitado nao esta disponivel para esta validacao."
+    );
+  }
+
+  if (currentUser.role === "professor") {
+    const visibleStudentIds = await loadProfessorStudentIds(currentUser);
+
+    if (!visibleStudentIds.includes(context.document.aluno_id)) {
+      throw new Error(
+        "Voce nao tem permissao para revisar este documento no contexto atual."
+      );
+    }
+
+    return context;
+  }
+
+  if (currentUser.role === "coordenador") {
+    const supabase = await createSupabaseServerClient();
+    const scope = await resolveScopedDataAccess(currentUser, {
+      supabase
+    });
+
+    if (!canCoordinatorReviewResolvedDocument(scope, context)) {
+      throw new Error(
+        "Voce nao tem permissao para revisar este documento no contexto atual."
+      );
+    }
+
+    return context;
+  }
+
+  throw new Error(
+    "Voce nao tem permissao para revisar este documento no contexto atual."
+  );
+}
+
 async function buildStudentDocumentDownloadUrl(input: {
   storagePath: string;
   fileName: string;
@@ -337,11 +811,23 @@ export interface StudentDocumentDirectoryFilterOption {
   label: string;
 }
 
+export interface StudentDocumentDirectoryInstitutionOption {
+  id: string;
+  name: string;
+}
+
+export interface StudentDocumentDirectoryUnitOption {
+  value: string;
+  label: string;
+  institutionId: string | null;
+}
+
 export interface StudentDocumentDirectoryEntry {
   studentId: string;
   studentName: string;
   registration: string;
   email: string;
+  institutionId: string | null;
   unitId: string | null;
   unitName: string | null;
   active: boolean;
@@ -362,12 +848,14 @@ export interface StudentDocumentDirectoryPageData {
   description: string;
   filters: {
     search: string;
+    institutionId: string;
     areaId: string;
     status: DirectoryStatusFilter;
     unitId: string;
   };
+  institutionOptions: StudentDocumentDirectoryInstitutionOption[];
   areaOptions: StudentDocumentDirectoryFilterOption[];
-  unitOptions: StudentDocumentDirectoryFilterOption[];
+  unitOptions: StudentDocumentDirectoryUnitOption[];
   statusOptions: ReadonlyArray<StudentDocumentDirectoryFilterOption>;
   metrics: {
     totalStudents: number;
@@ -408,8 +896,19 @@ interface StudentDocumentScopeContext {
   professorLinks: ProfessorLinkRow[];
 }
 
+interface StudentDocumentStudentScope {
+  studentIds: string[];
+  scope: Awaited<ReturnType<typeof resolveScopedDataAccess>> | null;
+}
+
 function normalizeSearchTerm(value?: string | null) {
   return (value ?? "").trim().toLowerCase();
+}
+
+function uniqueStringValues(values: Array<string | null | undefined>) {
+  return Array.from(
+    new Set(values.filter((value): value is string => Boolean(value?.trim())))
+  );
 }
 
 function selectMostRecentTimestamp(values: Array<string | null | undefined>) {
@@ -709,6 +1208,7 @@ async function loadStudentDocumentScopeByStudentIds(
   studentIds: string[],
   input?: {
     useAdminRead?: boolean;
+    scope?: Awaited<ReturnType<typeof resolveScopedDataAccess>> | null;
   }
 ) {
   const supabase = await createSupabaseServerClient();
@@ -745,6 +1245,13 @@ async function loadStudentDocumentScopeByStudentIds(
   }
 
   const documents = (documentRowsResult.data ?? []) as DocumentRow[];
+  const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
+  const studentById = new Map(studentRows.map((row) => [row.usuario_id, row]));
+  const requiredCourseDocumentIds = [
+    ...new Set(
+      documents.map((row) => row.documento_obrigatorio_curso_id).filter(Boolean)
+    )
+  ] as string[];
   const reviewerIds = [
     ...new Set(documents.map((row) => row.validado_por).filter(Boolean))
   ] as string[];
@@ -757,7 +1264,12 @@ async function loadStudentDocumentScopeByStudentIds(
     )
   ] as string[];
 
-  const [reviewerUsersResult, enrollmentRowsResult, unitRowsResult] = await Promise.all([
+  const [
+    reviewerUsersResult,
+    enrollmentRowsResult,
+    unitRowsResult,
+    requiredCourseDocumentsResult
+  ] = await Promise.all([
     reviewerIds.length
       ? adminClient.from("usuarios").select("*").in("id", reviewerIds)
       : Promise.resolve({ data: [], error: null }),
@@ -766,13 +1278,20 @@ async function loadStudentDocumentScopeByStudentIds(
       : Promise.resolve({ data: [], error: null }),
     unitIds.length
       ? readClient.from("unidades").select("*").in("id", unitIds)
+      : Promise.resolve({ data: [], error: null }),
+    requiredCourseDocumentIds.length
+      ? readClient
+          .from("documentos_obrigatorios_curso")
+          .select("*")
+          .in("id", requiredCourseDocumentIds)
       : Promise.resolve({ data: [], error: null })
   ]);
 
   if (
     reviewerUsersResult.error ||
     enrollmentRowsResult.error ||
-    unitRowsResult.error
+    unitRowsResult.error ||
+    requiredCourseDocumentsResult.error
   ) {
     throw new Error(
       "Não foi possível carregar o contexto complementar dos documentos dos alunos."
@@ -839,6 +1358,53 @@ async function loadStudentDocumentScopeByStudentIds(
     );
   }
 
+  const requiredCourseDocuments =
+    (requiredCourseDocumentsResult.data ?? []) as RequiredCourseDocumentRow[];
+  const requiredCourseDocumentById = new Map(
+    requiredCourseDocuments.map((row) => [row.id, row])
+  );
+  const scope = input?.scope ?? null;
+  const visibleDocumentIds = new Set(
+    documents
+      .filter((row) => {
+        if (!scope?.restrictToCourse) {
+          return true;
+        }
+
+        if (
+          row.oferta_curso_unidade_id &&
+          scope.offerIds.includes(row.oferta_curso_unidade_id)
+        ) {
+          return true;
+        }
+
+        if (row.documento_obrigatorio_curso_id) {
+          const requiredCourseDocument = requiredCourseDocumentById.get(
+            row.documento_obrigatorio_curso_id
+          );
+
+          if (requiredCourseDocument?.curso_id === scope.cursoId) {
+            return true;
+          }
+        }
+
+        const student = studentById.get(row.aluno_id);
+
+        if (!student || student.curso_id !== scope.cursoId) {
+          return false;
+        }
+
+        if (scope.scopeKind === "course_manager") {
+          return true;
+        }
+
+        return (
+          scope.unitIds.length === 0 ||
+          scope.unitIds.includes(student.unidade_id ?? "")
+        );
+      })
+      .map((row) => row.id)
+  );
   const users = [
     ...((userRowsResult.data ?? []) as UserRow[]),
     ...((reviewerUsersResult.data ?? []) as UserRow[])
@@ -846,10 +1412,12 @@ async function loadStudentDocumentScopeByStudentIds(
 
   return {
     users,
-    students: (studentRowsResult.data ?? []) as StudentRow[],
+    students: studentRows,
     units: (unitRowsResult.data ?? []) as UnitRow[],
-    documents,
-    notifications: (notificationRowsResult.data ?? []) as DocumentNotificationRow[],
+    documents: documents.filter((row) => visibleDocumentIds.has(row.id)),
+    notifications: ((notificationRowsResult.data ?? []) as DocumentNotificationRow[]).filter(
+      (row) => visibleDocumentIds.has(row.documento_id)
+    ),
     enrollments,
     classes,
     semesters: (semesterRowsResult.data ?? []) as SemesterRow[],
@@ -859,22 +1427,97 @@ async function loadStudentDocumentScopeByStudentIds(
   } satisfies StudentDocumentScopeContext;
 }
 
-async function loadMasterStudentDocumentUnitOptions() {
+async function loadMasterStudentDocumentInstitutionalFilterOptions() {
   const adminClient = createSupabaseAdminClient();
-  const { data, error } = await adminClient.from("unidades").select("*").order("nome");
+  const [institutionsResult, unitsResult] = await Promise.all([
+    adminClient.from("instituicoes").select("*").order("nome"),
+    adminClient.from("unidades").select("*").order("nome")
+  ]);
 
-  if (error) {
+  if (institutionsResult.error || unitsResult.error) {
     throw new Error(
       "Não foi possível carregar as unidades para a leitura documental global."
     );
   }
 
-  return ((data ?? []) as UnitRow[])
+  return {
+    institutions: ((institutionsResult.data ?? []) as InstitutionRow[])
+      .map((institution) => ({
+        id: institution.id,
+        name: institution.nome
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name, "pt-BR")),
+    units: ((unitsResult.data ?? []) as UnitRow[])
+      .map((unit) => ({
+        value: unit.id,
+        label: unit.nome,
+        institutionId: unit.instituicao_id
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label, "pt-BR"))
+  };
+}
+
+async function loadScopedStudentDocumentUnitOptions(unitIds: string[]) {
+  const visibleUnitIds = uniqueStringValues(unitIds);
+
+  if (!visibleUnitIds.length) {
+    return [] as StudentDocumentDirectoryUnitOption[];
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const { data: unitRowsData, error: unitRowsError } = await adminClient
+    .from("unidades")
+    .select("*")
+    .in("id", visibleUnitIds)
+    .order("nome");
+
+  if (unitRowsError) {
+    throw new Error(
+      "NÃ£o foi possÃ­vel carregar as unidades visÃ­veis para o contexto documental atual."
+    );
+  }
+
+  return ((unitRowsData ?? []) as UnitRow[])
     .map((unit) => ({
       value: unit.id,
-      label: unit.nome
+      label: unit.nome,
+      institutionId: unit.instituicao_id
     }))
     .sort((left, right) => left.label.localeCompare(right.label, "pt-BR"));
+}
+
+function normalizeStudentDocumentInstitutionalFilters(input: {
+  institutions: StudentDocumentDirectoryInstitutionOption[];
+  units: StudentDocumentDirectoryUnitOption[];
+  institutionId?: string | null;
+  unitId?: string | null;
+}) {
+  const requestedInstitutionId = (input.institutionId ?? "").trim();
+  const validInstitutionId = input.institutions.some(
+    (institution) => institution.id === requestedInstitutionId
+  )
+    ? requestedInstitutionId
+    : "";
+
+  const requestedUnitId = (input.unitId ?? "").trim();
+  const requestedUnit = input.units.find((unit) => unit.value === requestedUnitId) ?? null;
+  const validUnitId =
+    requestedUnit &&
+    (!validInstitutionId || requestedUnit.institutionId === validInstitutionId)
+      ? requestedUnitId
+      : "";
+
+  const visibleUnitIds = validInstitutionId
+    ? input.units
+        .filter((unit) => unit.institutionId === validInstitutionId)
+        .map((unit) => unit.value)
+    : [];
+
+  return {
+    institutionId: validInstitutionId,
+    unitId: validUnitId,
+    visibleUnitIds
+  };
 }
 
 function buildStudentNotificationCenter(
@@ -1039,8 +1682,14 @@ function buildDirectoryEntries(
         (document) => document.type === "tce" && document.active
       );
       const studentNotifications = notificationsByStudent.get(user.id) ?? [];
-      const unit = user.unidade_id
-        ? context.units.find((row) => row.id === user.unidade_id) ?? null
+      const resolvedUnitId =
+        user.unidade_id ??
+        currentVaccination?.unitId ??
+        currentTces[0]?.unitId ??
+        studentDocuments[0]?.unitId ??
+        null;
+      const unit = resolvedUnitId
+        ? context.units.find((row) => row.id === resolvedUnitId) ?? null
         : null;
 
       return {
@@ -1048,7 +1697,8 @@ function buildDirectoryEntries(
         studentName: user.nome_completo,
         registration: student?.matricula ?? "Sem matrícula",
         email: user.email,
-        unitId: user.unidade_id,
+        institutionId: unit?.instituicao_id ?? null,
+        unitId: resolvedUnitId,
         unitName: unit?.nome ?? null,
         active: user.ativo,
         areaIds: buildAreaIdsForStudent({
@@ -1124,14 +1774,19 @@ async function loadStudentUsersByScope(input: {
   currentUser: SessionUser;
   viewerRole: InstitutionalViewerRole;
   unitIdFilter?: string | null;
-}) {
+  unitIdsFilter?: string[] | null;
+  resolvedScope?: Awaited<ReturnType<typeof resolveScopedDataAccess>> | null;
+}): Promise<StudentDocumentStudentScope> {
   const supabase = await createSupabaseServerClient();
   const adminClient = createSupabaseAdminClient();
   const readClient =
     input.viewerRole === "coordenador_master" ? adminClient : supabase;
 
   if (input.viewerRole === "professor") {
-    return await loadProfessorStudentIds(input.currentUser);
+    return {
+      studentIds: await loadProfessorStudentIds(input.currentUser),
+      scope: null
+    };
   }
 
   const { data: studentProfileRowData, error: studentProfileError } = await readClient
@@ -1144,15 +1799,86 @@ async function loadStudentUsersByScope(input: {
     throw new Error("O perfil de aluno não está configurado para esta consulta.");
   }
 
+  if (input.viewerRole === "coordenador") {
+    const scope =
+      input.resolvedScope ??
+      (await resolveScopedDataAccess(input.currentUser, {
+        supabase
+      }));
+
+    if (scope.scopeKind === "none") {
+      return {
+        studentIds: [],
+        scope
+      };
+    }
+
+    if (scope.restrictToCourse) {
+      let studentQuery = readClient
+        .from("alunos")
+        .select("usuario_id, unidade_id")
+        .eq("curso_id", scope.cursoId ?? "__no_course__");
+
+      if (input.unitIdFilter) {
+        studentQuery = studentQuery.eq("unidade_id", input.unitIdFilter);
+      } else if (scope.offerIds.length > 0) {
+        studentQuery = studentQuery.in("oferta_curso_unidade_id", scope.offerIds);
+      } else if (scope.unitIds.length > 0) {
+        studentQuery = studentQuery.in("unidade_id", scope.unitIds);
+      }
+
+      const { data: scopedStudentRows, error: scopedStudentRowsError } =
+        await studentQuery;
+
+      if (scopedStudentRowsError) {
+        throw new Error(
+          "NÃ£o foi possÃ­vel consultar os alunos do curso visÃ­vel neste contexto."
+        );
+      }
+
+      return {
+        studentIds: ((scopedStudentRows ?? []) as Array<{ usuario_id: string }>).map(
+          (row) => row.usuario_id
+        ),
+        scope
+      };
+    }
+
+    let coordinatorQuery = readClient
+      .from("usuarios")
+      .select("id")
+      .eq("perfil_id", (studentProfileRowData as { id: number }).id);
+
+    if (scope.unitIds.length > 0) {
+      coordinatorQuery = coordinatorQuery.in("unidade_id", scope.unitIds);
+    } else {
+      coordinatorQuery = coordinatorQuery.eq("unidade_id", "__no_unit__");
+    }
+
+    const { data: coordinatorStudentRows, error: coordinatorStudentRowsError } =
+      await coordinatorQuery;
+
+    if (coordinatorStudentRowsError) {
+      throw new Error("NÃ£o foi possÃ­vel consultar os alunos disponÃ­veis neste escopo.");
+    }
+
+    return {
+      studentIds: ((coordinatorStudentRows ?? []) as Array<{ id: string }>).map(
+        (row) => row.id
+      ),
+      scope
+    };
+  }
+
   let query = readClient
     .from("usuarios")
     .select("id")
     .eq("perfil_id", (studentProfileRowData as { id: number }).id);
 
-  if (input.viewerRole === "coordenador") {
-    query = query.eq("unidade_id", input.currentUser.unitId ?? "");
-  } else if (input.unitIdFilter) {
+  if (input.unitIdFilter) {
     query = query.eq("unidade_id", input.unitIdFilter);
+  } else if (input.unitIdsFilter?.length) {
+    query = query.in("unidade_id", input.unitIdsFilter);
   }
 
   const { data: studentUserRows, error: studentUserError } = await query;
@@ -1161,7 +1887,12 @@ async function loadStudentUsersByScope(input: {
     throw new Error("Não foi possível consultar os alunos disponíveis neste escopo.");
   }
 
-  return ((studentUserRows ?? []) as Array<{ id: string }>).map((row) => row.id);
+  return {
+    studentIds: ((studentUserRows ?? []) as Array<{ id: string }>).map(
+      (row) => row.id
+    ),
+    scope: null
+  };
 }
 
 export async function getStudentDocumentUnreadNotificationCount(
@@ -1233,23 +1964,67 @@ export async function getStudentDocumentDirectoryPageData(input: {
   currentUser: SessionUser;
   viewerRole: InstitutionalViewerRole;
   search?: string | null;
+  institutionId?: string | null;
   areaId?: string | null;
   status?: string | null;
   unitId?: string | null;
 }) {
   const useAdminRead = input.viewerRole === "coordenador_master";
-  const rawStudentIds = await loadStudentUsersByScope({
+  const coordinatorSupabase =
+    input.viewerRole === "coordenador"
+      ? await createSupabaseServerClient()
+      : null;
+  const coordinatorScope =
+    input.viewerRole === "coordenador" && coordinatorSupabase
+      ? await resolveScopedDataAccess(input.currentUser, {
+          supabase: coordinatorSupabase
+        })
+      : null;
+  const institutionalFilterOptions =
+    input.viewerRole === "coordenador_master"
+      ? await loadMasterStudentDocumentInstitutionalFilterOptions()
+      : input.viewerRole === "coordenador" &&
+          coordinatorScope?.scopeKind === "course_manager"
+        ? {
+            institutions: [] as StudentDocumentDirectoryInstitutionOption[],
+            units: await loadScopedStudentDocumentUnitOptions(coordinatorScope.unitIds)
+          }
+      : {
+          institutions: [] as StudentDocumentDirectoryInstitutionOption[],
+          units: [] as StudentDocumentDirectoryUnitOption[]
+        };
+  const normalizedInstitutionalFilters = normalizeStudentDocumentInstitutionalFilters({
+    institutions: institutionalFilterOptions.institutions,
+    units: institutionalFilterOptions.units,
+    institutionId: input.institutionId ?? null,
+    unitId: input.unitId ?? null
+  });
+  const { studentIds, scope } = await loadStudentUsersByScope({
     currentUser: input.currentUser,
     viewerRole: input.viewerRole,
-    unitIdFilter: input.unitId ?? null
+    unitIdFilter: normalizedInstitutionalFilters.unitId || null,
+    unitIdsFilter:
+      input.viewerRole === "coordenador_master" &&
+      !normalizedInstitutionalFilters.unitId &&
+      normalizedInstitutionalFilters.visibleUnitIds.length > 0
+        ? normalizedInstitutionalFilters.visibleUnitIds
+        : input.viewerRole === "coordenador" &&
+            coordinatorScope?.scopeKind === "course_manager" &&
+            !normalizedInstitutionalFilters.unitId &&
+            coordinatorScope.unitIds.length > 0
+          ? coordinatorScope.unitIds
+          : null,
+    resolvedScope: coordinatorScope
   });
-  const context = await loadStudentDocumentScopeByStudentIds(rawStudentIds, {
-    useAdminRead
+  const context = await loadStudentDocumentScopeByStudentIds(studentIds, {
+    useAdminRead,
+    scope
   });
   const entries = buildDirectoryEntries(context, input.viewerRole);
   const searchTerm = normalizeSearchTerm(input.search);
   const areaId = (input.areaId ?? "").trim();
-  const unitId = (input.unitId ?? "").trim();
+  const institutionId = normalizedInstitutionalFilters.institutionId;
+  const unitId = normalizedInstitutionalFilters.unitId;
   const requestedStatus = (input.status ?? "todos").trim() as DirectoryStatusFilter;
   const statusFilter = DIRECTORY_STATUS_FILTERS.some(
     (option) => option.value === requestedStatus
@@ -1263,13 +2038,16 @@ export async function getStudentDocumentDirectoryPageData(input: {
       `${entry.studentName} ${entry.registration} ${entry.email} ${entry.unitName ?? ""}`
         .toLowerCase()
         .includes(searchTerm);
+    const matchesInstitution =
+      !institutionId || entry.institutionId === institutionId;
+    const matchesUnit = !unitId || entry.unitId === unitId;
     const matchesArea =
       !areaId ||
       entry.areaIds.includes(areaId) ||
       entry.currentTces.some((document) => document.areaId === areaId);
     const matchesStatus = matchesDirectoryStatusFilter(entry, statusFilter);
 
-    return matchesSearch && matchesArea && matchesStatus;
+    return matchesSearch && matchesInstitution && matchesUnit && matchesArea && matchesStatus;
   });
 
   const areaOptions = context.areas
@@ -1281,11 +2059,6 @@ export async function getStudentDocumentDirectoryPageData(input: {
       } satisfies StudentDocumentDirectoryFilterOption;
     })
     .sort((left, right) => left.label.localeCompare(right.label, "pt-BR"));
-
-  const unitOptions =
-    input.viewerRole === "coordenador_master"
-      ? await loadMasterStudentDocumentUnitOptions()
-      : [];
 
   return {
     viewerRole: input.viewerRole,
@@ -1303,12 +2076,14 @@ export async function getStudentDocumentDirectoryPageData(input: {
           : "Visão global multiunidade para acompanhamento documental institucional.",
     filters: {
       search: input.search?.trim() ?? "",
+      institutionId,
       areaId,
       status: statusFilter,
       unitId
     },
+    institutionOptions: institutionalFilterOptions.institutions,
     areaOptions,
-    unitOptions,
+    unitOptions: institutionalFilterOptions.units,
     statusOptions: buildDirectoryStatusOptions(),
     metrics: {
       totalStudents: filteredEntries.length,
@@ -1327,8 +2102,18 @@ export async function getStudentDocumentDetailPageData(input: {
   viewerRole: InstitutionalViewerRole;
   studentId: string;
 }) {
+  const { studentIds, scope } = await loadStudentUsersByScope({
+    currentUser: input.currentUser,
+    viewerRole: input.viewerRole
+  });
+
+  if (!studentIds.includes(input.studentId)) {
+    return null;
+  }
+
   const context = await loadStudentDocumentScopeByStudentIds([input.studentId], {
-    useAdminRead: input.viewerRole === "coordenador_master"
+    useAdminRead: input.viewerRole === "coordenador_master",
+    scope
   });
   const maps = buildStudentDocumentSummaryMaps(context);
   const studentUser = context.users.find((row) => row.id === input.studentId) ?? null;
@@ -1369,7 +2154,7 @@ export async function getStudentDocumentDetailPageData(input: {
 }
 
 export async function getAccessibleStudentDocumentForDownload(
-  _currentUser: SessionUser,
+  currentUser: SessionUser,
   documentId: string
 ) {
   const supabase = await createSupabaseServerClient();
@@ -1383,9 +2168,37 @@ export async function getAccessibleStudentDocumentForDownload(
     return null;
   }
 
+  const documentRow = documentRowData as DocumentRow;
+
+  if (currentUser.role === "aluno") {
+    if (documentRow.aluno_id !== currentUser.id) {
+      return null;
+    }
+  } else {
+    const viewerRole =
+      currentUser.role === "professor" ||
+      currentUser.role === "coordenador" ||
+      currentUser.role === "coordenador_master"
+        ? currentUser.role
+        : null;
+
+    if (!viewerRole) {
+      return null;
+    }
+
+    const { studentIds } = await loadStudentUsersByScope({
+      currentUser,
+      viewerRole
+    });
+
+    if (!studentIds.includes(documentRow.aluno_id)) {
+      return null;
+    }
+  }
+
   const downloadUrl = await buildStudentDocumentDownloadUrl({
-    storagePath: (documentRowData as DocumentRow).storage_path,
-    fileName: (documentRowData as DocumentRow).arquivo_nome
+    storagePath: documentRow.storage_path,
+    fileName: documentRow.arquivo_nome
   });
 
   if (!downloadUrl) {
@@ -1394,6 +2207,6 @@ export async function getAccessibleStudentDocumentForDownload(
 
   return {
     url: downloadUrl,
-    fileName: (documentRowData as DocumentRow).arquivo_nome
+    fileName: documentRow.arquivo_nome
   };
 }

@@ -12,6 +12,7 @@ import { SectionCard } from "@/components/common/section-card";
 import { ConfirmActionForm } from "@/components/forms/confirm-action-form";
 import { StudentProfileForm } from "@/components/forms/student-profile-form";
 import { StudentStageManagementForm } from "@/components/forms/student-stage-management-form";
+import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/session";
 import { getStudentManagementDetailData } from "@/services/management";
 
@@ -25,6 +26,27 @@ export default async function StudentManagementDetailPage(props: {
   }>;
 }) {
   const currentUser = await requireRole(["coordenador"]);
+
+  if (getActiveMasterCourseContext(currentUser)) {
+    return (
+      <div className="stack">
+        <section className="hero-card">
+          <p className="eyebrow">Gestão do aluno</p>
+          <h1>Acesso somente para consulta</h1>
+          <p>
+            O Gestor do curso acompanha cadastros por unidade, mas não edita alunos nem vínculos
+            operacionais nesta rota detalhada.
+          </p>
+          <div className="actions-row">
+            <Link className="button button-secondary" href="/gestao/alunos">
+              Voltar para cadastros
+            </Link>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   const { studentId } = await props.params;
   const searchParams = (await props.searchParams) ?? {};
   const { studentData, emptyState } = await getStudentManagementDetailData(

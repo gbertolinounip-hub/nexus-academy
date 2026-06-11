@@ -1,6 +1,7 @@
 import type { PropsWithChildren } from "react";
 import Link from "next/link";
 import type { Route } from "next";
+import { ContextSwitcher } from "@/components/auth/context-switcher";
 import { BrandLockup } from "@/components/common/brand-lockup";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { SignOutButton } from "@/components/forms/sign-out-button";
@@ -34,13 +35,17 @@ export function DashboardShell({
           <BrandLockup
             compact
             eyebrow="Plataforma institucional"
-            subtitle={"Desempenho e gest\u00e3o de est\u00e1gios"}
+            subtitle="Desempenho e gestão de estágios"
           />
         </div>
 
-        <div className="sidebar-user">
-          <strong>{currentUser.name}</strong>
-          <span>{getRoleDescription(currentUser.role)}</span>
+        <div className="sidebar-account-stack">
+          <div className="sidebar-user">
+            <strong>{currentUser.name}</strong>
+            <span>{getRoleDescription(currentUser)}</span>
+          </div>
+
+          <ContextSwitcher currentUser={currentUser} />
         </div>
 
         <SidebarNav
@@ -58,20 +63,17 @@ export function DashboardShell({
         >
           {showSidebarHelperContent ? (
             <p>
-              A navega\u00e7\u00e3o agora \u00e9 filtrada pelo perfil autenticado, e as
-              rotas s\u00e3o protegidas no servidor.
+              A navegação agora é filtrada pelo perfil autenticado, e as rotas são protegidas no
+              servidor.
             </p>
           ) : null}
           {showSidebarHelperContent ? (
             <Link href="/redirecionar" className="button button-secondary">
-              Ir para minha \u00e1rea
+              Ir para minha área
             </Link>
           ) : null}
           <div className="sidebar-footer-actions">
-            <Link
-              href={"/conta/seguranca" as Route}
-              className="button button-secondary"
-            >
+            <Link href={"/conta/seguranca" as Route} className="button button-secondary">
               Alterar senha
             </Link>
             <SignOutButton />
@@ -88,15 +90,13 @@ export function DashboardShell({
 
             <div className="student-password-notice-copy">
               <div className="student-password-notice-meta">
-                <span className="student-password-notice-tag">
-                  Atenção de segurança
-                </span>
+                <span className="student-password-notice-tag">Atenção de segurança</span>
                 <p className="eyebrow">Segurança da conta</p>
               </div>
               <h2>Bem-vindo ao Nexus Academy!</h2>
               <p>
-                Seu acesso foi criado com uma senha padrão. Recomendamos alterar sua
-                senha agora para manter sua conta mais segura.
+                Seu acesso foi criado com uma senha padrão. Recomendamos alterar sua senha agora
+                para manter sua conta mais segura.
               </p>
             </div>
 

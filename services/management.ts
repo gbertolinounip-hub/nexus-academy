@@ -1,4 +1,13 @@
 ﻿import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  loadScopedOperationalGraph,
+  resolveScopedDataAccess,
+  type ResolvedSessionDataScope
+} from "@/lib/auth/data-scope";
+import {
+  buildStageAreaBlocks,
+  loadVisibleStageAreaCatalog
+} from "@/services/stage-areas";
 import type { Database } from "@/types/database";
 import type { SessionUser } from "@/types/domain";
 
@@ -6,6 +15,8 @@ type UserRow = Database["public"]["Tables"]["usuarios"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["perfis"]["Row"];
 type StudentRow = Database["public"]["Tables"]["alunos"]["Row"];
 type ProfessorRow = Database["public"]["Tables"]["professores"]["Row"];
+type UnitRow = Database["public"]["Tables"]["unidades"]["Row"];
+type OfferRow = Database["public"]["Tables"]["ofertas_curso_unidade"]["Row"];
 type SemesterRow = Database["public"]["Tables"]["semestres"]["Row"];
 type BlockRow = Database["public"]["Tables"]["blocos_estagio"]["Row"];
 type AreaRow = Database["public"]["Tables"]["areas_estagio"]["Row"];
@@ -13,6 +24,225 @@ type ClassRow = Database["public"]["Tables"]["turmas"]["Row"];
 type EnrollmentRow = Database["public"]["Tables"]["matriculas_turma"]["Row"];
 type ProfessorAreaRow = Database["public"]["Tables"]["professor_areas_estagio"]["Row"];
 type ProfessorLinkRow = Database["public"]["Tables"]["vinculos_professor_aluno"]["Row"];
+type UserContextRow = Database["public"]["Tables"]["usuarios_papeis_contexto"]["Row"];
+type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
+
+function uniqueStringValues(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
+}
+
+interface ScopedProfessorRoster {
+  professorUsers: UserRow[];
+  professorRows: ProfessorRow[];
+  professorAreaRows: ProfessorAreaRow[];
+}
+
+async function resolveSafeLegacyProfessorUnitIds(input: {
+  supabase: SupabaseServerClient;
+  scope: ResolvedSessionDataScope;
+  selectedUnitId?: UnitRow["id"] | null;
+}) {
+  const requestedUnitIds = input.selectedUnitId
+    ? [input.selectedUnitId]
+    : input.scope.unitIds;
+
+  if (!requestedUnitIds.length) {
+    return [] as UnitRow["id"][];
+  }
+
+  if (input.scope.scopeKind !== "course_manager") {
+    return requestedUnitIds;
+  }
+
+  if (!input.scope.instituicaoId || !input.scope.cursoId) {
+    return [] as UnitRow["id"][];
+  }
+
+  const { data: scopedOfferData, error: scopedOfferError } = await input.supabase
+    .from("ofertas_curso_unidade")
+    .select("unidade_id, curso_id")
+    .eq("instituicao_id", input.scope.instituicaoId)
+    .in("unidade_id", requestedUnitIds);
+
+  if (scopedOfferError) {
+    throw new Error(
+      "Houve um problema ao validar as unidades legadas seguras para os professores do curso."
+    );
+  }
+
+  const courseIdsByUnit = new Map<UnitRow["id"], Set<string>>();
+
+  for (const offerRow of (scopedOfferData ?? []) as Array<
+    Pick<OfferRow, "unidade_id" | "curso_id">
+  >) {
+    const unitCourseIds = courseIdsByUnit.get(offerRow.unidade_id) ?? new Set<string>();
+    unitCourseIds.add(offerRow.curso_id);
+    courseIdsByUnit.set(offerRow.unidade_id, unitCourseIds);
+  }
+
+  return requestedUnitIds.filter((unitId) => {
+    const visibleCourseIds = courseIdsByUnit.get(unitId) ?? new Set<string>();
+    return visibleCourseIds.size === 1 && visibleCourseIds.has(input.scope.cursoId!);
+  });
+}
+
+async function loadScopedProfessorRoster(input: {
+  supabase: SupabaseServerClient;
+  scope: ResolvedSessionDataScope;
+  professorProfileId: ProfileRow["id"] | undefined;
+  professorLinks: ProfessorLinkRow[];
+  offersById: Map<string, OfferRow>;
+  selectedUnitId?: UnitRow["id"] | null;
+  currentUnitId?: UnitRow["id"] | null;
+}) {
+  if (!input.professorProfileId) {
+    return {
+      professorUsers: [],
+      professorRows: [],
+      professorAreaRows: []
+    } satisfies ScopedProfessorRoster;
+  }
+
+  if (input.scope.restrictToCourse) {
+    const safeLegacyUnitIds = await resolveSafeLegacyProfessorUnitIds({
+      supabase: input.supabase,
+      scope: input.scope,
+      selectedUnitId: input.selectedUnitId
+    });
+
+    const [contextRowsResult, fallbackUnitUsersResult] = await Promise.all([
+      input.scope.instituicaoId && input.scope.cursoId
+        ? input.supabase
+            .from("usuarios_papeis_contexto")
+            .select("*")
+            .eq("perfil_id", input.professorProfileId)
+            .eq("instituicao_id", input.scope.instituicaoId)
+            .eq("curso_id", input.scope.cursoId)
+            .eq("ativo", true)
+        : Promise.resolve({ data: [], error: null }),
+      safeLegacyUnitIds.length
+        ? input.supabase
+            .from("usuarios")
+            .select("*")
+            .eq("perfil_id", input.professorProfileId)
+            .in("unidade_id", safeLegacyUnitIds)
+        : Promise.resolve({ data: [], error: null })
+    ]);
+
+    if (contextRowsResult.error || fallbackUnitUsersResult.error) {
+      throw new Error(
+        "Houve um problema ao consultar os vínculos institucionais dos professores."
+      );
+    }
+
+    const contextRows = ((contextRowsResult.data ?? []) as UserContextRow[]).filter(
+      (contextRow) => {
+        if (contextRow.oferta_curso_unidade_id) {
+          if (!input.scope.offerIds.includes(contextRow.oferta_curso_unidade_id)) {
+            return false;
+          }
+
+          if (input.selectedUnitId) {
+            const offerRow =
+              input.offersById.get(contextRow.oferta_curso_unidade_id) ?? null;
+            return offerRow?.unidade_id === input.selectedUnitId;
+          }
+
+          return true;
+        }
+
+        return !input.selectedUnitId;
+      }
+    );
+    const fallbackUnitUsers = (fallbackUnitUsersResult.data ?? []) as UserRow[];
+    const professorIds = uniqueStringValues([
+      ...input.professorLinks.map((link) => link.professor_id),
+      ...contextRows.map((contextRow) => contextRow.usuario_id),
+      ...fallbackUnitUsers.map((user) => user.id)
+    ]);
+    const [professorUsersResult, professorRowsResult, professorAreaRowsResult] =
+      await Promise.all([
+        professorIds.length
+          ? input.supabase.from("usuarios").select("*").in("id", professorIds)
+          : Promise.resolve({ data: [], error: null }),
+        professorIds.length
+          ? input.supabase.from("professores").select("*").in("usuario_id", professorIds)
+          : Promise.resolve({ data: [], error: null }),
+        professorIds.length
+          ? input.supabase
+              .from("professor_areas_estagio")
+              .select("*")
+              .in("professor_id", professorIds)
+              .eq("ativo", true)
+          : Promise.resolve({ data: [], error: null })
+      ]);
+
+    if (
+      professorUsersResult.error ||
+      professorRowsResult.error ||
+      professorAreaRowsResult.error
+    ) {
+      throw new Error(
+        "Houve um problema ao consultar professores e áreas vinculadas ao contexto visível."
+      );
+    }
+
+    return {
+      professorUsers: ((professorUsersResult.data ?? []) as UserRow[]).filter(
+        (user) => user.perfil_id === input.professorProfileId
+      ),
+      professorRows: (professorRowsResult.data ?? []) as ProfessorRow[],
+      professorAreaRows: (professorAreaRowsResult.data ?? []) as ProfessorAreaRow[]
+    } satisfies ScopedProfessorRoster;
+  }
+
+  const currentUnitId = input.currentUnitId ?? null;
+
+  if (!currentUnitId) {
+    return {
+      professorUsers: [],
+      professorRows: [],
+      professorAreaRows: []
+    } satisfies ScopedProfessorRoster;
+  }
+
+  const [unitUsersResult, professorRowsResult] = await Promise.all([
+    input.supabase.from("usuarios").select("*").eq("unidade_id", currentUnitId),
+    input.supabase.from("professores").select("*")
+  ]);
+
+  if (unitUsersResult.error || professorRowsResult.error) {
+    throw new Error(
+      "Houve um problema ao consultar os professores vinculados à unidade ativa."
+    );
+  }
+
+  const professorUsers = ((unitUsersResult.data ?? []) as UserRow[]).filter(
+    (user) => user.perfil_id === input.professorProfileId
+  );
+  const professorUserIds = professorUsers.map((user) => user.id);
+  const scopedProfessorAreaRowsResult = professorUserIds.length
+    ? await input.supabase
+        .from("professor_areas_estagio")
+        .select("*")
+        .in("professor_id", professorUserIds)
+        .eq("ativo", true)
+    : { data: [], error: null };
+
+  if (scopedProfessorAreaRowsResult.error) {
+    throw new Error(
+      "Houve um problema ao consultar as áreas vinculadas aos supervisores da unidade."
+    );
+  }
+
+  return {
+    professorUsers,
+    professorRows: ((professorRowsResult.data ?? []) as ProfessorRow[]).filter((professor) =>
+      professorUserIds.includes(professor.usuario_id)
+    ),
+    professorAreaRows: (scopedProfessorAreaRowsResult.data ?? []) as ProfessorAreaRow[]
+  } satisfies ScopedProfessorRoster;
+}
 
 export interface ManagementSemesterOption {
   id: string;
@@ -49,10 +279,19 @@ export interface ManagementProfessorOption {
   label: string;
 }
 
+export interface ManagementUnitOption {
+  id: string;
+  name: string;
+  label: string;
+}
+
 export interface ManagementStudentAssignment {
   enrollmentId: string;
   semesterId: string;
   semesterCode: string;
+  offerId: string | null;
+  unitId: string | null;
+  unitName: string | null;
   className: string;
   areaName: string;
   blockName: string;
@@ -66,6 +305,8 @@ export interface ManagementStudentListItem {
   registration: string;
   cellphone: string | null;
   email: string;
+  unitId: string | null;
+  unitName: string | null;
   isActive: boolean;
   assignments: ManagementStudentAssignment[];
 }
@@ -75,6 +316,8 @@ export interface ManagementProfessorListItem {
   name: string;
   email: string;
   functional: string | null;
+  unitId: string | null;
+  unitName: string | null;
   isActive: boolean;
   areas: string[];
 }
@@ -83,6 +326,8 @@ export interface ManagementSecretaryListItem {
   id: string;
   name: string;
   email: string;
+  unitId: string | null;
+  unitName: string | null;
   isActive: boolean;
 }
 
@@ -95,6 +340,9 @@ export interface ManagementPageData {
   semesters: ManagementSemesterOption[];
   areaBlocks: ManagementAreaBlock[];
   professorOptions: ManagementProfessorOption[];
+  isCourseManager: boolean;
+  selectedUnitId: string | null;
+  unitOptions: ManagementUnitOption[];
   students: ManagementStudentListItem[];
   professors: ManagementProfessorListItem[];
   secretaries: ManagementSecretaryListItem[];
@@ -190,133 +438,85 @@ function getRequiredManagementUnitId(currentUser: SessionUser) {
 }
 
 export async function getCoordinatorManagementPageData(
-  currentUser: SessionUser
-): Promise<ManagementPageLoadResult> {
-  const currentUnitId = getRequiredManagementUnitId(currentUser);
-
-  if (!currentUnitId) {
-    return buildEmptyState(
-      "Unidade operacional não identificada",
-      "O coordenador autenticado precisa estar vinculado a uma unidade para acessar a gestão acadêmica."
-    );
+  currentUser: SessionUser,
+  filters?: {
+    unitId?: string | null;
   }
-
+): Promise<ManagementPageLoadResult> {
   const supabase = await createSupabaseServerClient();
-
-  const [semesterRowsResult, blockRowsResult, areaRowsResult, profileRowsResult, unitUsersResult] =
+  const [scopedGraph, blockRowsResult, profileRowsResult] =
     await Promise.all([
-    supabase.from("semestres").select("*").eq("unidade_id", currentUnitId),
-    supabase.from("blocos_estagio").select("*").order("ordem", { ascending: true }),
-    supabase
-      .from("areas_estagio")
-      .select("*")
-      .eq("ativa", true)
-      .order("ordem", { ascending: true }),
-    supabase
-      .from("perfis")
-      .select("*")
-      .in("codigo", ["aluno", "professor", "secretaria"]),
-    supabase.from("usuarios").select("*").eq("unidade_id", currentUnitId)
-  ]);
+      loadScopedOperationalGraph(currentUser, { supabase }),
+      supabase.from("blocos_estagio").select("*").order("ordem", { ascending: true }),
+      supabase
+        .from("perfis")
+        .select("*")
+        .in("codigo", ["aluno", "professor", "secretaria"])
+    ]);
 
-  if (
-    semesterRowsResult.error ||
-    blockRowsResult.error ||
-    areaRowsResult.error ||
-    profileRowsResult.error ||
-    unitUsersResult.error
-  ) {
+  if (blockRowsResult.error || profileRowsResult.error) {
     return buildEmptyState(
       "Não foi possível carregar a gestao academica",
       "Houve um problema ao consultar os dados reais de semestres, áreas, alunos, professores ou vínculos."
     );
   }
 
-  const semesterRows = sortSemesters((semesterRowsResult.data ?? []) as SemesterRow[]);
-  const blockRows = (blockRowsResult.data ?? []) as BlockRow[];
-  const areaRows = (areaRowsResult.data ?? []) as AreaRow[];
-  const profileRows = (profileRowsResult.data ?? []) as ProfileRow[];
-  const unitUsers = (unitUsersResult.data ?? []) as UserRow[];
+  const scope = scopedGraph.scope;
 
-  if (!blockRows.length || !areaRows.length) {
+  if (
+    scope.scopeKind === "none" ||
+    (scope.restrictToCourse && scopedGraph.semesterRows.length === 0 && scope.offerIds.length === 0)
+  ) {
+    return buildEmptyState(
+      "Contexto acadêmico não identificado",
+      "O usuário autenticado precisa estar vinculado a uma oferta, curso ou unidade válida para acessar a gestão acadêmica."
+    );
+  }
+
+  const semesterRows = sortSemesters(scopedGraph.semesterRows);
+  const blockRows = (blockRowsResult.data ?? []) as BlockRow[];
+  const profileRows = (profileRowsResult.data ?? []) as ProfileRow[];
+  const [offerRowsResult, unitRowsResult] = await Promise.all([
+    scope.offerIds.length
+      ? supabase.from("ofertas_curso_unidade").select("*").in("id", scope.offerIds)
+      : Promise.resolve({ data: [], error: null }),
+    scope.unitIds.length
+      ? supabase.from("unidades").select("*").in("id", scope.unitIds).order("nome")
+      : Promise.resolve({ data: [], error: null })
+  ]);
+
+  if (offerRowsResult.error || unitRowsResult.error) {
+    return buildEmptyState(
+      "Não foi possível carregar a gestao academica",
+      "Houve um problema ao consultar as unidades e ofertas visíveis para o contexto atual."
+    );
+  }
+
+  if (!blockRows.length) {
     return buildEmptyState(
       "Estrutura academica incompleta",
-      "Cadastre semestres e aplique o seed das áreas de estagio para liberar o fluxo de cadastro."
+      "Cadastre ao menos os blocos de estágio para liberar o fluxo de cadastro e a organização das áreas supervisionadas."
     );
   }
 
   const profileMap = new Map(profileRows.map((profile) => [profile.codigo, profile.id]));
-  const professorUsers = unitUsers.filter(
-    (user) => user.perfil_id === profileMap.get("professor")
-  );
-  const secretaryUsers = unitUsers.filter(
-    (user) => user.perfil_id === profileMap.get("secretaria")
-  );
-  const studentUsers = unitUsers.filter(
-    (user) => user.perfil_id === profileMap.get("aluno")
-  );
-  const professorUserIds = professorUsers.map((user) => user.id);
-  const studentUserIds = studentUsers.map((user) => user.id);
-  const semesterIds = semesterRows.map((semester) => semester.id);
-
-  const [
-    professorRowsResult,
-    professorAreaRowsResult,
-    studentRowsResult,
-    classRowsResult
-  ] = await Promise.all([
-    professorUserIds.length
-      ? supabase.from("professores").select("*").in("usuario_id", professorUserIds)
-      : Promise.resolve({ data: [], error: null }),
-    professorUserIds.length
-      ? supabase
-          .from("professor_areas_estagio")
-          .select("*")
-          .in("professor_id", professorUserIds)
-          .eq("ativo", true)
-      : Promise.resolve({ data: [], error: null }),
-    studentUserIds.length
-      ? supabase.from("alunos").select("*").in("usuario_id", studentUserIds)
-      : Promise.resolve({ data: [], error: null }),
-    semesterIds.length
-      ? supabase
-          .from("turmas")
-          .select("*")
-          .in("semestre_id", semesterIds)
-          .eq("ativa", true)
-      : Promise.resolve({ data: [], error: null })
-  ]);
-
-  if (
-    professorRowsResult.error ||
-    professorAreaRowsResult.error ||
-    studentRowsResult.error ||
-    classRowsResult.error
-  ) {
-    return buildEmptyState(
-      "Não foi possível carregar a gestao academica",
-      "Houve um problema ao consultar professores, alunos ou turmas da unidade."
-    );
-  }
-
-  const professorRows = (professorRowsResult.data ?? []) as ProfessorRow[];
-  const professorAreaRows = (professorAreaRowsResult.data ?? []) as ProfessorAreaRow[];
-  const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
-  const classRows = (classRowsResult.data ?? []) as ClassRow[];
-  const classIds = classRows.map((classGroup) => classGroup.id);
-
-  const enrollmentRowsResult = classIds.length
-    ? await supabase.from("matriculas_turma").select("*").in("turma_id", classIds)
-    : { data: [], error: null };
-
-  if (enrollmentRowsResult.error) {
-    return buildEmptyState(
-      "Não foi possível carregar a gestao academica",
-      "Houve um problema ao consultar as matrículas da unidade."
-    );
-  }
-
-  const enrollmentRows = (enrollmentRowsResult.data ?? []) as EnrollmentRow[];
+  const offerRows = (offerRowsResult.data ?? []) as OfferRow[];
+  const unitRows = (unitRowsResult.data ?? []) as UnitRow[];
+  const offersById = new Map(offerRows.map((offer) => [offer.id, offer]));
+  const unitsById = new Map(unitRows.map((unit) => [unit.id, unit]));
+  const unitOptions = unitRows
+    .map((unit) => ({
+      id: unit.id,
+      name: unit.nome,
+      label: unit.nome
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label, "pt-BR"));
+  const requestedUnitId = filters?.unitId?.trim() || null;
+  const selectedUnitId = requestedUnitId && unitOptions.some((unit) => unit.id === requestedUnitId)
+    ? requestedUnitId
+    : null;
+  const visibleClassRows = scopedGraph.classRows.filter((classGroup) => classGroup.ativa);
+  const enrollmentRows = scopedGraph.enrollmentRows;
   const enrollmentIds = enrollmentRows.map((enrollment) => enrollment.id);
   const professorLinksResult = enrollmentIds.length
     ? await supabase
@@ -334,29 +534,201 @@ export async function getCoordinatorManagementPageData(
   }
 
   const professorLinks = (professorLinksResult.data ?? []) as ProfessorLinkRow[];
+  let studentUsers: UserRow[] = [];
+  let studentRows: StudentRow[] = [];
+  let professorUsers: UserRow[] = [];
+  let professorRows: ProfessorRow[] = [];
+  let professorAreaRows: ProfessorAreaRow[] = [];
+  let secretaries: ManagementSecretaryListItem[] = [];
+  let currentUnitId: string | null = null;
+  let areaRows: AreaRow[] = [];
+
+  if (scope.restrictToCourse) {
+    const secretaryProfileId = profileMap.get("secretaria");
+    const enrollmentStudentIds = uniqueStringValues(
+      enrollmentRows.map((enrollment) => enrollment.aluno_id)
+    );
+    const studentRowsByCoursePromise = scope.cursoId
+      ? supabase.from("alunos").select("*").eq("curso_id", scope.cursoId)
+      : Promise.resolve({ data: [], error: null });
+    const studentRowsByOfferPromise = scope.offerIds.length
+      ? supabase.from("alunos").select("*").in("oferta_curso_unidade_id", scope.offerIds)
+      : Promise.resolve({ data: [], error: null });
+    const studentRowsByEnrollmentPromise = enrollmentStudentIds.length
+      ? supabase.from("alunos").select("*").in("usuario_id", enrollmentStudentIds)
+      : Promise.resolve({ data: [], error: null });
+    const secretariesResult =
+      secretaryProfileId && scope.unitIds.length
+        ? supabase
+            .from("usuarios")
+            .select("*")
+            .eq("perfil_id", secretaryProfileId)
+            .in("unidade_id", selectedUnitId ? [selectedUnitId] : scope.unitIds)
+        : Promise.resolve({ data: [], error: null });
+
+    const [
+      studentRowsByCourseResult,
+      studentRowsByOfferResult,
+      studentRowsByEnrollmentResult,
+      secretariesUsersResult
+    ] = await Promise.all([
+      studentRowsByCoursePromise,
+      studentRowsByOfferPromise,
+      studentRowsByEnrollmentPromise,
+      secretariesResult
+    ]);
+
+    if (
+      studentRowsByCourseResult.error ||
+      studentRowsByOfferResult.error ||
+      studentRowsByEnrollmentResult.error ||
+      secretariesUsersResult.error
+    ) {
+      return buildEmptyState(
+        "Não foi possível carregar a gestao academica",
+        "Houve um problema ao consultar os alunos do curso visível no contexto atual."
+      );
+    }
+
+    const mergedStudentRows = new Map<string, StudentRow>();
+
+    for (const studentRow of [
+      ...((studentRowsByCourseResult.data ?? []) as StudentRow[]),
+      ...((studentRowsByOfferResult.data ?? []) as StudentRow[]),
+      ...((studentRowsByEnrollmentResult.data ?? []) as StudentRow[])
+    ]) {
+      mergedStudentRows.set(studentRow.usuario_id, studentRow);
+    }
+
+    studentRows = Array.from(mergedStudentRows.values());
+    const studentUserIds = studentRows.map((student) => student.usuario_id);
+    const [studentUsersResult] = await Promise.all([
+      studentUserIds.length
+        ? supabase.from("usuarios").select("*").in("id", studentUserIds)
+        : Promise.resolve({ data: [], error: null })
+    ]);
+
+    if (studentUsersResult.error) {
+      return buildEmptyState(
+        "Não foi possível carregar a gestao academica",
+        "Houve um problema ao consultar professores, alunos ou turmas dentro do curso visível."
+      );
+    }
+
+    studentUsers = (studentUsersResult.data ?? []) as UserRow[];
+    secretaries = ((secretariesUsersResult.data ?? []) as UserRow[])
+      .map((user) => ({
+        id: user.id,
+        name: user.nome_completo,
+        email: user.email,
+        unitId: user.unidade_id ?? null,
+        unitName: user.unidade_id ? unitsById.get(user.unidade_id)?.nome ?? null : null,
+        isActive: user.ativo
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+  } else {
+    const resolvedCurrentUnitId = getRequiredManagementUnitId(currentUser);
+
+    if (!resolvedCurrentUnitId) {
+      return buildEmptyState(
+        "Unidade operacional não identificada",
+        "O coordenador autenticado precisa estar vinculado a uma unidade para acessar a gestão acadêmica."
+      );
+    }
+
+    const { data: unitUsersData, error: unitUsersError } = await supabase
+      .from("usuarios")
+      .select("*")
+      .eq("unidade_id", resolvedCurrentUnitId);
+
+    if (unitUsersError) {
+      return buildEmptyState(
+        "Não foi possível carregar a gestao academica",
+        "Houve um problema ao consultar os usuários reais da unidade."
+      );
+    }
+
+    currentUnitId = resolvedCurrentUnitId;
+    const unitUsers = (unitUsersData ?? []) as UserRow[];
+    const secretaryUsers = unitUsers.filter((user) => user.perfil_id === profileMap.get("secretaria"));
+    studentUsers = unitUsers.filter((user) => user.perfil_id === profileMap.get("aluno"));
+    const studentUserIds = studentUsers.map((user) => user.id);
+    const [studentRowsResult] = await Promise.all([
+      studentUserIds.length
+        ? supabase.from("alunos").select("*").in("usuario_id", studentUserIds)
+        : Promise.resolve({ data: [], error: null })
+    ]);
+
+    if (studentRowsResult.error) {
+      return buildEmptyState(
+        "Não foi possível carregar a gestao academica",
+        "Houve um problema ao consultar professores, alunos ou turmas da unidade."
+      );
+    }
+
+    studentRows = (studentRowsResult.data ?? []) as StudentRow[];
+    secretaries = secretaryUsers
+      .map((user) => ({
+        id: user.id,
+        name: user.nome_completo,
+        email: user.email,
+        unitId: user.unidade_id ?? null,
+        unitName: user.unidade_id ? unitsById.get(user.unidade_id)?.nome ?? null : null,
+        isActive: user.ativo
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+  }
+
+  try {
+    const professorRoster = await loadScopedProfessorRoster({
+      supabase,
+      scope,
+      professorProfileId: profileMap.get("professor"),
+      professorLinks,
+      offersById,
+      selectedUnitId,
+      currentUnitId
+    });
+
+    professorUsers = professorRoster.professorUsers;
+    professorRows = professorRoster.professorRows;
+    professorAreaRows = professorRoster.professorAreaRows;
+  } catch {
+    return buildEmptyState(
+      "Não foi possível carregar a gestao academica",
+      "Houve um problema ao consultar os professores e supervisores visíveis no contexto atual."
+    );
+  }
+
+  try {
+    const visibleStageAreaCatalog = await loadVisibleStageAreaCatalog({
+      supabase,
+      scope,
+      selectedUnitId,
+      offerRows,
+      visibleClassRows,
+      professorAreaRows
+    });
+
+    areaRows = visibleStageAreaCatalog.areaRows;
+  } catch {
+    return buildEmptyState(
+      "Não foi possível carregar a gestao academica",
+      "Houve um problema ao consultar as áreas supervisionadas visíveis no contexto atual."
+    );
+  }
+
   const blockMap = new Map(blockRows.map((block) => [block.id, block]));
   const areaMap = new Map(areaRows.map((área) => [área.id, área]));
   const semesterMap = new Map(semesterRows.map((semester) => [semester.id, semester]));
-  const classMap = new Map(classRows.map((classGroup) => [classGroup.id, classGroup]));
+  const classMap = new Map(visibleClassRows.map((classGroup) => [classGroup.id, classGroup]));
   const professorMap = new Map(professorRows.map((professor) => [professor.usuario_id, professor]));
   const professorUserMap = new Map(professorUsers.map((user) => [user.id, user]));
   const studentMap = new Map(studentRows.map((student) => [student.usuario_id, student]));
-
-  const areaBlocks = blockRows.map((block) => ({
-    id: block.id,
-    code: block.codigo,
-    name: block.nome,
-    areas: areaRows
-      .filter((área) => área.bloco_id === block.id)
-      .map((área) => ({
-        id: área.id,
-        code: área.codigo,
-        name: área.nome,
-        blockId: block.id,
-        blockCode: block.codigo,
-        blockName: block.nome
-      }))
-  }));
+  const areaBlocks = buildStageAreaBlocks({
+    blockRows,
+    areaRows
+  });
 
   const professorOptions = professorUsers
     .filter((user) => user.ativo)
@@ -404,6 +776,19 @@ export async function getCoordinatorManagementPageData(
           }
 
           const semester = semesterMap.get(classGroup.semestre_id);
+          const offerRow =
+            (classGroup.oferta_curso_unidade_id
+              ? offersById.get(classGroup.oferta_curso_unidade_id) ?? null
+              : null) ??
+            (semester?.oferta_curso_unidade_id
+              ? offersById.get(semester.oferta_curso_unidade_id) ?? null
+              : null) ??
+            (student.oferta_curso_unidade_id
+              ? offersById.get(student.oferta_curso_unidade_id) ?? null
+              : null);
+          const unitRow =
+            (offerRow?.unidade_id ? unitsById.get(offerRow.unidade_id) ?? null : null) ??
+            (student.unidade_id ? unitsById.get(student.unidade_id) ?? null : null);
           const área = classGroup.area_estagio_id
             ? areaMap.get(classGroup.area_estagio_id)
             : null;
@@ -427,6 +812,9 @@ export async function getCoordinatorManagementPageData(
             enrollmentId: enrollment.id,
             semesterId: semester.id,
             semesterCode: semester.codigo,
+            offerId: offerRow?.id ?? null,
+            unitId: unitRow?.id ?? student.unidade_id ?? null,
+            unitName: unitRow?.nome ?? null,
             className: classGroup.nome,
             areaName: área?.nome ?? classGroup.area_estagio,
             blockName: block?.nome ?? "Bloco não identificado",
@@ -445,14 +833,36 @@ export async function getCoordinatorManagementPageData(
           return left!.areaName.localeCompare(right!.areaName, "pt-BR");
         }) as ManagementStudentAssignment[];
 
+      const primaryOfferRow = student.oferta_curso_unidade_id
+        ? offersById.get(student.oferta_curso_unidade_id) ?? null
+        : null;
+      const primaryUnitId = primaryOfferRow?.unidade_id ?? student.unidade_id ?? null;
+      const primaryUnitName =
+        (primaryUnitId ? unitsById.get(primaryUnitId)?.nome ?? null : null) ??
+        studentAssignments[0]?.unitName ??
+        null;
+      const visibleAssignments = selectedUnitId
+        ? studentAssignments.filter((assignment) => assignment.unitId === selectedUnitId)
+        : studentAssignments;
+      const matchesSelectedUnit =
+        !selectedUnitId ||
+        primaryUnitId === selectedUnitId ||
+        visibleAssignments.length > 0;
+
+      if (!matchesSelectedUnit) {
+        return null;
+      }
+
       return {
         id: user.id,
         name: student.nome_social ?? user.nome_completo,
         registration: student.matricula,
         cellphone: student.celular,
         email: user.email,
+        unitId: primaryUnitId,
+        unitName: primaryUnitName,
         isActive: user.ativo,
-        assignments: studentAssignments
+        assignments: visibleAssignments
       } satisfies ManagementStudentListItem;
     })
     .filter(Boolean)
@@ -476,21 +886,19 @@ export async function getCoordinatorManagementPageData(
         name: user.nome_completo,
         email: user.email,
         functional: professor.registro_funcional,
+        unitId: user.unidade_id ?? null,
+        unitName: user.unidade_id ? unitsById.get(user.unidade_id)?.nome ?? null : null,
         isActive: user.ativo,
         areas
       } satisfies ManagementProfessorListItem;
     })
-    .filter(Boolean)
-    .sort((left, right) => left!.name.localeCompare(right!.name, "pt-BR")) as ManagementProfessorListItem[];
-
-  const secretaries = secretaryUsers
-    .map((user) => ({
-      id: user.id,
-      name: user.nome_completo,
-      email: user.email,
-      isActive: user.ativo
-    }))
+    .filter((professor): professor is ManagementProfessorListItem => professor !== null)
+    .filter((professor) => !selectedUnitId || professor.unitId === selectedUnitId)
     .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+
+  const filteredSecretaries = selectedUnitId
+    ? secretaries.filter((secretary) => secretary.unitId === selectedUnitId)
+    : secretaries;
 
   return {
     pageData: {
@@ -510,9 +918,12 @@ export async function getCoordinatorManagementPageData(
       })),
       areaBlocks,
       professorOptions,
+      isCourseManager: scope.scopeKind === "course_manager",
+      selectedUnitId,
+      unitOptions,
       students,
       professors,
-      secretaries
+      secretaries: filteredSecretaries
     },
     emptyState: null
   };
@@ -522,50 +933,52 @@ export async function getStudentManagementDetailData(
   currentUser: SessionUser,
   studentId: string
 ): Promise<StudentManagementDetailLoadResult> {
-  const currentUnitId = getRequiredManagementUnitId(currentUser);
+  const supabase = await createSupabaseServerClient();
+  const [scope, scopedGraph, blockRowsResult, profileRowsResult] =
+    await Promise.all([
+      resolveScopedDataAccess(currentUser, { supabase }),
+      loadScopedOperationalGraph(currentUser, { supabase }),
+      supabase.from("blocos_estagio").select("*").order("ordem", { ascending: true }),
+      supabase.from("perfis").select("*").in("codigo", ["aluno", "professor"])
+    ]);
 
-  if (!currentUnitId) {
+  if (blockRowsResult.error || profileRowsResult.error) {
     return {
       studentData: null,
       emptyState: {
-        title: "Unidade operacional não identificada",
+        title: "Não foi possível carregar o aluno",
         description:
-          "O coordenador autenticado precisa estar vinculado a uma unidade para acessar a gestão do aluno."
+          "Houve um problema ao consultar o cadastro permanente e o histórico de estagio deste aluno."
       }
     };
   }
 
-  const supabase = await createSupabaseServerClient();
-
-  const [
-    semesterRowsResult,
-    blockRowsResult,
-    areaRowsResult,
-    profileRowsResult,
-    studentUserResult,
-    studentRowResult
-  ] = await Promise.all([
-    supabase.from("semestres").select("*").eq("unidade_id", currentUnitId),
-    supabase.from("blocos_estagio").select("*").order("ordem", { ascending: true }),
-    supabase.from("areas_estagio").select("*").order("ordem", { ascending: true }),
-    supabase.from("perfis").select("*").in("codigo", ["aluno", "professor"]),
-    supabase
-      .from("usuarios")
-      .select("*")
-      .eq("id", studentId)
-      .eq("unidade_id", currentUnitId)
-      .maybeSingle(),
-    supabase.from("alunos").select("*").eq("usuario_id", studentId).maybeSingle()
-  ]);
-
   if (
-    semesterRowsResult.error ||
-    blockRowsResult.error ||
-    areaRowsResult.error ||
-    profileRowsResult.error ||
-    studentUserResult.error ||
-    studentRowResult.error
+    scope.scopeKind === "none" ||
+    (scope.restrictToCourse && scopedGraph.semesterRows.length === 0 && scope.offerIds.length === 0)
   ) {
+    return {
+      studentData: null,
+      emptyState: {
+        title: "Contexto acadêmico não identificado",
+        description:
+          "O usuário autenticado precisa estar vinculado a uma oferta, curso ou unidade válida para acessar a gestão do aluno."
+      }
+    };
+  }
+
+  const studentUserResult = await supabase
+    .from("usuarios")
+    .select("*")
+    .eq("id", studentId)
+    .maybeSingle();
+  const studentRowResult = await supabase
+    .from("alunos")
+    .select("*")
+    .eq("usuario_id", studentId)
+    .maybeSingle();
+
+  if (studentUserResult.error || studentRowResult.error) {
     return {
       studentData: null,
       emptyState: {
@@ -590,92 +1003,60 @@ export async function getStudentManagementDetailData(
     };
   }
 
-  const semesterRows = sortSemesters((semesterRowsResult.data ?? []) as SemesterRow[]);
+  const canAccessStudent =
+    scope.restrictToCourse
+      ? studentRow.curso_id === scope.cursoId &&
+        (scope.scopeKind === "course_manager" ||
+          scope.unitIds.length === 0 ||
+          scope.unitIds.includes(studentRow.unidade_id ?? ""))
+      : studentUser.unidade_id === getRequiredManagementUnitId(currentUser);
+
+  if (!canAccessStudent) {
+    return {
+      studentData: null,
+      emptyState: {
+        title: "Aluno não encontrado",
+        description:
+          "O cadastro solicitado não pertence ao contexto institucional ativo."
+      }
+    };
+  }
+
+  const semesterRows = sortSemesters(scopedGraph.semesterRows);
   const blockRows = (blockRowsResult.data ?? []) as BlockRow[];
-  const areaRows = (areaRowsResult.data ?? []) as AreaRow[];
   const profileRows = (profileRowsResult.data ?? []) as ProfileRow[];
   const profileMap = new Map(profileRows.map((profile) => [profile.codigo, profile.id]));
   const professorProfileId = profileMap.get("professor");
-  const semesterIds = semesterRows.map((semester) => semester.id);
-
-  const [unitUsersResult, professorRowsResult, classRowsResult] = await Promise.all([
-    supabase.from("usuarios").select("*").eq("unidade_id", currentUnitId),
-    professorProfileId
-      ? supabase.from("professores").select("*")
-      : Promise.resolve({ data: [], error: null }),
-    semesterIds.length
-      ? supabase.from("turmas").select("*").in("semestre_id", semesterIds)
-      : Promise.resolve({ data: [], error: null })
-  ]);
-
-  if (unitUsersResult.error || professorRowsResult.error || classRowsResult.error) {
-    return {
-      studentData: null,
-      emptyState: {
-        title: "Não foi possível carregar o aluno",
-        description:
-          "Houve um problema ao consultar usuários, professores ou turmas da unidade."
-      }
-    };
-  }
-
-  const unitUsers = (unitUsersResult.data ?? []) as UserRow[];
-  const professorUsers = unitUsers.filter((user) => user.perfil_id === professorProfileId);
-  const professorUserIds = professorUsers.map((user) => user.id);
-  const professorRows = ((professorRowsResult.data ?? []) as ProfessorRow[]).filter(
-    (professor) => professorUserIds.includes(professor.usuario_id)
-  );
-  const classRows = (classRowsResult.data ?? []) as ClassRow[];
-  const visibleClassIds = new Set(classRows.map((classGroup) => classGroup.id));
-  const enrollmentRowsResult = await supabase
-    .from("matriculas_turma")
-    .select("*")
-    .eq("aluno_id", studentId);
-
-  if (enrollmentRowsResult.error) {
-    return {
-      studentData: null,
-      emptyState: {
-        title: "Não foi possível carregar o aluno",
-        description:
-          "Houve um problema ao consultar as matrículas operacionais deste aluno."
-      }
-    };
-  }
-
-  const enrollmentRows = ((enrollmentRowsResult.data ?? []) as EnrollmentRow[]).filter(
-    (enrollment) => visibleClassIds.has(enrollment.turma_id)
-  );
-  const professorAreaRowsResult = professorUserIds.length
-    ? await supabase
-        .from("professor_areas_estagio")
-        .select("*")
-        .in("professor_id", professorUserIds)
-        .eq("ativo", true)
+  const offerRowsResult = scope.offerIds.length
+    ? await supabase.from("ofertas_curso_unidade").select("*").in("id", scope.offerIds)
     : { data: [], error: null };
 
-  if (professorAreaRowsResult.error) {
+  if (offerRowsResult.error) {
     return {
       studentData: null,
       emptyState: {
         title: "Não foi possível carregar o aluno",
         description:
-          "Houve um problema ao consultar as áreas vinculadas aos supervisores da unidade."
+          "Houve um problema ao consultar as ofertas vinculadas ao contexto institucional ativo."
       }
     };
   }
 
-  const professorAreaRows = (professorAreaRowsResult.data ?? []) as ProfessorAreaRow[];
-
-  const enrollmentIds = enrollmentRows.map((enrollment) => enrollment.id);
-  const { data: professorLinksData, error: professorLinksError } = enrollmentIds.length
+  const offerRows = (offerRowsResult.data ?? []) as OfferRow[];
+  const offersById = new Map(offerRows.map((offer) => [offer.id, offer]));
+  const visibleClassRows = scopedGraph.classRows;
+  const visibleClassIds = new Set(visibleClassRows.map((classGroup) => classGroup.id));
+  const enrollmentRows = scopedGraph.enrollmentRows.filter(
+    (enrollment) => enrollment.aluno_id === studentId && visibleClassIds.has(enrollment.turma_id)
+  );
+  const professorLinksResult = enrollmentRows.length
     ? await supabase
         .from("vinculos_professor_aluno")
         .select("*")
-        .in("matricula_turma_id", enrollmentIds)
+        .in("matricula_turma_id", enrollmentRows.map((enrollment) => enrollment.id))
     : { data: [], error: null };
 
-  if (professorLinksError) {
+  if (professorLinksResult.error) {
     return {
       studentData: null,
       emptyState: {
@@ -686,29 +1067,71 @@ export async function getStudentManagementDetailData(
     };
   }
 
-  const professorLinks = (professorLinksData ?? []) as ProfessorLinkRow[];
+  const professorLinks = (professorLinksResult.data ?? []) as ProfessorLinkRow[];
+  const currentUnitId = getRequiredManagementUnitId(currentUser);
+
+  if (!scope.restrictToCourse && !currentUnitId) {
+    return {
+      studentData: null,
+      emptyState: {
+        title: "Unidade operacional não identificada",
+        description:
+          "O usuário autenticado precisa estar vinculado a uma unidade para acessar a gestão detalhada do aluno."
+      }
+    };
+  }
+
+  let professorUsers: UserRow[] = [];
+  let professorRows: ProfessorRow[] = [];
+  let professorAreaRows: ProfessorAreaRow[] = [];
+  let areaRows: AreaRow[] = [];
+
+  try {
+    const professorRoster = await loadScopedProfessorRoster({
+      supabase,
+      scope,
+      professorProfileId,
+      professorLinks,
+      offersById,
+      currentUnitId
+    });
+
+    professorUsers = professorRoster.professorUsers;
+    professorRows = professorRoster.professorRows;
+    professorAreaRows = professorRoster.professorAreaRows;
+
+    const visibleStageAreaCatalog = await loadVisibleStageAreaCatalog({
+      supabase,
+      scope,
+      offerRows,
+      visibleClassRows,
+      professorAreaRows
+    });
+
+    areaRows = visibleStageAreaCatalog.areaRows;
+  } catch (error) {
+    return {
+      studentData: null,
+      emptyState: {
+        title: "Não foi possível carregar o aluno",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Houve um problema ao consultar os professores e supervisores disponíveis."
+      }
+    };
+  }
+
   const blockMap = new Map(blockRows.map((block) => [block.id, block]));
   const areaMap = new Map(areaRows.map((área) => [área.id, área]));
   const semesterMap = new Map(semesterRows.map((semester) => [semester.id, semester]));
-  const classMap = new Map(classRows.map((classGroup) => [classGroup.id, classGroup]));
+  const classMap = new Map(visibleClassRows.map((classGroup) => [classGroup.id, classGroup]));
   const professorMap = new Map(professorRows.map((professor) => [professor.usuario_id, professor]));
   const professorUserMap = new Map(professorUsers.map((user) => [user.id, user]));
-
-  const areaBlocks = blockRows.map((block) => ({
-    id: block.id,
-    code: block.codigo,
-    name: block.nome,
-    areas: areaRows
-      .filter((área) => área.bloco_id === block.id)
-      .map((área) => ({
-        id: área.id,
-        code: área.codigo,
-        name: área.nome,
-        blockId: block.id,
-        blockCode: block.codigo,
-        blockName: block.nome
-      }))
-  }));
+  const areaBlocks = buildStageAreaBlocks({
+    blockRows,
+    areaRows
+  });
 
   const semesters = semesterRows.map((semester) => ({
     id: semester.id,

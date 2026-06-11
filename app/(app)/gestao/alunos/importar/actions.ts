@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/session";
+import { resolveScopedDataAccess } from "@/lib/auth/data-scope";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
@@ -25,6 +27,15 @@ import type {
 
 type UserInsert = Database["public"]["Tables"]["usuarios"]["Insert"];
 type StudentInsert = Database["public"]["Tables"]["alunos"]["Insert"];
+type OfferRow = Database["public"]["Tables"]["ofertas_curso_unidade"]["Row"];
+type CourseRow = Database["public"]["Tables"]["cursos"]["Row"];
+
+interface ResolvedOperationalImportScope {
+  unitId: string;
+  courseId: string | null;
+  courseName: string | null;
+  offerId: string | null;
+}
 
 const MAX_IMPORT_ROWS = 500;
 const MAX_IMPORT_FILE_SIZE_BYTES = 5 * 1024 * 1024;
@@ -50,6 +61,42 @@ function getRequiredCoordinatorUnitId(currentUser: SessionUser) {
   }
 
   return currentUser.unitId;
+}
+
+function assertOperationalImportAllowed(currentUser: SessionUser) {
+  if (getActiveMasterCourseContext(currentUser)) {
+    throw new Error(
+      "O Gestor do curso possui acesso somente de consulta na importacao de alunos. Use o Coordenador Local para importar cadastros operacionais."
+    );
+  }
+}
+
+function resolveCoordinatorOperationalContext(currentUser: SessionUser, unitId: string) {
+  const activeContext =
+    currentUser.contextoAtivo?.ativo && currentUser.contextoAtivo.perfilCodigo === "coordenador"
+      ? currentUser.contextoAtivo
+      : null;
+
+  if (activeContext) {
+    return activeContext;
+  }
+
+  const coordinatorContexts = currentUser.contextosDisponiveis.filter(
+    (context) => context.ativo && context.perfilCodigo === "coordenador"
+  );
+  const matchingUnitContexts = coordinatorContexts.filter(
+    (context) => !context.unidadeId || context.unidadeId === unitId
+  );
+
+  if (matchingUnitContexts.length === 1) {
+    return matchingUnitContexts[0];
+  }
+
+  if (coordinatorContexts.length === 1) {
+    return coordinatorContexts[0];
+  }
+
+  return null;
 }
 
 function readStringField(formData: FormData, name: string) {
@@ -212,6 +259,9 @@ function resolveImportFailureMessage(error: unknown) {
 async function createImportedStudent(input: {
   unitId: string;
   studentProfileId: number;
+  courseId: string | null;
+  courseName: string | null;
+  offerId: string | null;
   row: StudentImportSourceRow;
 }) {
   const supabase = await createSupabaseServerClient();
@@ -273,7 +323,9 @@ async function createImportedStudent(input: {
       unidade_id: input.unitId,
       matricula: input.row.ra,
       celular: input.row.celular,
-      curso: "Fisioterapia"
+      curso: input.courseName ?? "Fisioterapia",
+      curso_id: input.courseId,
+      oferta_curso_unidade_id: input.offerId
     };
 
     const { error: studentInsertError } = await (supabase.from("alunos") as any).insert(
@@ -301,6 +353,58 @@ async function createImportedStudent(input: {
       message: resolveImportFailureMessage(error)
     };
   }
+}
+
+async function resolveOperationalImportScope(
+  currentUser: SessionUser
+): Promise<ResolvedOperationalImportScope> {
+  const unitId = getRequiredCoordinatorUnitId(currentUser);
+  const activeContext = resolveCoordinatorOperationalContext(currentUser, unitId);
+  const supabase = await createSupabaseServerClient();
+  const scope = await resolveScopedDataAccess(currentUser, { supabase });
+  const candidateOfferId =
+    activeContext?.ofertaCursoUnidadeId ??
+    currentUser.ofertaCursoUnidadeId ??
+    (scope.offerIds.length === 1 ? scope.offerIds[0] : null);
+
+  if (!candidateOfferId) {
+    return {
+      unitId,
+      courseId: activeContext?.cursoId ?? currentUser.cursoId ?? null,
+      courseName: activeContext?.cursoNome ?? currentUser.cursoNome ?? null,
+      offerId: null
+    };
+  }
+
+  const { data: offerData } = await supabase
+    .from("ofertas_curso_unidade")
+    .select("id, unidade_id, curso_id")
+    .eq("id", candidateOfferId)
+    .maybeSingle();
+  const offerRow = (offerData ?? null) as Pick<OfferRow, "id" | "unidade_id" | "curso_id"> | null;
+
+  if (!offerRow) {
+    return {
+      unitId,
+      courseId: activeContext?.cursoId ?? currentUser.cursoId ?? null,
+      courseName: activeContext?.cursoNome ?? currentUser.cursoNome ?? null,
+      offerId: null
+    };
+  }
+
+  const { data: courseData } = await supabase
+    .from("cursos")
+    .select("id, nome")
+    .eq("id", offerRow.curso_id)
+    .maybeSingle();
+  const courseRow = (courseData ?? null) as Pick<CourseRow, "id" | "nome"> | null;
+
+  return {
+    unitId: offerRow.unidade_id ?? unitId,
+    courseId: offerRow.curso_id,
+    courseName: courseRow?.nome ?? activeContext?.cursoNome ?? currentUser.cursoNome ?? null,
+    offerId: offerRow.id
+  };
 }
 
 function updatePreviewRowStatus(
@@ -337,7 +441,9 @@ export async function processStudentImportAction(
   formData: FormData
 ): Promise<StudentImportActionState> {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalImportAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
+  const operationalScope = await resolveOperationalImportScope(currentUser);
   const intent = readStringField(formData, "intent") === "import" ? "import" : "preview";
 
   if (intent === "preview") {
@@ -483,8 +589,11 @@ export async function processStudentImportAction(
 
   for (const row of previewState.importableRows) {
     const importResult = await createImportedStudent({
-      unitId: coordinatorUnitId,
+      unitId: operationalScope.unitId,
       studentProfileId: resolvedStudentProfileRow.id,
+      courseId: operationalScope.courseId,
+      courseName: operationalScope.courseName,
+      offerId: operationalScope.offerId,
       row
     });
 
@@ -501,6 +610,7 @@ export async function processStudentImportAction(
     revalidatePath("/coordenador");
     revalidatePath("/relatorios");
     revalidatePath("/auditoria");
+    revalidatePath("/master-curso");
   }
 
   const summary = buildImportSummary(rows);

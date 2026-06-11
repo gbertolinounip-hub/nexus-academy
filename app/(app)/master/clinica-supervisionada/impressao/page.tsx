@@ -9,7 +9,7 @@ import { getClinicalInstitutionalDashboardPageData } from "@/services/clinical-s
 
 export default async function MasterClinicalInstitutionalDashboardPrintPage(props: {
   searchParams?: Promise<{
-    q?: string;
+    institution_id?: string;
     unit_id?: string;
     semester_id?: string;
     area_id?: string;
@@ -25,7 +25,7 @@ export default async function MasterClinicalInstitutionalDashboardPrintPage(prop
   const { pageData, emptyState } = await getClinicalInstitutionalDashboardPageData(
     currentUser,
     {
-      query: searchParams.q ?? null,
+      institutionId: searchParams.institution_id ?? null,
       unitId: searchParams.unit_id ?? null,
       semesterId: searchParams.semester_id ?? null,
       areaId: searchParams.area_id ?? null,

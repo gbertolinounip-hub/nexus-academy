@@ -2,10 +2,31 @@ import Link from "next/link";
 import type { Route } from "next";
 import { SectionCard } from "@/components/common/section-card";
 import { StudentImportForm } from "@/components/forms/student-import-form";
+import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/session";
 
 export default async function StudentImportPage() {
   const currentUser = await requireRole(["coordenador"]);
+
+  if (getActiveMasterCourseContext(currentUser)) {
+    return (
+      <div className="stack management-import-page">
+        <section className="hero-card">
+          <p className="eyebrow">Gestão acadêmica</p>
+          <h1>Acesso somente para consulta</h1>
+          <p>
+            O Gestor do curso acompanha os cadastros da unidade, mas a importação operacional
+            de alunos continua restrita ao Coordenador Local da oferta.
+          </p>
+          <div className="actions-row">
+            <Link href={"/gestao/alunos" as Route} className="button button-secondary">
+              Voltar para cadastros
+            </Link>
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="stack management-import-page">

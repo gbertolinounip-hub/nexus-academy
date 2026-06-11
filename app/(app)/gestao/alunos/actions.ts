@@ -3,7 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/session";
+import { resolveScopedDataAccess } from "@/lib/auth/data-scope";
+import { loadVisibleStageAreaCatalog } from "@/services/stage-areas";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
@@ -14,11 +17,15 @@ import type {
   StudentRegistrationConflictInfo,
   StudentProfileFormValues,
   ProfessorRegistrationActionState,
+  CourseManagerUnitCoordinatorActionState,
+  CourseManagerUnitCoordinatorFormValues,
   ProfessorRegistrationFormValues,
   SecretaryRegistrationActionState,
   SecretaryRegistrationFormValues,
   SemesterManagementActionState,
   SemesterManagementFormValues,
+  StageAreaRegistrationActionState,
+  StageAreaRegistrationFormValues,
   StudentRegistrationActionState,
   StudentRegistrationAssignmentFormValue,
   StudentStageManagementActionState,
@@ -28,15 +35,19 @@ import type {
 
 type ProfileRow = Database["public"]["Tables"]["perfis"]["Row"];
 type SemesterRow = Database["public"]["Tables"]["semestres"]["Row"];
+type StageBlockRow = Database["public"]["Tables"]["blocos_estagio"]["Row"];
 type AreaRow = Database["public"]["Tables"]["areas_estagio"]["Row"];
 type ProfessorAreaRow = Database["public"]["Tables"]["professor_areas_estagio"]["Row"];
 type UserRow = Database["public"]["Tables"]["usuarios"]["Row"];
 type ClassRow = Database["public"]["Tables"]["turmas"]["Row"];
 type StudentRow = Database["public"]["Tables"]["alunos"]["Row"];
+type OfferRow = Database["public"]["Tables"]["ofertas_curso_unidade"]["Row"];
+type CourseRow = Database["public"]["Tables"]["cursos"]["Row"];
 type UserInsert = Database["public"]["Tables"]["usuarios"]["Insert"];
 type StudentInsert = Database["public"]["Tables"]["alunos"]["Insert"];
 type ProfessorInsert = Database["public"]["Tables"]["professores"]["Insert"];
 type ProfessorAreaInsert = Database["public"]["Tables"]["professor_areas_estagio"]["Insert"];
+type CoordinatorInsert = Database["public"]["Tables"]["coordenadores"]["Insert"];
 type ClassInsert = Database["public"]["Tables"]["turmas"]["Insert"];
 type EnrollmentInsert = Database["public"]["Tables"]["matriculas_turma"]["Insert"];
 type EnrollmentRow = Database["public"]["Tables"]["matriculas_turma"]["Row"];
@@ -48,7 +59,18 @@ type ProfessorLinkUpdate =
   Database["public"]["Tables"]["vinculos_professor_aluno"]["Update"];
 type UserUpdate = Database["public"]["Tables"]["usuarios"]["Update"];
 type StudentUpdate = Database["public"]["Tables"]["alunos"]["Update"];
+type UserContextRow = Database["public"]["Tables"]["usuarios_papeis_contexto"]["Row"];
+type UserContextInsert = Database["public"]["Tables"]["usuarios_papeis_contexto"]["Insert"];
+type UserContextUpdate = Database["public"]["Tables"]["usuarios_papeis_contexto"]["Update"];
 type AuditRow = Database["public"]["Tables"]["historico_alteracoes"]["Row"];
+
+interface ResolvedOperationalScope {
+  unitId: string;
+  instituicaoId: string | null;
+  courseId: string | null;
+  courseName: string | null;
+  offerId: string | null;
+}
 
 interface ParsedStudentAssignment {
   row_id: string;
@@ -218,6 +240,43 @@ const semesterManagementSchema = z
     message: "A data de fim deve ser posterior a data de inicio."
   });
 
+const stageAreaRegistrationSchema = z.object({
+  nome: z
+    .string()
+    .trim()
+    .min(3, "Informe o nome da área supervisionada.")
+    .max(120, "O nome da área deve ter no máximo 120 caracteres."),
+  codigo: z
+    .string()
+    .trim()
+    .max(60, "O código da área deve ter no máximo 60 caracteres."),
+  ativo: z.enum(["true", "false"])
+});
+
+const courseManagerUnitCoordinatorSchema = z.object({
+  unidade_id: z.string().uuid("Selecione uma unidade valida."),
+  nome_completo: z
+    .string()
+    .trim()
+    .min(3, "Informe o nome completo do coordenador.")
+    .max(160, "O nome do coordenador deve ter no maximo 160 caracteres."),
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("Informe um e-mail valido para o coordenador."),
+  senha: z
+    .string()
+    .min(8, "A senha inicial deve ter ao menos 8 caracteres.")
+    .max(72, "A senha inicial deve ter no maximo 72 caracteres."),
+  cargo: z
+    .string()
+    .trim()
+    .min(3, "Informe o cargo do coordenador.")
+    .max(120, "O cargo deve ter no maximo 120 caracteres."),
+  ativo: z.enum(["true", "false"])
+});
+
 function normalizeFieldErrors(
   fieldErrors: Record<string, string[] | undefined>
 ): Record<string, string> {
@@ -341,6 +400,34 @@ function buildSemesterErrorState(
   };
 }
 
+function buildStageAreaErrorState(
+  message: string,
+  fieldErrors: Record<string, string> = {},
+  formValues?: StageAreaRegistrationFormValues
+): StageAreaRegistrationActionState {
+  return {
+    status: "error",
+    message,
+    fieldErrors,
+    formValues,
+    submittedAt: Date.now()
+  };
+}
+
+function buildCourseManagerCoordinatorErrorState(
+  message: string,
+  fieldErrors: Record<string, string> = {},
+  formValues?: CourseManagerUnitCoordinatorFormValues
+): CourseManagerUnitCoordinatorActionState {
+  return {
+    status: "error",
+    message,
+    fieldErrors,
+    formValues,
+    submittedAt: Date.now()
+  };
+}
+
 function buildStudentSuccessState(message: string): StudentRegistrationActionState {
   return {
     status: "success",
@@ -404,6 +491,59 @@ function buildSemesterSuccessState(message: string): SemesterManagementActionSta
   };
 }
 
+function buildStageAreaSuccessState(message: string): StageAreaRegistrationActionState {
+  return {
+    status: "success",
+    message,
+    fieldErrors: {},
+    submittedAt: Date.now()
+  };
+}
+
+function buildCourseManagerCoordinatorSuccessState(
+  message: string
+): CourseManagerUnitCoordinatorActionState {
+  return {
+    status: "success",
+    message,
+    fieldErrors: {},
+    submittedAt: Date.now()
+  };
+}
+
+function isDuplicateEmailMessage(message: string | undefined) {
+  const normalizedMessage = (message ?? "").toLowerCase();
+  return normalizedMessage.includes("already") || normalizedMessage.includes("duplicate");
+}
+
+function resolveCoordinatorOperationalContext(currentUser: SessionUser, unitId: string) {
+  const activeContext =
+    currentUser.contextoAtivo?.ativo && currentUser.contextoAtivo.perfilCodigo === "coordenador"
+      ? currentUser.contextoAtivo
+      : null;
+
+  if (activeContext) {
+    return activeContext;
+  }
+
+  const coordinatorContexts = currentUser.contextosDisponiveis.filter(
+    (context) => context.ativo && context.perfilCodigo === "coordenador"
+  );
+  const matchingUnitContexts = coordinatorContexts.filter(
+    (context) => !context.unidadeId || context.unidadeId === unitId
+  );
+
+  if (matchingUnitContexts.length === 1) {
+    return matchingUnitContexts[0];
+  }
+
+  if (coordinatorContexts.length === 1) {
+    return coordinatorContexts[0];
+  }
+
+  return null;
+}
+
 function getRequiredCoordinatorUnitId(currentUser: SessionUser) {
   if (!currentUser.unitId) {
     throw new Error(
@@ -412,6 +552,14 @@ function getRequiredCoordinatorUnitId(currentUser: SessionUser) {
   }
 
   return currentUser.unitId;
+}
+
+function assertOperationalMutationAllowed(currentUser: SessionUser) {
+  if (getActiveMasterCourseContext(currentUser)) {
+    throw new Error(
+      "O Gestor do curso possui acesso somente de consulta na aba Cadastros. Use o Coordenador Local para executar cadastros operacionais."
+    );
+  }
 }
 
 function readStringField(formData: FormData, name: string) {
@@ -542,6 +690,31 @@ function buildSemesterFormValues(formData: FormData): SemesterManagementFormValu
   };
 }
 
+function buildStageAreaFormValues(formData: FormData): StageAreaRegistrationFormValues {
+  const activeValue = readStringField(formData, "ativo");
+
+  return {
+    nome: readStringField(formData, "nome"),
+    codigo: readStringField(formData, "codigo"),
+    ativo: activeValue === "false" ? "false" : "true"
+  };
+}
+
+function buildCourseManagerCoordinatorFormValues(
+  formData: FormData
+): CourseManagerUnitCoordinatorFormValues {
+  const activeValue = readStringField(formData, "ativo");
+
+  return {
+    unidade_id: readStringField(formData, "unidade_id"),
+    nome_completo: readStringField(formData, "nome_completo"),
+    email: readStringField(formData, "email").toLowerCase(),
+    senha: readStringField(formData, "senha"),
+    cargo: readStringField(formData, "cargo"),
+    ativo: activeValue === "false" ? "false" : "true"
+  };
+}
+
 function collectAssignmentsToPersist(
   assignments: ParsedStudentAssignment[]
 ): PersistableStudentAssignment[] {
@@ -577,9 +750,96 @@ async function loadProfileMap() {
   );
 }
 
+async function resolveOperationalScopeForCurrentCoordinator(
+  currentUser: SessionUser
+): Promise<ResolvedOperationalScope> {
+  const unitId = getRequiredCoordinatorUnitId(currentUser);
+  const activeContext = resolveCoordinatorOperationalContext(currentUser, unitId);
+  const supabase = await createSupabaseServerClient();
+  const scope = await resolveScopedDataAccess(currentUser, {
+    supabase
+  });
+  const candidateOfferId =
+    activeContext?.ofertaCursoUnidadeId ??
+    currentUser.ofertaCursoUnidadeId ??
+    (scope.offerIds.length === 1 ? scope.offerIds[0] : null);
+
+  if (!candidateOfferId) {
+    return {
+      unitId,
+      instituicaoId: activeContext?.instituicaoId ?? currentUser.instituicaoId ?? null,
+      courseId: activeContext?.cursoId ?? currentUser.cursoId ?? null,
+      courseName: activeContext?.cursoNome ?? currentUser.cursoNome ?? null,
+      offerId: null
+    };
+  }
+
+  const { data: offerData, error: offerError } = await supabase
+    .from("ofertas_curso_unidade")
+    .select("id, unidade_id, instituicao_id, curso_id")
+    .eq("id", candidateOfferId)
+    .maybeSingle();
+
+  const offerRow = (offerData ?? null) as Pick<
+    OfferRow,
+    "id" | "unidade_id" | "instituicao_id" | "curso_id"
+  > | null;
+
+  if (offerError || !offerRow) {
+    return {
+      unitId,
+      instituicaoId: activeContext?.instituicaoId ?? currentUser.instituicaoId ?? null,
+      courseId: activeContext?.cursoId ?? currentUser.cursoId ?? null,
+      courseName: activeContext?.cursoNome ?? currentUser.cursoNome ?? null,
+      offerId: null
+    };
+  }
+
+  const { data: courseData } = await supabase
+    .from("cursos")
+    .select("id, nome")
+    .eq("id", offerRow.curso_id)
+    .maybeSingle();
+  const courseRow = (courseData ?? null) as Pick<CourseRow, "id" | "nome"> | null;
+
+  return {
+    unitId: offerRow.unidade_id ?? unitId,
+    instituicaoId: offerRow.instituicao_id ?? activeContext?.instituicaoId ?? null,
+    courseId: offerRow.curso_id ?? activeContext?.cursoId ?? null,
+    courseName: courseRow?.nome ?? activeContext?.cursoNome ?? null,
+    offerId: offerRow.id
+  };
+}
+
 function buildAreaClassCode(semester: SemesterRow, area: AreaRow) {
   const rawCode = `${semester.codigo}-${area.codigo}`.toUpperCase();
   return rawCode.slice(0, 30);
+}
+
+function normalizeStageAreaCode(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 60);
+}
+
+function resolveUniqueStageAreaCode(baseCode: string, existingCodes: Set<string>) {
+  if (!existingCodes.has(baseCode)) {
+    return baseCode;
+  }
+
+  let suffix = 2;
+  let nextCode = `${baseCode}_${suffix}`;
+
+  while (existingCodes.has(nextCode)) {
+    suffix += 1;
+    nextCode = `${baseCode}_${suffix}`;
+  }
+
+  return nextCode;
 }
 
 async function findOrCreateAreaClass(input: {
@@ -605,6 +865,7 @@ async function findOrCreateAreaClass(input: {
 
   const classInsertPayload: ClassInsert = {
     semestre_id: input.semester.id,
+    oferta_curso_unidade_id: input.semester.oferta_curso_unidade_id ?? null,
     codigo: buildAreaClassCode(input.semester, input.area),
     nome: `${input.area.nome} - ${input.semester.codigo}`,
     area_estagio: input.area.nome,
@@ -779,15 +1040,21 @@ async function reconcileStudentOperationalAccess(studentIds: string[]) {
 
 async function loadSemesterOperationalContext(input: {
   semesterId: string;
-  unitId: string;
+  operationalScope: ResolvedOperationalScope;
 }) {
   const supabase = await createSupabaseServerClient();
-  const { data: semesterData, error: semesterError } = await supabase
+  const semesterQuery = supabase
     .from("semestres")
     .select("*")
-    .eq("id", input.semesterId)
-    .eq("unidade_id", input.unitId)
-    .maybeSingle();
+    .eq("id", input.semesterId);
+
+  if (input.operationalScope.offerId) {
+    semesterQuery.eq("oferta_curso_unidade_id", input.operationalScope.offerId);
+  } else {
+    semesterQuery.eq("unidade_id", input.operationalScope.unitId);
+  }
+
+  const { data: semesterData, error: semesterError } = await semesterQuery.maybeSingle();
 
   if (semesterError || !semesterData) {
     throw new Error("Não foi possível localizar o semestre informado.");
@@ -828,7 +1095,7 @@ async function loadSemesterOperationalContext(input: {
 
 async function setSemesterToClosedOperationally(input: {
   semesterId: string;
-  unitId: string;
+  operationalScope: ResolvedOperationalScope;
 }) {
   const { supabase, semester, classRows, enrollmentRows } =
     await loadSemesterOperationalContext(input);
@@ -907,7 +1174,7 @@ async function setSemesterToClosedOperationally(input: {
 
 async function setSemesterToActiveOperationally(input: {
   semesterId: string;
-  unitId: string;
+  operationalScope: ResolvedOperationalScope;
 }) {
   const { supabase, semester, classRows, enrollmentRows } =
     await loadSemesterOperationalContext(input);
@@ -951,7 +1218,7 @@ async function setSemesterToActiveOperationally(input: {
 
 async function setSemesterToPlannedOperationally(input: {
   semesterId: string;
-  unitId: string;
+  operationalScope: ResolvedOperationalScope;
 }) {
   const { supabase, semester, classRows, enrollmentRows } =
     await loadSemesterOperationalContext(input);
@@ -1037,43 +1304,112 @@ function validateAssignmentStructure(
 }
 
 async function loadAssignmentValidationContext(input: {
+  currentUser: SessionUser;
+  operationalScope: ResolvedOperationalScope;
   semesterId: string;
   assignmentsToPersist: PersistableStudentAssignment[];
-  unitId: string;
 }) {
   const supabase = await createSupabaseServerClient();
+  const scope = await resolveScopedDataAccess(input.currentUser, { supabase });
   const areaIds = [
     ...new Set(input.assignmentsToPersist.map((assignment) => assignment.areaId).filter(Boolean))
   ];
   const supervisorIds = [
     ...new Set(input.assignmentsToPersist.flatMap((assignment) => assignment.supervisorIds))
   ];
+  const semesterQuery = supabase.from("semestres").select("*").eq("id", input.semesterId);
+
+  if (input.operationalScope.offerId) {
+    semesterQuery.eq("oferta_curso_unidade_id", input.operationalScope.offerId);
+  } else {
+    semesterQuery.eq("unidade_id", input.operationalScope.unitId);
+  }
+
+  const visibleStageAreaCatalog = await loadVisibleStageAreaCatalog({
+    supabase,
+    scope,
+    selectedUnitId: input.operationalScope.unitId
+  });
+  const visibleAreaRows = visibleStageAreaCatalog.areaRows.filter(
+    (areaRow) => areaIds.length === 0 || areaIds.includes(areaRow.id)
+  );
+  let allowedSupervisorIds = supervisorIds;
+  const shouldFilterSupervisorUsersByUnit =
+    !input.operationalScope.offerId &&
+    !(input.operationalScope.instituicaoId && input.operationalScope.courseId);
+
+  if (supervisorIds.length > 0) {
+    if (input.operationalScope.offerId) {
+      const { data: contextRowsData, error: contextRowsError } = await supabase
+        .from("usuarios_papeis_contexto")
+        .select("usuario_id")
+        .eq("oferta_curso_unidade_id", input.operationalScope.offerId)
+        .eq("ativo", true)
+        .in("usuario_id", supervisorIds);
+
+      if (contextRowsError) {
+        return {
+          semesterResult: { data: null, error: contextRowsError },
+          areaResult: { data: visibleAreaRows, error: null },
+          professorAreaResult: { data: [], error: contextRowsError },
+          professorUsersResult: { data: [], error: contextRowsError }
+        };
+      }
+
+      allowedSupervisorIds = uniqueStringValues(
+        ((contextRowsData ?? []) as Array<Pick<UserContextRow, "usuario_id">>).map(
+          (contextRow) => contextRow.usuario_id
+        )
+      );
+    } else if (input.operationalScope.instituicaoId && input.operationalScope.courseId) {
+      const { data: contextRowsData, error: contextRowsError } = await supabase
+        .from("usuarios_papeis_contexto")
+        .select("usuario_id")
+        .eq("instituicao_id", input.operationalScope.instituicaoId)
+        .eq("curso_id", input.operationalScope.courseId)
+        .eq("ativo", true)
+        .in("usuario_id", supervisorIds);
+
+      if (contextRowsError) {
+        return {
+          semesterResult: { data: null, error: contextRowsError },
+          areaResult: { data: visibleAreaRows, error: null },
+          professorAreaResult: { data: [], error: contextRowsError },
+          professorUsersResult: { data: [], error: contextRowsError }
+        };
+      }
+
+      allowedSupervisorIds = uniqueStringValues(
+        ((contextRowsData ?? []) as Array<Pick<UserContextRow, "usuario_id">>).map(
+          (contextRow) => contextRow.usuario_id
+        )
+      );
+    }
+  }
 
   const [semesterResult, areaResult, professorAreaResult, professorUsersResult] =
     await Promise.all([
-      supabase
-        .from("semestres")
-        .select("*")
-        .eq("id", input.semesterId)
-        .eq("unidade_id", input.unitId)
-        .maybeSingle(),
-      areaIds.length
-        ? supabase.from("areas_estagio").select("*").in("id", areaIds).eq("ativa", true)
-        : Promise.resolve({ data: [], error: null }),
-      areaIds.length && supervisorIds.length
+      semesterQuery.maybeSingle(),
+      Promise.resolve({ data: visibleAreaRows, error: null }),
+      areaIds.length && allowedSupervisorIds.length
         ? supabase
             .from("professor_areas_estagio")
             .select("*")
             .in("area_estagio_id", areaIds)
-            .in("professor_id", supervisorIds)
+            .in("professor_id", allowedSupervisorIds)
             .eq("ativo", true)
         : Promise.resolve({ data: [], error: null }),
-      supervisorIds.length
-        ? supabase
-            .from("usuarios")
-            .select("*")
-            .in("id", supervisorIds)
-            .eq("unidade_id", input.unitId)
+      allowedSupervisorIds.length
+        ? shouldFilterSupervisorUsersByUnit
+          ? supabase
+              .from("usuarios")
+              .select("*")
+              .in("id", allowedSupervisorIds)
+              .eq("unidade_id", input.operationalScope.unitId)
+          : supabase
+              .from("usuarios")
+              .select("*")
+              .in("id", allowedSupervisorIds)
         : Promise.resolve({ data: [], error: null })
     ]);
 
@@ -1313,11 +1649,14 @@ async function syncStudentSemesterAssignments(input: {
 
     const existingEnrollmentEntry = enrollmentMapByArea.get(area.id);
     let enrollment = existingEnrollmentEntry?.enrollment;
+    const desiredOfferId =
+      classGroup.oferta_curso_unidade_id ?? input.semester.oferta_curso_unidade_id ?? null;
 
     if (!enrollment) {
       const enrollmentInsertPayload: EnrollmentInsert = {
         turma_id: classGroup.id,
         aluno_id: input.studentId,
+        oferta_curso_unidade_id: desiredOfferId,
         status: "ativa"
       };
 
@@ -1341,7 +1680,8 @@ async function syncStudentSemesterAssignments(input: {
       });
     } else if (enrollment.status !== "ativa") {
       const enrollmentUpdatePayload: EnrollmentUpdate = {
-        status: "ativa"
+        status: "ativa",
+        oferta_curso_unidade_id: desiredOfferId
       };
 
       const { error } = await (supabase.from("matriculas_turma") as any)
@@ -1355,6 +1695,28 @@ async function syncStudentSemesterAssignments(input: {
       enrollment = {
         ...enrollment,
         status: "ativa"
+      };
+
+      enrollmentMapByArea.set(area.id, {
+        enrollment,
+        classGroup
+      });
+    } else if (enrollment.oferta_curso_unidade_id !== desiredOfferId) {
+      const enrollmentUpdatePayload: EnrollmentUpdate = {
+        oferta_curso_unidade_id: desiredOfferId
+      };
+
+      const { error } = await (supabase.from("matriculas_turma") as any)
+        .update(enrollmentUpdatePayload)
+        .eq("id", enrollment.id);
+
+      if (error) {
+        throw new Error("Não foi possível sincronizar a oferta institucional da matrícula.");
+      }
+
+      enrollment = {
+        ...enrollment,
+        oferta_curso_unidade_id: desiredOfferId
       };
 
       enrollmentMapByArea.set(area.id, {
@@ -1453,6 +1815,9 @@ async function updateExistingStudentBaseRegistration(input: {
   email: string;
   registration: string;
   cellphone: string;
+  courseId: string | null;
+  courseName: string | null;
+  offerId: string | null;
 }) {
   const supabase = await createSupabaseServerClient();
 
@@ -1465,7 +1830,9 @@ async function updateExistingStudentBaseRegistration(input: {
     unidade_id: input.unitId,
     matricula: input.registration,
     celular: input.cellphone,
-    curso: "Fisioterapia"
+    curso: input.courseName ?? "Fisioterapia",
+    curso_id: input.courseId,
+    oferta_curso_unidade_id: input.offerId
   };
 
   const { error: userUpdateError } = await (supabase.from("usuarios") as any)
@@ -1489,6 +1856,7 @@ async function updateExistingStudentBaseRegistration(input: {
 async function applyExistingStudentResolution(input: {
   userId: string;
   unitId: string;
+  operationalScope: ResolvedOperationalScope;
   currentUser: SessionUser;
   submittedFormValues: StudentRegistrationFormValues;
   parsedData: z.infer<typeof studentRegistrationSchema>;
@@ -1526,7 +1894,10 @@ async function applyExistingStudentResolution(input: {
       name: input.parsedData.nome_completo,
       email: input.parsedData.email,
       registration: input.parsedData.ra,
-      cellphone: input.parsedData.celular
+      cellphone: input.parsedData.celular,
+      courseId: input.operationalScope.courseId,
+      courseName: input.operationalScope.courseName,
+      offerId: input.operationalScope.offerId
     });
 
     if (input.resolution === "reactivate") {
@@ -1626,6 +1997,24 @@ async function cleanupCreatedStudentData(input: {
   }
 }
 
+async function cleanupCreatedCoordinatorDataForCourseManager(input: {
+  authUserId?: string | null;
+  userId?: string | null;
+}) {
+  const supabase = await createSupabaseServerClient();
+  const adminClient = createSupabaseAdminClient();
+
+  if (input.userId) {
+    await (supabase.from("usuarios_papeis_contexto") as any).delete().eq("usuario_id", input.userId);
+    await (supabase.from("coordenadores") as any).delete().eq("usuario_id", input.userId);
+    await (supabase.from("usuarios") as any).delete().eq("id", input.userId);
+  }
+
+  if (input.authUserId) {
+    await adminClient.auth.admin.deleteUser(input.authUserId);
+  }
+}
+
 async function cleanupCreatedProfessorData(input: {
   authUserId?: string | null;
   userId?: string | null;
@@ -1634,6 +2023,15 @@ async function cleanupCreatedProfessorData(input: {
   const adminClient = createSupabaseAdminClient();
 
   if (input.userId) {
+    await (supabase.from("usuarios_papeis_contexto") as any)
+      .delete()
+      .eq("usuario_id", input.userId);
+    await (supabase.from("professor_areas_estagio") as any)
+      .delete()
+      .eq("professor_id", input.userId);
+    await (supabase.from("professores") as any)
+      .delete()
+      .eq("usuario_id", input.userId);
     await (supabase.from("usuarios") as any).delete().eq("id", input.userId);
   }
 
@@ -1663,6 +2061,7 @@ function revalidateAcademicViews(studentId?: string) {
   revalidatePath("/aluno");
   revalidatePath("/relatorios");
   revalidatePath("/auditoria");
+  revalidatePath("/master-curso");
 }
 
 function buildRedirectPathWithNotice(
@@ -2011,9 +2410,19 @@ async function assessProfessorDeletionSafety(userId: string) {
 async function assessSemesterDiscardSafety(input: {
   semesterId: string;
   unitId: string;
+  offerId: string | null;
 }) {
   const { supabase, semester, classRows, enrollmentRows } =
-    await loadSemesterOperationalContext(input);
+    await loadSemesterOperationalContext({
+      semesterId: input.semesterId,
+      operationalScope: {
+        unitId: input.unitId,
+        instituicaoId: null,
+        courseId: null,
+        courseName: null,
+        offerId: input.offerId
+      }
+    });
   const adminClient = createSupabaseAdminClient();
   const classIds = classRows.map((classGroup) => classGroup.id);
   const enrollmentIds = enrollmentRows.map((enrollment) => enrollment.id);
@@ -2192,6 +2601,7 @@ async function deleteSecretarySafely(userId: string) {
 async function deleteSemesterSafely(input: {
   semesterId: string;
   unitId: string;
+  offerId: string | null;
 }) {
   const adminClient = createSupabaseAdminClient();
   const safety = await assessSemesterDiscardSafety(input);
@@ -2540,6 +2950,7 @@ export async function createStudentRegistrationAction(
   formData: FormData
 ): Promise<StudentRegistrationActionState> {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const submittedFormValues = buildStudentFormValues(formData);
   const requestedResolution = readExistingStudentResolutionAction(formData);
@@ -2583,15 +2994,17 @@ export async function createStudentRegistrationAction(
   }
 
   const supabase = await createSupabaseServerClient();
+  const operationalScope = await resolveOperationalScopeForCurrentCoordinator(currentUser);
   const profileMap = await loadProfileMap();
   let validatedSemester: SemesterRow | null = null;
   let validatedAreaMap = new Map<string, AreaRow>();
 
   if (assignmentsToPersist.length > 0 && parsedData.data.semestre_id) {
     const validationContext = await loadAssignmentValidationContext({
+      currentUser,
+      operationalScope,
       semesterId: parsedData.data.semestre_id,
-      assignmentsToPersist,
-      unitId: coordinatorUnitId
+      assignmentsToPersist
     });
 
     if (validationContext.semesterResult.error || !validationContext.semesterResult.data) {
@@ -2737,6 +3150,7 @@ export async function createStudentRegistrationAction(
     return applyExistingStudentResolution({
       userId: existingStudentLookup.user.id,
       unitId: coordinatorUnitId,
+      operationalScope,
       currentUser,
       submittedFormValues,
       parsedData: parsedData.data,
@@ -2801,7 +3215,9 @@ export async function createStudentRegistrationAction(
       unidade_id: coordinatorUnitId,
       matricula: parsedData.data.ra,
       celular: parsedData.data.celular,
-      curso: "Fisioterapia"
+      curso: operationalScope.courseName ?? "Fisioterapia",
+      curso_id: operationalScope.courseId,
+      oferta_curso_unidade_id: operationalScope.offerId
     };
 
     const { error: studentInsertError } = await (supabase.from("alunos") as any).insert(
@@ -2841,6 +3257,10 @@ export async function createStudentRegistrationAction(
       const enrollmentInsertPayload: EnrollmentInsert = {
         turma_id: classGroup.id,
         aluno_id: createdAuthUser.user.id,
+        oferta_curso_unidade_id:
+          classGroup.oferta_curso_unidade_id ??
+          validatedSemester.oferta_curso_unidade_id ??
+          operationalScope.offerId,
         status: "ativa"
       };
 
@@ -2916,6 +3336,7 @@ export async function updateStudentProfileAction(
   formData: FormData
 ): Promise<StudentProfileActionState> {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const submittedFormValues = buildStudentProfileFormValues(formData);
   const parsedData = studentProfileSchema.safeParse(submittedFormValues);
@@ -3030,6 +3451,7 @@ export async function updateStudentSemesterAction(
   formData: FormData
 ): Promise<StudentStageManagementActionState> {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const submittedFormValues = buildStudentStageFormValues(formData);
   const parsedData = studentStageManagementSchema.safeParse(submittedFormValues);
@@ -3054,6 +3476,7 @@ export async function updateStudentSemesterAction(
   }
 
   const supabase = await createSupabaseServerClient();
+  const operationalScope = await resolveOperationalScopeForCurrentCoordinator(currentUser);
   const [studentUserResult, validationContext] = await Promise.all([
     supabase
       .from("usuarios")
@@ -3062,9 +3485,10 @@ export async function updateStudentSemesterAction(
       .eq("unidade_id", coordinatorUnitId)
       .maybeSingle(),
     loadAssignmentValidationContext({
+      currentUser,
+      operationalScope,
       semesterId: parsedData.data.semestre_id,
-      assignmentsToPersist,
-      unitId: coordinatorUnitId
+      assignmentsToPersist
     })
   ]);
 
@@ -3165,7 +3589,9 @@ export async function createProfessorRegistrationAction(
   formData: FormData
 ): Promise<ProfessorRegistrationActionState> {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
+  const operationalScope = await resolveOperationalScopeForCurrentCoordinator(currentUser);
   const submittedFormValues = buildProfessorFormValues(formData);
   const parsedData = professorRegistrationSchema.safeParse(submittedFormValues);
 
@@ -3188,28 +3614,38 @@ export async function createProfessorRegistrationAction(
   }
 
   const supabase = await createSupabaseServerClient();
-  const [profileMap, areaResult] = await Promise.all([
-    loadProfileMap(),
-    supabase
-      .from("areas_estagio")
-      .select("*")
-      .in("id", parsedData.data.area_ids)
-      .eq("ativa", true)
-  ]);
+  const scope = await resolveScopedDataAccess(currentUser, { supabase });
+  let profileMap: Map<string, ProfileRow>;
+  let visibleStageAreaCatalog: Awaited<ReturnType<typeof loadVisibleStageAreaCatalog>>;
 
-  if (areaResult.error) {
+  try {
+    [profileMap, visibleStageAreaCatalog] = await Promise.all([
+      loadProfileMap(),
+      loadVisibleStageAreaCatalog({
+        supabase,
+        scope,
+        selectedUnitId: operationalScope.unitId
+      })
+    ]);
+  } catch (error) {
     return buildProfessorErrorState(
-      "Não foi possível validar as áreas do professor.",
+      error instanceof Error
+        ? error.message
+        : "Não foi possível validar as áreas supervisionadas disponíveis.",
       {},
       submittedFormValues
     );
   }
 
-  if ((areaResult.data ?? []).length !== parsedData.data.area_ids.length) {
+  const visibleAreaRows = visibleStageAreaCatalog.areaRows.filter((areaRow) =>
+    parsedData.data.area_ids.includes(areaRow.id)
+  );
+
+  if (visibleAreaRows.length !== parsedData.data.area_ids.length) {
     return buildProfessorErrorState(
-      "Uma ou mais áreas selecionadas não são válidas.",
+      "Uma ou mais áreas selecionadas não pertencem à oferta atual.",
       {
-        area_ids: "Selecione apenas áreas de estágio ativas."
+        area_ids: "Selecione apenas áreas supervisionadas visíveis no contexto atual."
       },
       submittedFormValues
     );
@@ -3294,6 +3730,53 @@ export async function createProfessorRegistrationAction(
     if (professorAreaInsertError) {
       throw new Error(professorAreaInsertError.message);
     }
+
+    if (operationalScope.instituicaoId && operationalScope.courseId) {
+      const contextInsertPayload: UserContextInsert = {
+        usuario_id: createdAuthUser.user.id,
+        perfil_id: professorProfile.id,
+        instituicao_id: operationalScope.instituicaoId,
+        curso_id: operationalScope.courseId,
+        oferta_curso_unidade_id: operationalScope.offerId,
+        principal: true,
+        ativo: true,
+        metadata: {
+          origem: "coordinator-professor-registration",
+          escopo: operationalScope.offerId ? "oferta_unidade" : "curso_unidade"
+        }
+      };
+
+      const { data: insertedContextData, error: insertedContextError } = await adminClient
+        .from("usuarios_papeis_contexto")
+        .insert(contextInsertPayload as never)
+        .select("id")
+        .single();
+
+      const insertedContext = (insertedContextData ?? null) as Pick<
+        UserContextRow,
+        "id"
+      > | null;
+
+      if (insertedContextError || !insertedContext) {
+        throw new Error(
+          insertedContextError?.message ??
+            "Não foi possível criar o contexto institucional do professor."
+        );
+      }
+
+      const { error: defaultContextError } = await adminClient
+        .from("usuarios")
+        .update({
+          contexto_padrao_id: insertedContext.id
+        } as never)
+        .eq("id", createdAuthUser.user.id);
+
+      if (defaultContextError) {
+        throw new Error(
+          "Não foi possível definir o contexto padrão do professor recém-cadastrado."
+        );
+      }
+    }
   } catch (error) {
     await cleanupCreatedProfessorData({
       authUserId,
@@ -3309,14 +3792,187 @@ export async function createProfessorRegistrationAction(
     );
   }
 
-  revalidatePath("/gestao/alunos");
-  revalidatePath("/coordenador");
-  revalidatePath("/professor");
-  revalidatePath("/relatorios");
-  revalidatePath("/auditoria");
+  revalidateAcademicViews();
 
   return buildProfessorSuccessState(
     "Professor cadastrado com sucesso e vinculado às áreas selecionadas."
+  );
+}
+
+export async function createStageAreaAction(
+  _previousState: StageAreaRegistrationActionState,
+  formData: FormData
+): Promise<StageAreaRegistrationActionState> {
+  const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
+  const submittedFormValues = buildStageAreaFormValues(formData);
+  const parsedData = stageAreaRegistrationSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return buildStageAreaErrorState(
+      "Revise os campos obrigatórios da área supervisionada.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const operationalScope = await resolveOperationalScopeForCurrentCoordinator(currentUser);
+
+  if (!operationalScope.offerId) {
+    return buildStageAreaErrorState(
+      "O coordenador local precisa estar vinculado a uma oferta do curso para cadastrar áreas supervisionadas.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const scope = await resolveScopedDataAccess(currentUser, { supabase });
+  const [defaultBlockResult, existingOfferAreasResult] = await Promise.all([
+    supabase
+      .from("blocos_estagio")
+      .select("id")
+      .order("ordem", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("areas_estagio")
+      .select("*")
+      .eq("oferta_curso_unidade_id", operationalScope.offerId)
+  ]);
+
+  if (defaultBlockResult.error || !defaultBlockResult.data) {
+    return buildStageAreaErrorState(
+      "Não foi possível localizar a estrutura técnica necessária para cadastrar a área supervisionada.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  if (existingOfferAreasResult.error) {
+    return buildStageAreaErrorState(
+      "Não foi possível validar as áreas já cadastradas para esta oferta.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  let visibleStageAreaCatalog: Awaited<ReturnType<typeof loadVisibleStageAreaCatalog>>;
+
+  try {
+    visibleStageAreaCatalog = await loadVisibleStageAreaCatalog({
+      supabase,
+      scope,
+      selectedUnitId: operationalScope.unitId
+    });
+  } catch (error) {
+    return buildStageAreaErrorState(
+      error instanceof Error
+        ? error.message
+        : "Não foi possível consultar as áreas supervisionadas visíveis.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const defaultBlock = defaultBlockResult.data as Pick<StageBlockRow, "id">;
+  const blockId = defaultBlock.id;
+  const normalizedName = parsedData.data.nome.trim();
+  const normalizedNameKey = normalizeStageAreaCode(normalizedName);
+  const requestedCode = normalizeStageAreaCode(
+    parsedData.data.codigo || parsedData.data.nome
+  );
+
+  if (!requestedCode) {
+    return buildStageAreaErrorState(
+      "Informe um nome válido para gerar o código da área supervisionada.",
+      {
+        codigo: "Use letras e números para gerar um código de área válido."
+      },
+      submittedFormValues
+    );
+  }
+
+  const visibleAreas = visibleStageAreaCatalog.areaRows;
+  const existingOfferAreas = (existingOfferAreasResult.data ?? []) as AreaRow[];
+  const existingOfferCodes = new Set(
+    existingOfferAreas.map((areaRow) => normalizeStageAreaCode(areaRow.codigo))
+  );
+  const visibleNameExists = visibleAreas.some(
+    (areaRow) => normalizeStageAreaCode(areaRow.nome) === normalizedNameKey
+  );
+
+  if (visibleNameExists) {
+    return buildStageAreaErrorState(
+      "Já existe uma área supervisionada com este nome no contexto atual.",
+      {
+        nome: "Use um nome diferente para evitar duplicidade na oferta."
+      },
+      submittedFormValues
+    );
+  }
+
+  if (parsedData.data.codigo && existingOfferCodes.has(requestedCode)) {
+    return buildStageAreaErrorState(
+      "Já existe uma área supervisionada com este código na oferta atual.",
+      {
+        codigo: "Use um código diferente para esta área supervisionada."
+      },
+      submittedFormValues
+    );
+  }
+
+  const nextCode = parsedData.data.codigo
+    ? requestedCode
+    : resolveUniqueStageAreaCode(requestedCode, existingOfferCodes);
+  const nextOrder =
+    Math.max(
+      0,
+      ...existingOfferAreas
+        .filter((areaRow) => areaRow.bloco_id === blockId)
+        .map((areaRow) => areaRow.ordem),
+      ...visibleAreas
+        .filter((areaRow) => areaRow.bloco_id === blockId)
+        .map((areaRow) => areaRow.ordem)
+    ) + 1;
+
+  const { error: insertError } = await (supabase.from("areas_estagio") as any).insert({
+    bloco_id: blockId,
+    oferta_curso_unidade_id: operationalScope.offerId,
+    codigo: nextCode,
+    nome: normalizedName,
+    ordem: nextOrder,
+    ativa: parsedData.data.ativo === "true"
+  } satisfies Database["public"]["Tables"]["areas_estagio"]["Insert"]);
+
+  if (insertError) {
+    const auditCaseNotFound = /case not found/i.test(insertError.message);
+    const duplicateConstraint =
+      insertError.code === "23505" || /duplicate key|unique/i.test(insertError.message);
+
+    return buildStageAreaErrorState(
+      auditCaseNotFound
+        ? "A auditoria do banco local ainda não foi atualizada para o cadastro de áreas supervisionadas. Aplique o patch SQL desta etapa e tente novamente."
+        : duplicateConstraint
+        ? "Já existe uma área supervisionada com este nome ou código na oferta atual."
+        : insertError.message,
+      auditCaseNotFound
+        ? {
+            nome: "Atualize a função de auditoria do banco antes de cadastrar novas áreas."
+          }
+        : duplicateConstraint
+        ? {
+            nome: "Revise o nome ou o código desta área supervisionada."
+          }
+        : {},
+      submittedFormValues
+    );
+  }
+
+  revalidateAcademicViews();
+
+  return buildStageAreaSuccessState(
+    `${normalizedName} foi cadastrada com sucesso para a oferta atual.`
   );
 }
 
@@ -3325,6 +3981,7 @@ export async function createSecretaryRegistrationAction(
   formData: FormData
 ): Promise<SecretaryRegistrationActionState> {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const submittedFormValues = buildSecretaryFormValues(formData);
   const parsedData = secretaryRegistrationSchema.safeParse(submittedFormValues);
@@ -3416,6 +4073,7 @@ export async function createSemesterAction(
   formData: FormData
 ): Promise<SemesterManagementActionState> {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const submittedFormValues = buildSemesterFormValues(formData);
   const parsedData = semesterManagementSchema.safeParse(submittedFormValues);
@@ -3429,9 +4087,11 @@ export async function createSemesterAction(
   }
 
   const supabase = await createSupabaseServerClient();
+  const operationalScope = await resolveOperationalScopeForCurrentCoordinator(currentUser);
 
   const { error } = await (supabase.from("semestres") as any).insert({
     unidade_id: coordinatorUnitId,
+    oferta_curso_unidade_id: operationalScope.offerId,
     codigo: parsedData.data.codigo,
     nome: parsedData.data.nome,
     data_inicio: parsedData.data.data_inicio,
@@ -3455,13 +4115,366 @@ export async function createSemesterAction(
   revalidatePath("/gestao/alunos");
   revalidatePath("/coordenador");
   revalidatePath("/relatorios");
+  revalidatePath("/master-curso");
 
   return buildSemesterSuccessState("Semestre cadastrado com sucesso.");
 }
 
+export async function createCourseManagerUnitCoordinatorAction(
+  _previousState: CourseManagerUnitCoordinatorActionState,
+  formData: FormData
+): Promise<CourseManagerUnitCoordinatorActionState> {
+  const currentUser = await requireRole(["coordenador"]);
+  const activeCourseManagerContext = getActiveMasterCourseContext(currentUser);
+  const submittedFormValues = buildCourseManagerCoordinatorFormValues(formData);
+  const parsedData = courseManagerUnitCoordinatorSchema.safeParse(submittedFormValues);
+
+  if (!activeCourseManagerContext) {
+    return buildCourseManagerCoordinatorErrorState(
+      "Somente o Gestor do curso pode cadastrar o Coordenador de Unidade nesta área.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  if (!parsedData.success) {
+    return buildCourseManagerCoordinatorErrorState(
+      "Revise os campos obrigatorios do Coordenador de Unidade.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const scope = await resolveScopedDataAccess(currentUser, { supabase });
+
+  if (!scope.isCourseManager || !scope.unitIds.includes(parsedData.data.unidade_id)) {
+    return buildCourseManagerCoordinatorErrorState(
+      "A unidade selecionada nao pertence ao contexto ativo do Gestor do curso.",
+      {
+        unidade_id: "Selecione uma unidade com oferta do curso atual."
+      },
+      submittedFormValues
+    );
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const profileMap = await loadProfileMap();
+  const coordinatorProfile = profileMap.get("coordenador");
+
+  if (!coordinatorProfile) {
+    return buildCourseManagerCoordinatorErrorState(
+      "O perfil tecnico de coordenador nao foi encontrado.",
+      {
+        unidade_id: "Nao foi possivel validar o perfil tecnico de coordenador."
+      },
+      submittedFormValues
+    );
+  }
+
+  const { data: selectedOfferData, error: selectedOfferError } = await adminClient
+    .from("ofertas_curso_unidade")
+    .select("id, unidade_id, instituicao_id, curso_id, ativo")
+    .eq("instituicao_id", activeCourseManagerContext.instituicaoId)
+    .eq("curso_id", activeCourseManagerContext.cursoId)
+    .eq("unidade_id", parsedData.data.unidade_id)
+    .maybeSingle();
+  const selectedOffer = (selectedOfferData ?? null) as Pick<
+    OfferRow,
+    "id" | "unidade_id" | "instituicao_id" | "curso_id" | "ativo"
+  > | null;
+
+  if (selectedOfferError || !selectedOffer) {
+    return buildCourseManagerCoordinatorErrorState(
+      "Nao foi possivel localizar a oferta do curso para a unidade selecionada.",
+      {
+        unidade_id: "Selecione uma unidade que possua oferta ativa do curso."
+      },
+      submittedFormValues
+    );
+  }
+
+  if (!selectedOffer.ativo) {
+    return buildCourseManagerCoordinatorErrorState(
+      "A oferta do curso na unidade selecionada esta inativa.",
+      {
+        unidade_id: "Selecione uma unidade com oferta ativa do curso."
+      },
+      submittedFormValues
+    );
+  }
+
+  const shouldActivate = parsedData.data.ativo === "true";
+  const { data: existingUserData, error: existingUserError } = await adminClient
+    .from("usuarios")
+    .select("id, perfil_id, contexto_padrao_id, ativo")
+    .eq("email", parsedData.data.email)
+    .maybeSingle();
+  const existingUser = (existingUserData ?? null) as Pick<
+    UserRow,
+    "id" | "perfil_id" | "contexto_padrao_id" | "ativo"
+  > | null;
+
+  if (existingUserError) {
+    return buildCourseManagerCoordinatorErrorState(
+      "Nao foi possivel validar a disponibilidade do e-mail informado.",
+      {
+        email: "Tente novamente com outro e-mail ou revise o cadastro existente."
+      },
+      submittedFormValues
+    );
+  }
+
+  if (existingUser && existingUser.perfil_id !== coordinatorProfile.id) {
+    return buildCourseManagerCoordinatorErrorState(
+      "Este e-mail ja pertence a outro perfil institucional e nao pode ser reaproveitado como Coordenador de Unidade nesta etapa.",
+      {
+        email: "Use um e-mail exclusivo de coordenador para esta unidade."
+      },
+      submittedFormValues
+    );
+  }
+
+  let userId = existingUser?.id ?? null;
+  let createdAuthUserId: string | null = null;
+  let reusedExistingContext = false;
+
+  try {
+    if (!existingUser) {
+      const { data: createdAuthUser, error: authError } =
+        await adminClient.auth.admin.createUser({
+          email: parsedData.data.email,
+          password: parsedData.data.senha,
+          email_confirm: true
+        });
+
+      if (authError || !createdAuthUser.user) {
+        return buildCourseManagerCoordinatorErrorState(
+          authError?.message ?? "Nao foi possivel criar o acesso do coordenador no Auth.",
+          {
+            email: isDuplicateEmailMessage(authError?.message)
+              ? "Este e-mail ja possui cadastro institucional."
+              : "Nao foi possivel criar o acesso de autenticacao."
+          },
+          submittedFormValues
+        );
+      }
+
+      createdAuthUserId = createdAuthUser.user.id;
+      userId = createdAuthUser.user.id;
+
+      const userInsertPayload: UserInsert = {
+        id: createdAuthUser.user.id,
+        perfil_id: coordinatorProfile.id,
+        unidade_id: parsedData.data.unidade_id,
+        contexto_padrao_id: null,
+        email: parsedData.data.email,
+        nome_completo: parsedData.data.nome_completo,
+        ativo: shouldActivate
+      };
+
+      const { error: userInsertError } = await adminClient
+        .from("usuarios")
+        .insert(userInsertPayload as never);
+
+      if (userInsertError) {
+        throw new Error(userInsertError.message);
+      }
+    } else {
+      const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(
+        existingUser.id,
+        {
+          password: parsedData.data.senha,
+          email_confirm: true
+        }
+      );
+
+      if (authUpdateError) {
+        throw new Error(authUpdateError.message);
+      }
+
+      const userUpdatePayload: UserUpdate = {
+        perfil_id: coordinatorProfile.id,
+        unidade_id: parsedData.data.unidade_id,
+        nome_completo: parsedData.data.nome_completo,
+        email: parsedData.data.email,
+        ativo: shouldActivate
+      };
+
+      const { error: userUpdateError } = await adminClient
+        .from("usuarios")
+        .update(userUpdatePayload as never)
+        .eq("id", existingUser.id);
+
+      if (userUpdateError) {
+        throw new Error(userUpdateError.message);
+      }
+    }
+
+    const coordinatorUpsertPayload: CoordinatorInsert = {
+      usuario_id: userId!,
+      unidade_id: parsedData.data.unidade_id,
+      cargo: parsedData.data.cargo
+    };
+
+    const { error: coordinatorUpsertError } = await adminClient
+      .from("coordenadores")
+      .upsert(coordinatorUpsertPayload as never, {
+        onConflict: "usuario_id"
+      });
+
+    if (coordinatorUpsertError) {
+      throw new Error(coordinatorUpsertError.message);
+    }
+
+    const { data: userContextsData, error: userContextsError } = await adminClient
+      .from("usuarios_papeis_contexto")
+      .select("*")
+      .eq("usuario_id", userId!);
+    const userContexts = (userContextsData ?? []) as UserContextRow[];
+
+    if (userContextsError) {
+      throw new Error("Nao foi possivel consultar os contextos atuais do coordenador.");
+    }
+
+    const existingCoordinatorContext =
+      userContexts.find(
+        (contextRow) =>
+          contextRow.perfil_id === coordinatorProfile.id &&
+          contextRow.instituicao_id === activeCourseManagerContext.instituicaoId &&
+          contextRow.curso_id === activeCourseManagerContext.cursoId &&
+          contextRow.oferta_curso_unidade_id === selectedOffer.id
+      ) ?? null;
+    reusedExistingContext = Boolean(existingCoordinatorContext);
+    const shouldBePrincipal = userContexts.length === 0;
+
+    let coordinatorContextId = existingCoordinatorContext?.id ?? null;
+
+    if (!existingCoordinatorContext) {
+      const contextInsertPayload: UserContextInsert = {
+        usuario_id: userId!,
+        perfil_id: coordinatorProfile.id,
+        instituicao_id: activeCourseManagerContext.instituicaoId,
+        curso_id: activeCourseManagerContext.cursoId,
+        oferta_curso_unidade_id: selectedOffer.id,
+        principal: shouldBePrincipal,
+        ativo: shouldActivate,
+        metadata: {
+          origem: "course-manager-unit-coordinator",
+          escopo: "oferta_unidade"
+        }
+      };
+
+      const { data: insertedContextData, error: insertedContextError } = await adminClient
+        .from("usuarios_papeis_contexto")
+        .insert(contextInsertPayload as never)
+        .select("id")
+        .single();
+
+      const insertedContext = (insertedContextData ?? null) as Pick<
+        UserContextRow,
+        "id"
+      > | null;
+
+      if (insertedContextError || !insertedContext) {
+        throw new Error(
+          insertedContextError?.message ??
+            "Nao foi possivel criar o contexto institucional do Coordenador de Unidade."
+        );
+      }
+
+      coordinatorContextId = insertedContext.id;
+    } else {
+      const contextUpdatePayload: UserContextUpdate = {
+        ativo: shouldActivate,
+        principal: existingCoordinatorContext.principal || shouldBePrincipal
+      };
+
+      const { error: contextUpdateError } = await adminClient
+        .from("usuarios_papeis_contexto")
+        .update(contextUpdatePayload as never)
+        .eq("id", existingCoordinatorContext.id);
+
+      if (contextUpdateError) {
+        throw new Error(
+          "Nao foi possivel reativar o contexto institucional do Coordenador de Unidade."
+        );
+      }
+
+      coordinatorContextId = existingCoordinatorContext.id;
+    }
+
+    if (shouldActivate && coordinatorContextId && (!existingUser?.contexto_padrao_id || shouldBePrincipal)) {
+      const userUpdatePayload: UserUpdate = {
+        contexto_padrao_id: coordinatorContextId
+      };
+
+      const { error: contextoPadraoError } = await adminClient
+        .from("usuarios")
+        .update(userUpdatePayload as never)
+        .eq("id", userId!);
+
+      if (contextoPadraoError) {
+        throw new Error(
+          "Nao foi possivel definir o contexto padrao do Coordenador de Unidade."
+        );
+      }
+    } else if (
+      !shouldActivate &&
+      coordinatorContextId &&
+      existingUser?.contexto_padrao_id === coordinatorContextId
+    ) {
+      const userUpdatePayload: UserUpdate = {
+        contexto_padrao_id: null
+      };
+
+      const { error: clearDefaultContextError } = await adminClient
+        .from("usuarios")
+        .update(userUpdatePayload as never)
+        .eq("id", userId!);
+
+      if (clearDefaultContextError) {
+        throw new Error(
+          "Nao foi possivel limpar o contexto padrao do Coordenador de Unidade desativado."
+        );
+      }
+    }
+
+    await syncAuthUserActivation(userId!, shouldActivate);
+  } catch (error) {
+    if (createdAuthUserId) {
+      await cleanupCreatedCoordinatorDataForCourseManager({
+        authUserId: createdAuthUserId,
+        userId
+      });
+    }
+
+    return buildCourseManagerCoordinatorErrorState(
+      error instanceof Error
+        ? error.message
+        : "Nao foi possivel concluir o cadastro do Coordenador de Unidade.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  revalidateAcademicViews();
+  revalidatePath("/master-curso");
+  revalidatePath("/master/contextos");
+
+  return buildCourseManagerCoordinatorSuccessState(
+    shouldActivate
+      ? `${parsedData.data.nome_completo} foi ${
+          reusedExistingContext || existingUser ? "habilitado" : "cadastrado"
+        } como Coordenador de Unidade para a oferta atual do curso.`
+      : `${parsedData.data.nome_completo} foi vinculado como Coordenador de Unidade, mas o acesso inicial permaneceu inativo.`
+  );
+}
+
 export async function updateSemesterStatusAction(formData: FormData) {
   const currentUser = await requireRole(["coordenador"]);
-  const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
+  assertOperationalMutationAllowed(currentUser);
+  const operationalScope = await resolveOperationalScopeForCurrentCoordinator(currentUser);
 
   const semesterId = readStringField(formData, "semester_id");
   const rawStatus = readStringField(formData, "status");
@@ -3499,7 +4512,7 @@ export async function updateSemesterStatusAction(formData: FormData) {
       const result = await setSemesterToClosedOperationally(
         {
           semesterId: validationResult.data.semester_id,
-          unitId: coordinatorUnitId
+          operationalScope
         }
       );
       successMessage = result.message;
@@ -3507,7 +4520,7 @@ export async function updateSemesterStatusAction(formData: FormData) {
       const result = await setSemesterToActiveOperationally(
         {
           semesterId: validationResult.data.semester_id,
-          unitId: coordinatorUnitId
+          operationalScope
         }
       );
       successMessage = result.message;
@@ -3515,7 +4528,7 @@ export async function updateSemesterStatusAction(formData: FormData) {
       const result = await setSemesterToPlannedOperationally(
         {
           semesterId: validationResult.data.semester_id,
-          unitId: coordinatorUnitId
+          operationalScope
         }
       );
       successMessage = result.message;
@@ -3543,7 +4556,8 @@ export async function updateSemesterStatusAction(formData: FormData) {
 
 export async function discardSemesterAction(formData: FormData) {
   const currentUser = await requireRole(["coordenador"]);
-  const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
+  assertOperationalMutationAllowed(currentUser);
+  const operationalScope = await resolveOperationalScopeForCurrentCoordinator(currentUser);
   const semesterId = readStringField(formData, "semester_id");
   const returnPath = readReturnPath(formData, "/gestao/alunos");
   let noticeType: "success" | "error" = "error";
@@ -3569,7 +4583,8 @@ export async function discardSemesterAction(formData: FormData) {
   try {
     const result = await deleteSemesterSafely({
       semesterId: validationResult.data.semester_id,
-      unitId: coordinatorUnitId
+      unitId: operationalScope.unitId,
+      offerId: operationalScope.offerId
     });
     noticeType = result.deleted ? "success" : "error";
     noticeMessage = result.message;
@@ -3587,6 +4602,7 @@ export async function discardSemesterAction(formData: FormData) {
 
 export async function deactivateStudentAction(formData: FormData) {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const userId = readStringField(formData, "user_id");
   const returnPath = readReturnPath(formData, "/gestao/alunos");
@@ -3612,6 +4628,7 @@ export async function deactivateStudentAction(formData: FormData) {
 
 export async function reactivateStudentAction(formData: FormData) {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const userId = readStringField(formData, "user_id");
   const returnPath = readReturnPath(formData, "/gestao/alunos");
@@ -3637,6 +4654,7 @@ export async function reactivateStudentAction(formData: FormData) {
 
 export async function deactivateProfessorAction(formData: FormData) {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const userId = readStringField(formData, "user_id");
   const returnPath = readReturnPath(formData, "/gestao/alunos");
@@ -3666,6 +4684,7 @@ export async function deactivateProfessorAction(formData: FormData) {
 
 export async function reactivateProfessorAction(formData: FormData) {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const userId = readStringField(formData, "user_id");
   const returnPath = readReturnPath(formData, "/gestao/alunos");
@@ -3695,6 +4714,7 @@ export async function reactivateProfessorAction(formData: FormData) {
 
 export async function deactivateSecretaryAction(formData: FormData) {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const userId = readStringField(formData, "user_id");
   const returnPath = readReturnPath(formData, "/gestao/alunos");
@@ -3724,6 +4744,7 @@ export async function deactivateSecretaryAction(formData: FormData) {
 
 export async function reactivateSecretaryAction(formData: FormData) {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const userId = readStringField(formData, "user_id");
   const returnPath = readReturnPath(formData, "/gestao/alunos");
@@ -3753,6 +4774,7 @@ export async function reactivateSecretaryAction(formData: FormData) {
 
 export async function deleteStudentAction(formData: FormData) {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const userId = readStringField(formData, "user_id");
   const returnPath = readReturnPath(formData, "/gestao/alunos");
@@ -3788,6 +4810,7 @@ export async function deleteStudentAction(formData: FormData) {
 
 export async function deleteProfessorAction(formData: FormData) {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const userId = readStringField(formData, "user_id");
   const returnPath = readReturnPath(formData, "/gestao/alunos");
@@ -3823,6 +4846,7 @@ export async function deleteProfessorAction(formData: FormData) {
 
 export async function deleteSecretaryAction(formData: FormData) {
   const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
   const userId = readStringField(formData, "user_id");
   const returnPath = readReturnPath(formData, "/gestao/alunos");

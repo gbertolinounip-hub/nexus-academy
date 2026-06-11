@@ -7,10 +7,13 @@ import {
   initialUnitActionState,
   type UnitFormValues
 } from "@/app/(app)/master/state";
+import type { MasterInstitutionOption } from "@/services/master";
 
 interface MasterUnitFormProps {
+  institutions: MasterInstitutionOption[];
   initialValues?: UnitFormValues;
   submitLabel: string;
+  institutionReadOnly?: boolean;
 }
 
 function cloneUnitFormValues(values?: UnitFormValues): UnitFormValues {
@@ -20,8 +23,10 @@ function cloneUnitFormValues(values?: UnitFormValues): UnitFormValues {
 }
 
 export function MasterUnitForm({
+  institutions,
   initialValues,
-  submitLabel
+  submitLabel,
+  institutionReadOnly = false
 }: MasterUnitFormProps) {
   const [state, formAction] = useActionState(
     upsertUnitAction,
@@ -66,6 +71,9 @@ export function MasterUnitForm({
   return (
     <form action={formAction} className="form-stack">
       <input type="hidden" name="unit_id" value={draft.unit_id} />
+      {institutionReadOnly ? (
+        <input type="hidden" name="instituicao_id" value={draft.instituicao_id} />
+      ) : null}
 
       {safeState.message ? (
         <div
@@ -80,6 +88,45 @@ export function MasterUnitForm({
       ) : null}
 
       <div className="form-grid">
+        <label className={getFieldClassName("instituicao_id")}>
+          <span>Instituicao / IES</span>
+          {institutionReadOnly ? (
+            <>
+              <input
+                className={getInputClassName("instituicao_id")}
+                value={
+                  institutions.find((institution) => institution.id === draft.instituicao_id)?.name ??
+                  "Instituicao nao identificada"
+                }
+                disabled
+                readOnly
+              />
+              <span className="field-help">
+                A instituicao vinculada nao pode ser alterada nesta etapa para evitar impacto em
+                cursos, ofertas e semestres existentes.
+              </span>
+            </>
+          ) : (
+            <select
+              className={getInputClassName("instituicao_id")}
+              name="instituicao_id"
+              value={draft.instituicao_id}
+              onChange={(event) => updateDraft("instituicao_id", event.currentTarget.value)}
+            >
+              <option value="">Selecione</option>
+              {institutions.map((institution) => (
+                <option key={institution.id} value={institution.id} disabled={!institution.isActive}>
+                  {institution.name}
+                  {!institution.isActive ? " (inativa)" : ""}
+                </option>
+              ))}
+            </select>
+          )}
+          {fieldErrors.instituicao_id ? (
+            <span className="field-error">{fieldErrors.instituicao_id}</span>
+          ) : null}
+        </label>
+
         <label className={getFieldClassName("nome")}>
           <span>Nome da unidade</span>
           <input

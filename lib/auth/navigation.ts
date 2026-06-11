@@ -1,6 +1,11 @@
-﻿import type { Route } from "next";
-import { defaultDashboardPath, roleLabels } from "@/lib/auth/roles";
-import type { ProfileCode } from "@/types/domain";
+import type { Route } from "next";
+import {
+  defaultDashboardPath,
+  getActiveMasterCourseContext,
+  getDefaultDashboardPathForUser,
+  roleLabels
+} from "@/lib/auth/roles";
+import type { ProfileCode, SessionUser } from "@/types/domain";
 
 export interface NavigationItem {
   href: Route;
@@ -47,8 +52,23 @@ export const navigationItems: NavigationItem[] = [
     allowedRoles: ["coordenador_master"]
   },
   {
+    href: "/master/instituicoes" as Route,
+    label: "Instituições / IES",
+    allowedRoles: ["coordenador_master"]
+  },
+  {
     href: "/master/unidades" as Route,
     label: "Unidades",
+    allowedRoles: ["coordenador_master"]
+  },
+  {
+    href: "/master/cursos" as Route,
+    label: "Cursos e ofertas",
+    allowedRoles: ["coordenador_master"]
+  },
+  {
+    href: "/master/gestores-curso" as Route,
+    label: "Gestores de curso",
     allowedRoles: ["coordenador_master"]
   },
   {
@@ -57,8 +77,33 @@ export const navigationItems: NavigationItem[] = [
     allowedRoles: ["coordenador_master"]
   },
   {
+    href: "/master/cursos/configuracoes" as Route,
+    label: "Configurações dos cursos",
+    allowedRoles: ["coordenador_master"]
+  },
+  {
     href: "/master/usuarios" as Route,
     label: "Usuários",
+    allowedRoles: ["coordenador_master"]
+  },
+  {
+    href: "/master/contextos" as Route,
+    label: "Contextos institucionais",
+    allowedRoles: ["coordenador_master"]
+  },
+  {
+    href: "/master/semestres" as Route,
+    label: "Semestres por oferta",
+    allowedRoles: ["coordenador_master"]
+  },
+  {
+    href: "/master/turmas" as Route,
+    label: "Turmas por semestre",
+    allowedRoles: ["coordenador_master"]
+  },
+  {
+    href: "/master/matriculas" as Route,
+    label: "Matrículas por oferta",
     allowedRoles: ["coordenador_master"]
   },
   {
@@ -127,11 +172,48 @@ export function getNavigationForRole(role: ProfileCode) {
   return navigationItems.filter((item) => item.allowedRoles.includes(role));
 }
 
+export function getNavigationForUser(currentUser: SessionUser) {
+  const links = [...getNavigationForRole(currentUser.role)];
+
+  if (getActiveMasterCourseContext(currentUser)) {
+    const coordinatorDashboardIndex = links.findIndex(
+      (link) => link.href === ("/coordenador" as Route)
+    );
+
+    if (coordinatorDashboardIndex >= 0) {
+      links[coordinatorDashboardIndex] = {
+        ...links[coordinatorDashboardIndex],
+        href: "/master-curso" as Route,
+        label: "Gestão do curso"
+      };
+    } else if (!links.some((link) => link.href === ("/master-curso" as Route))) {
+      links.unshift({
+        href: "/master-curso" as Route,
+        label: "Gestão do curso",
+        allowedRoles: [currentUser.role]
+      });
+    }
+  }
+
+  return links;
+}
+
 export function getUnauthorizedRedirectPath(role: ProfileCode) {
   return defaultDashboardPath[role];
 }
 
-export function getRoleDescription(role: ProfileCode) {
-  return `${roleLabels[role]} autenticado`;
+export function getRoleDescription(
+  currentUser: Pick<SessionUser, "role" | "contextoAtivo">
+) {
+  if (getActiveMasterCourseContext(currentUser)) {
+    return "Gestor autenticado";
+  }
+
+  return `${roleLabels[currentUser.role]} autenticado`;
 }
 
+export function getHomeNavigationPath(
+  currentUser: Pick<SessionUser, "role" | "contextoAtivo">
+) {
+  return getDefaultDashboardPathForUser(currentUser);
+}

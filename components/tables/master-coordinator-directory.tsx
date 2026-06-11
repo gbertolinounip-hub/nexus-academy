@@ -1,4 +1,3 @@
-import { Fragment } from "react";
 import Link from "next/link";
 import type { Route } from "next";
 import { ConfirmActionForm } from "@/components/forms/confirm-action-form";
@@ -17,6 +16,26 @@ function formatLinkedDate(date: string) {
   return new Date(date).toLocaleDateString("pt-BR");
 }
 
+function renderEditDisclosure(entry: MasterCoordinatorDirectoryEntry) {
+  return (
+    <details className="master-inline-action-disclosure master-coordinator-inline-disclosure">
+      <summary className="button button-secondary button-small master-inline-action-trigger">
+        Editar coordenador
+      </summary>
+      <div className="master-inline-action-panel">
+        <MasterCoordinatorProfileForm
+          initialValues={{
+            coordinator_id: entry.coordinatorId,
+            unit_id: entry.unitId,
+            nome_completo: entry.name,
+            cargo: entry.roleTitle
+          }}
+        />
+      </div>
+    </details>
+  );
+}
+
 export function MasterCoordinatorDirectory({
   entries,
   emptyMessage,
@@ -27,11 +46,9 @@ export function MasterCoordinatorDirectory({
     return <p className="empty-message">{emptyMessage}</p>;
   }
 
-  const columnCount = showUnitColumn ? 5 : 4;
-
   return (
     <div className="master-coordinator-directory">
-      <div className="table-wrap master-coordinator-table-wrap">
+      <div className="table-wrap master-coordinator-table-wrap table-scroll-sm">
         <table className="table master-coordinator-table">
           <colgroup>
             <col className="master-coordinator-col-identity" />
@@ -51,81 +68,63 @@ export function MasterCoordinatorDirectory({
           </thead>
           <tbody>
             {entries.map((entry) => (
-              <Fragment key={`${entry.unitId}-${entry.coordinatorId}`}>
-                <tr>
-                  <td className="master-coordinator-cell-identity">
-                    <strong>{entry.name}</strong>
-                    <span className="table-helper">{entry.email}</span>
+              <tr key={`${entry.unitId}-${entry.coordinatorId}`}>
+                <td className="master-coordinator-cell-identity">
+                  <strong>{entry.name}</strong>
+                  <span className="table-helper">{entry.email}</span>
+                </td>
+                {showUnitColumn ? (
+                  <td className="master-coordinator-cell-unit">
+                    <strong>{entry.unitName}</strong>
+                    <span className="table-helper">{entry.unitSlug}</span>
                   </td>
-                  {showUnitColumn ? (
-                    <td className="master-coordinator-cell-unit">
-                      <strong>{entry.unitName}</strong>
-                      <span className="table-helper">{entry.unitSlug}</span>
-                    </td>
-                  ) : null}
-                  <td>
-                    <strong>{entry.roleTitle}</strong>
-                    <span className="table-helper">
-                      Vinculado em {formatLinkedDate(entry.createdAt)}
+                ) : null}
+                <td>
+                  <strong>{entry.roleTitle}</strong>
+                  <span className="table-helper">Vinculado em {formatLinkedDate(entry.createdAt)}</span>
+                </td>
+                <td>
+                  <div className="master-pill-group master-coordinator-status-group">
+                    {entry.isResponsible ? (
+                      <span className="status-pill status-ativo">Responsável</span>
+                    ) : null}
+                    <span
+                      className={`status-pill ${
+                        entry.isActive ? "status-ativo" : "status-inativo"
+                      }`}
+                    >
+                      {entry.isActive ? "Ativo" : "Inativo"}
                     </span>
-                  </td>
-                  <td>
-                    <div className="master-pill-group master-coordinator-status-group">
-                      {entry.isResponsible ? (
-                        <span className="status-pill status-ativo">Responsável</span>
-                      ) : null}
-                      <span
-                        className={`status-pill ${
-                          entry.isActive ? "status-ativo" : "status-inativo"
-                        }`}
-                      >
-                        {entry.isActive ? "Ativo" : "Inativo"}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="master-coordinator-cell-actions">
-                    <div className="actions-row master-coordinator-actions">
-                      {showOpenUnitAction ? (
-                        <Link
-                          href={`/master/unidades/${encodeURIComponent(entry.unitId)}` as Route}
-                          className="button button-secondary button-small"
-                        >
-                          Abrir unidade
-                        </Link>
-                      ) : null}
-                      <ConfirmActionForm
-                        action={toggleCoordinatorAccessAction}
-                        confirmationMessage={`Deseja ${
-                          entry.isActive ? "desativar" : "ativar"
-                        } o acesso de ${entry.name}?`}
-                        fields={[
-                          { name: "coordinator_id", value: entry.coordinatorId },
-                          { name: "unit_id", value: entry.unitId },
-                          { name: "ativo", value: entry.isActive ? "false" : "true" }
-                        ]}
+                  </div>
+                </td>
+                <td className="master-coordinator-cell-actions">
+                  <div className="actions-row master-coordinator-actions">
+                    {showOpenUnitAction ? (
+                      <Link
+                        href={`/master/unidades/${encodeURIComponent(entry.unitId)}` as Route}
                         className="button button-secondary button-small"
                       >
-                        {entry.isActive ? "Desativar acesso" : "Ativar acesso"}
-                      </ConfirmActionForm>
-                    </div>
-                  </td>
-                </tr>
-                <tr className="master-coordinator-edit-row">
-                  <td colSpan={columnCount}>
-                    <details className="master-unit-disclosure master-coordinator-inline-disclosure">
-                      <summary>Editar coordenador</summary>
-                      <MasterCoordinatorProfileForm
-                        initialValues={{
-                          coordinator_id: entry.coordinatorId,
-                          unit_id: entry.unitId,
-                          nome_completo: entry.name,
-                          cargo: entry.roleTitle
-                        }}
-                      />
-                    </details>
-                  </td>
-                </tr>
-              </Fragment>
+                        Abrir unidade
+                      </Link>
+                    ) : null}
+                    <ConfirmActionForm
+                      action={toggleCoordinatorAccessAction}
+                      confirmationMessage={`Deseja ${
+                        entry.isActive ? "desativar" : "ativar"
+                      } o acesso de ${entry.name}?`}
+                      fields={[
+                        { name: "coordinator_id", value: entry.coordinatorId },
+                        { name: "unit_id", value: entry.unitId },
+                        { name: "ativo", value: entry.isActive ? "false" : "true" }
+                      ]}
+                      className="button button-secondary button-small"
+                    >
+                      {entry.isActive ? "Desativar acesso" : "Ativar acesso"}
+                    </ConfirmActionForm>
+                    {renderEditDisclosure(entry)}
+                  </div>
+                </td>
+              </tr>
             ))}
           </tbody>
         </table>
@@ -204,17 +203,7 @@ export function MasterCoordinatorDirectory({
               </ConfirmActionForm>
             </div>
 
-            <details className="master-unit-disclosure master-coordinator-inline-disclosure">
-              <summary>Editar coordenador</summary>
-              <MasterCoordinatorProfileForm
-                initialValues={{
-                  coordinator_id: entry.coordinatorId,
-                  unit_id: entry.unitId,
-                  nome_completo: entry.name,
-                  cargo: entry.roleTitle
-                }}
-              />
-            </details>
+            {renderEditDisclosure(entry)}
           </article>
         ))}
       </div>

@@ -20,6 +20,7 @@ function getStatusClassName(status: string) {
 export default async function ClinicalPatientsBasePage(props: {
   searchParams?: Promise<{
     q?: string;
+    unit_id?: string;
     status?: string;
     semester_id?: string;
     area_id?: string;
@@ -29,6 +30,7 @@ export default async function ClinicalPatientsBasePage(props: {
   const searchParams = (await props.searchParams) ?? {};
   const { pageData, emptyState } = await getClinicalPatientBasePageData(currentUser, {
     query: searchParams.q ?? null,
+    unitId: searchParams.unit_id ?? null,
     status: searchParams.status ?? null,
     semesterId: searchParams.semester_id ?? null,
     areaId: searchParams.area_id ?? null
@@ -63,6 +65,8 @@ export default async function ClinicalPatientsBasePage(props: {
   }
 
   const isSecretaryView = pageData.viewerRole === "secretaria";
+  const showUnitFilter = pageData.filterOptions.units.length > 0;
+  const showSearchFilter = !showUnitFilter;
 
   return (
     <div className="stack clinical-supervision-page">
@@ -71,7 +75,9 @@ export default async function ClinicalPatientsBasePage(props: {
         <h1>Pacientes</h1>
         <p>
           {pageData.viewerRole === "coordenador"
-            ? "Consulte a base permanente de pacientes da unidade, acompanhe o histórico longitudinal e abra novos casos clínicos sem recadastro desnecessário."
+            ? showUnitFilter
+              ? "Consulte a base permanente de pacientes do curso, acompanhe o histórico longitudinal por unidade e abra novos casos clínicos sem recadastro desnecessário."
+              : "Consulte a base permanente de pacientes da unidade, acompanhe o histórico longitudinal e abra novos casos clínicos sem recadastro desnecessário."
             : isSecretaryView
               ? "Consulte a base administrativa de pacientes da unidade, com busca, filtros e visão operacional para cadastro e atribuição."
               : "Consulte os pacientes vinculados à sua atuação clínica, acompanhe o histórico longitudinal e reutilize o cadastro-base para novos casos."}
@@ -103,19 +109,43 @@ export default async function ClinicalPatientsBasePage(props: {
 
       <SectionCard
         title="Busca e filtros"
-        description="Pesquise por nome, identificador ou CPF e refine a base institucional por status, semestre e área."
+        description={
+          showSearchFilter
+            ? "Pesquise por nome, identificador ou CPF e refine a base institucional por status, semestre e área."
+            : "Refine a base institucional do curso por unidade, status, semestre e área."
+        }
       >
         <form method="get" className="clinical-patient-filter-grid">
-          <label className="field">
-            <span>Busca</span>
-            <input
-              className="input"
-              type="search"
-              name="q"
-              defaultValue={pageData.filters.query}
-              placeholder="Nome, identificador ou CPF"
-            />
-          </label>
+          {showSearchFilter ? (
+            <label className="field">
+              <span>Busca</span>
+              <input
+                className="input"
+                type="search"
+                name="q"
+                defaultValue={pageData.filters.query}
+                placeholder="Nome, identificador ou CPF"
+              />
+            </label>
+          ) : null}
+
+          {showUnitFilter ? (
+            <label className="field">
+              <span>Unidade</span>
+              <select
+                className="input"
+                name="unit_id"
+                defaultValue={pageData.filters.unitId}
+              >
+                <option value="">Todas</option>
+                {pageData.filterOptions.units.map((unitOption) => (
+                  <option key={unitOption.id} value={unitOption.id}>
+                    {unitOption.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
           <label className="field">
             <span>Status</span>

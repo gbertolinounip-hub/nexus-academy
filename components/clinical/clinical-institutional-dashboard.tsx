@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Route } from "next";
+import { ClinicalInstitutionalDashboardFilters } from "@/components/forms/clinical-institutional-dashboard-filters";
 import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
 import {
@@ -25,6 +26,7 @@ interface ClinicalInstitutionalDashboardScreenProps {
   heroDescription: string;
   secondaryActions?: ClinicalInstitutionalDashboardLinkAction[];
   printLabel?: string;
+  hideCaseTable?: boolean;
 }
 
 interface ClinicalInstitutionalDashboardPrintSectionsProps {
@@ -33,6 +35,7 @@ interface ClinicalInstitutionalDashboardPrintSectionsProps {
 
 export function buildClinicalInstitutionalDashboardQuery(filters: {
   query: string;
+  institutionId?: string;
   unitId?: string;
   semesterId: string;
   areaId: string;
@@ -44,6 +47,10 @@ export function buildClinicalInstitutionalDashboardQuery(filters: {
 
   if (filters.query) {
     searchParams.set("q", filters.query);
+  }
+
+  if (filters.institutionId) {
+    searchParams.set("institution_id", filters.institutionId);
   }
 
   if (filters.unitId) {
@@ -97,6 +104,8 @@ export function formatClinicalInstitutionalLatestEvolutionLabel(
 function shouldShowUnitScope(pageData: ClinicalInstitutionalDashboardPageData) {
   return (
     pageData.viewerRole === "coordenador_master" ||
+    (pageData.viewerRole === "coordenador" &&
+      pageData.filterOptions.units.length > 0) ||
     pageData.breakdowns.byUnit.length > 1
   );
 }
@@ -145,6 +154,11 @@ export function ClinicalInstitutionalDashboardScreen(
 ) {
   const { pageData } = props;
   const showUnitScope = shouldShowUnitScope(pageData);
+  const showInstitutionScope = pageData.viewerRole === "coordenador_master";
+  const showCourseManagerUnitScope =
+    pageData.viewerRole === "coordenador" &&
+    pageData.filterOptions.units.length > 0;
+  const showSearchFilter = !showInstitutionScope && !showCourseManagerUnitScope;
   const dashboardQuery = buildClinicalInstitutionalDashboardQuery(pageData.filters);
   const printHref = dashboardQuery
     ? `${props.printBasePath}${dashboardQuery}&print=1`
@@ -217,11 +231,24 @@ export function ClinicalInstitutionalDashboardScreen(
       <SectionCard
         title="Filtros institucionais"
         description={
-          showUnitScope
-            ? "Refine a visão global por unidade, paciente, semestre, área, professor, aluno e status do caso."
-            : "Refine a visão da unidade por paciente, semestre, área, professor, aluno e status do caso."
+          showCourseManagerUnitScope
+            ? "Refine a visão do curso por unidade, semestre, área, professor, aluno e status do caso."
+            : showUnitScope
+              ? "Refine a visão global por unidade, paciente, semestre, área, professor, aluno e status do caso."
+              : "Refine a visão da unidade por paciente, semestre, área, professor, aluno e status do caso."
         }
       >
+        {showInstitutionScope || showCourseManagerUnitScope ? (
+          <ClinicalInstitutionalDashboardFilters
+            actionPath={props.basePath}
+            printHref={printHref as Route}
+            filters={pageData.filters}
+            filterOptions={pageData.filterOptions}
+            showInstitutionFilter={showInstitutionScope}
+            showSearchFilter={showSearchFilter}
+            showUnitFilter={showUnitScope}
+          />
+        ) : (
         <form method="get" className="clinical-institutional-filter-form">
           <label className="field">
             <span>Busca</span>
@@ -348,6 +375,7 @@ export function ClinicalInstitutionalDashboardScreen(
             </Link>
           </div>
         </form>
+        )}
       </SectionCard>
 
       <div className="clinical-institutional-breakdown-grid">
@@ -405,118 +433,120 @@ export function ClinicalInstitutionalDashboardScreen(
         })}
       </div>
 
-      <SectionCard
-        title="Tabela consolidada de casos"
-        description={
-          showUnitScope
-            ? "Leitura institucional multiunidade do recorte atual, com dados clínicos, acadêmicos e acesso ao caso."
-            : "Leitura institucional do recorte atual, com dados clínicos, acadêmicos e acesso ao caso."
-        }
-      >
-        {pageData.cases.length ? (
-          <div className="table-wrap">
-            <table className="table clinical-institutional-case-table">
-              <colgroup>
-                {showUnitScope ? <col className="clinical-case-col-unit" /> : null}
-                <col className="clinical-case-col-patient" />
-                <col className="clinical-case-col-semester" />
-                <col className="clinical-case-col-area" />
-                <col className="clinical-case-col-professor" />
-                <col className="clinical-case-col-student" />
-                <col className="clinical-case-col-status" />
-                <col className="clinical-case-col-start" />
-                <col className="clinical-case-col-end" />
-                <col className="clinical-case-col-evolution" />
-                <col className="clinical-case-col-record" />
-                <col className="clinical-case-col-actions" />
-              </colgroup>
-              <thead>
-                <tr>
-                  {showUnitScope ? <th>Unidade</th> : null}
-                  <th>Paciente</th>
-                  <th>Semestre</th>
-                  <th>Área</th>
-                  <th>Professor</th>
-                  <th>Aluno</th>
-                  <th>Status</th>
-                  <th>Início</th>
-                  <th>Fim</th>
-                  <th>Última evolução</th>
-                  <th>Último registro</th>
-                  <th>Ações</th>
-                </tr>
-              </thead>
-              <tbody>
+      {props.hideCaseTable ? null : (
+        <SectionCard
+          title="Tabela consolidada de casos"
+          description={
+            showUnitScope
+              ? "Leitura institucional multiunidade do recorte atual, com dados clínicos, acadêmicos e acesso ao caso."
+              : "Leitura institucional do recorte atual, com dados clínicos, acadêmicos e acesso ao caso."
+          }
+        >
+          {pageData.cases.length ? (
+            <div className="table-wrap">
+              <table className="table clinical-institutional-case-table">
+                <colgroup>
+                  {showUnitScope ? <col className="clinical-case-col-unit" /> : null}
+                  <col className="clinical-case-col-patient" />
+                  <col className="clinical-case-col-semester" />
+                  <col className="clinical-case-col-area" />
+                  <col className="clinical-case-col-professor" />
+                  <col className="clinical-case-col-student" />
+                  <col className="clinical-case-col-status" />
+                  <col className="clinical-case-col-start" />
+                  <col className="clinical-case-col-end" />
+                  <col className="clinical-case-col-evolution" />
+                  <col className="clinical-case-col-record" />
+                  <col className="clinical-case-col-actions" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    {showUnitScope ? <th>Unidade</th> : null}
+                    <th>Paciente</th>
+                    <th>Semestre</th>
+                    <th>Área</th>
+                    <th>Professor</th>
+                    <th>Aluno</th>
+                    <th>Status</th>
+                    <th>Início</th>
+                    <th>Fim</th>
+                    <th>Última evolução</th>
+                    <th>Último registro</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
                   {pageData.cases.map((row) => (
                     <tr key={row.caseItem.id}>
-                    {showUnitScope ? (
-                      <td className="clinical-institutional-case-cell-unit">
-                        {row.caseItem.unitName}
+                      {showUnitScope ? (
+                        <td className="clinical-institutional-case-cell-unit">
+                          {row.caseItem.unitName}
+                        </td>
+                      ) : null}
+                      <td className="clinical-institutional-case-cell-main clinical-institutional-case-cell-patient">
+                        <strong>{row.caseItem.patient.name}</strong>
+                        <div className="table-helper">
+                          Identificador: {row.caseItem.patient.identifier}
+                        </div>
                       </td>
-                    ) : null}
-                    <td className="clinical-institutional-case-cell-main clinical-institutional-case-cell-patient">
-                      <strong>{row.caseItem.patient.name}</strong>
-                      <div className="table-helper">
-                        Identificador: {row.caseItem.patient.identifier}
-                      </div>
-                    </td>
-                    <td>{row.caseItem.semesterCode}</td>
-                    <td className="clinical-institutional-case-cell-area">{row.caseItem.areaName}</td>
-                    <td className="clinical-institutional-case-cell-professor">
-                      {row.caseItem.professorName}
-                    </td>
-                    <td className="clinical-institutional-case-cell-main clinical-institutional-case-cell-student">
-                      <strong>{row.caseItem.studentName}</strong>
-                      <div className="table-helper">{row.caseItem.registration}</div>
-                    </td>
-                    <td>
-                      <span className={`status-pill status-${row.caseItem.status}`}>
-                        {formatClinicalCaseStatus(row.caseItem.status)}
-                      </span>
-                      {row.hasPendingItems ? (
-                        <div className="table-helper">Há pendências clínicas</div>
-                      ) : null}
-                      {row.hasRecentEvolutionGap ? (
-                        <div className="table-helper">Sem evolução recente</div>
-                      ) : null}
-                    </td>
-                    <td>{formatDate(row.caseItem.startedAt)}</td>
-                    <td>
-                      {row.caseItem.endedAt
-                        ? formatDate(row.caseItem.endedAt)
-                        : "Em aberto"}
-                    </td>
-                    <td>
-                      {formatClinicalInstitutionalLatestEvolutionLabel(
-                        row.latestEvolutionDate
-                      )}
-                    </td>
-                    <td>
-                      {formatClinicalInstitutionalLatestRecordLabel({
-                        type: row.latestRecordType,
-                        status: row.latestRecordStatus,
-                        updatedAt: row.latestRecordUpdatedAt
-                      })}
-                    </td>
-                    <td className="clinical-institutional-case-actions-cell">
-                      <Link
-                        href={`/clinica-supervisionada/${row.caseItem.id}` as Route}
-                        className="button button-secondary button-small"
-                      >
-                        Abrir caso
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="empty-message">
-            Nenhum caso clínico corresponde ao recorte atual da gestão clínica.
-          </p>
-        )}
-      </SectionCard>
+                      <td>{row.caseItem.semesterCode}</td>
+                      <td className="clinical-institutional-case-cell-area">
+                        {row.caseItem.areaName}
+                      </td>
+                      <td className="clinical-institutional-case-cell-professor">
+                        {row.caseItem.professorName}
+                      </td>
+                      <td className="clinical-institutional-case-cell-main clinical-institutional-case-cell-student">
+                        <strong>{row.caseItem.studentName}</strong>
+                        <div className="table-helper">{row.caseItem.registration}</div>
+                      </td>
+                      <td>
+                        <span className={`status-pill status-${row.caseItem.status}`}>
+                          {formatClinicalCaseStatus(row.caseItem.status)}
+                        </span>
+                        {row.hasPendingItems ? (
+                          <div className="table-helper">Há pendências clínicas</div>
+                        ) : null}
+                        {row.hasRecentEvolutionGap ? (
+                          <div className="table-helper">Sem evolução recente</div>
+                        ) : null}
+                      </td>
+                      <td>{formatDate(row.caseItem.startedAt)}</td>
+                      <td>
+                        {row.caseItem.endedAt ? formatDate(row.caseItem.endedAt) : "Em aberto"}
+                      </td>
+                      <td>
+                        {formatClinicalInstitutionalLatestEvolutionLabel(
+                          row.latestEvolutionDate
+                        )}
+                      </td>
+                      <td>
+                        {formatClinicalInstitutionalLatestRecordLabel({
+                          type: row.latestRecordType,
+                          status: row.latestRecordStatus,
+                          updatedAt: row.latestRecordUpdatedAt
+                        })}
+                      </td>
+                      <td className="clinical-institutional-case-actions-cell">
+                        <Link
+                          href={`/clinica-supervisionada/${row.caseItem.id}` as Route}
+                          className="button button-secondary button-small"
+                        >
+                          Abrir caso
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="empty-message">
+              Nenhum caso clínico corresponde ao recorte atual da gestão clínica.
+            </p>
+          )}
+        </SectionCard>
+      )}
     </div>
   );
 }

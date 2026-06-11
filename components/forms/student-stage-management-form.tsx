@@ -301,6 +301,13 @@ export function StudentStageManagementForm({
         </div>
       ) : null}
 
+      {!allAreas.length ? (
+        <div className="form-notice form-notice-error">
+          Cadastre ao menos uma área supervisionada na oferta atual antes de editar os vínculos
+          de estágio deste aluno.
+        </div>
+      ) : null}
+
       <div className="management-slots">
         {draftAssignments.map((assignment, assignmentIndex) => {
           const areaFieldName = getAssignmentFieldName(assignmentIndex, "area_id");
@@ -367,18 +374,14 @@ export function StudentStageManagementForm({
                     <option value="">
                       {selectedSemesterId ? "Selecione uma área" : "Escolha o semestre primeiro"}
                     </option>
-                    {areaBlocks.map((block) => (
-                      <optgroup key={block.id} label={block.name}>
-                        {block.areas.map((área) => (
-                          <option
-                            key={área.id}
-                            value={área.id}
-                            disabled={isAreaTakenByAnotherAssignment(área.id, assignment.row_id)}
-                          >
-                            {área.name}
-                          </option>
-                        ))}
-                      </optgroup>
+                    {allAreas.map((area) => (
+                      <option
+                        key={area.id}
+                        value={area.id}
+                        disabled={isAreaTakenByAnotherAssignment(area.id, assignment.row_id)}
+                      >
+                        {area.name}
+                      </option>
                     ))}
                   </select>
                   {fieldErrors[areaFieldName] ? (
@@ -460,6 +463,7 @@ export function StudentStageManagementForm({
           className="button button-secondary"
           onClick={addAssignment}
           disabled={
+            !allAreas.length ||
             !studentIsActive ||
             !selectedSemesterId ||
             draftAssignments.length >= allAreas.length

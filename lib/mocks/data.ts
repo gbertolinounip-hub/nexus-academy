@@ -30,31 +30,36 @@ export const demoSessions: Record<SessionUser["role"], SessionUser> = {
     id: "stu-ana",
     name: "Ana Paula Souza",
     email: "ana.paula@ies.edu.br",
-    role: "aluno"
+    role: "aluno",
+    contextosDisponiveis: []
   },
   professor: {
     id: "prf-juliana",
     name: "Dra. Juliana Martins",
     email: "juliana.martins@ies.edu.br",
-    role: "professor"
+    role: "professor",
+    contextosDisponiveis: []
   },
   secretaria: {
     id: "sec-luana",
     name: "Luana Ferreira",
     email: "luana.ferreira@ies.edu.br",
-    role: "secretaria"
+    role: "secretaria",
+    contextosDisponiveis: []
   },
   coordenador: {
     id: "coord-marcelo",
     name: "Prof. Marcelo Carvalho",
     email: "marcelo.carvalho@ies.edu.br",
-    role: "coordenador"
+    role: "coordenador",
+    contextosDisponiveis: []
   },
   coordenador_master: {
     id: "coord-master-ana",
     name: "Profa. Ana Beatriz Gomes",
     email: "ana.gomes@ies.edu.br",
-    role: "coordenador_master"
+    role: "coordenador_master",
+    contextosDisponiveis: []
   }
 };
 

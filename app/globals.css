@@ -1,4 +1,12 @@
 :root {
+  --font-public-sans:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
   --bg: #f8fafc;
   --panel: rgba(255, 255, 255, 0.84);
   --panel-strong: #ffffff;
@@ -412,6 +420,12 @@ select {
   gap: 0.45rem;
 }
 
+.sidebar-account-stack {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
 .sidebar-user {
   display: grid;
   gap: 0.2rem;
@@ -424,6 +438,155 @@ select {
 .sidebar-user span {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.context-switcher {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.75rem 0.95rem;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.82);
+  overflow: hidden;
+}
+
+.context-switcher-readonly {
+  padding-block: 0.72rem;
+}
+
+.context-switcher-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.context-switcher-kicker {
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.context-switcher-disclosure {
+  min-width: 0;
+}
+
+.context-switcher-disclosure summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.context-switcher-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.context-switcher-summary {
+  position: relative;
+  display: grid;
+  gap: 0.16rem;
+  min-width: 0;
+  padding-right: 1.1rem;
+}
+
+.context-switcher-summary::after {
+  content: "▾";
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.context-switcher-current {
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-switcher-current-meta {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-switcher-options {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.context-switcher-option {
+  display: grid;
+  gap: 0.18rem;
+  width: 100%;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(243, 248, 253, 0.78);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.context-switcher-option:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.28);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 10px 24px rgba(var(--brand-rgb), 0.08);
+  transform: translateY(-1px);
+}
+
+.context-switcher-option:disabled {
+  cursor: default;
+}
+
+.context-switcher-option-active {
+  border-color: rgba(var(--brand-rgb), 0.2);
+  background: rgba(var(--brand-rgb), 0.08);
+}
+
+.context-switcher-option-short,
+.context-switcher-option-long {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-switcher-option-short {
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.context-switcher-option-long {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.context-switcher-feedback {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.context-switcher-feedback-error {
+  color: var(--danger);
 }
 
 .page {
@@ -634,6 +797,36 @@ select {
   max-width: 100%;
   border-radius: 18px;
   border: 1px solid var(--line);
+}
+
+.master-scroll-shell {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.table-scroll-sm,
+.table-scroll-md,
+.table-scroll-lg,
+.table-scroll-xl {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.table-scroll-sm {
+  max-height: 26rem;
+}
+
+.table-scroll-md {
+  max-height: 34rem;
+}
+
+.table-scroll-lg {
+  max-height: 42rem;
+}
+
+.table-scroll-xl {
+  max-height: 52rem;
 }
 
 .table {
@@ -2242,6 +2435,29 @@ textarea.input:focus {
   white-space: nowrap;
 }
 
+.management-inline-filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.65rem;
+}
+
+.management-inline-filter-field {
+  display: grid;
+  gap: 0.35rem;
+  min-width: min(100%, 220px);
+  color: rgba(var(--foreground-rgb), 0.82);
+  font-size: 0.82rem;
+}
+
+.management-inline-filter-field span {
+  font-weight: 600;
+}
+
+.management-inline-filter-form .input {
+  min-width: min(100%, 220px);
+}
+
 .management-students-table-wrap,
 .management-professors-table-wrap {
   overflow-x: auto;
@@ -3396,10 +3612,33 @@ textarea.input:focus {
   padding-top: 0;
 }
 
-.master-coordinator-edit-row td {
-  padding-top: 0.35rem;
-  padding-bottom: 0.95rem;
-  background: rgba(255, 255, 255, 0.55);
+.master-inline-action-disclosure {
+  min-width: 0;
+}
+
+.master-inline-action-disclosure summary {
+  list-style: none;
+}
+
+.master-inline-action-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.master-inline-action-trigger {
+  display: inline-flex;
+  width: fit-content;
+}
+
+.master-inline-action-panel {
+  margin-top: 0.85rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.master-inline-action-panel .form-stack {
+  max-width: 30rem;
 }
 
 .master-coordinator-mobile-list {
@@ -3683,6 +3922,237 @@ textarea.input:focus {
   min-width: 720px;
 }
 
+.master-contexts-dashboard .card,
+.master-contexts-dashboard .table-wrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.master-contexts-table-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.master-contexts-user-table-scroll {
+  max-height: 30rem;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.master-classes-table-scroll {
+  max-height: 38.75rem;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.master-enrollments-table-scroll {
+  max-height: 28.75rem;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.master-documents-table-scroll {
+  max-height: 38.75rem;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.master-contexts-structure-table {
+  min-width: 760px;
+}
+
+.master-contexts-user-table {
+  min-width: 1320px;
+}
+
+.master-contexts-master-course-table {
+  min-width: 760px;
+}
+
+.master-course-management-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.master-institution-management-table {
+  min-width: 1180px;
+}
+
+.master-course-management-course-table {
+  min-width: 880px;
+}
+
+.master-course-management-offer-table {
+  min-width: 1080px;
+}
+
+.master-course-configuration-course-table {
+  min-width: 960px;
+}
+
+.master-course-configuration-detail-table {
+  min-width: 840px;
+}
+
+.master-course-configuration-detail-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.master-course-configuration-editor-grid {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.master-course-configuration-edit-form .form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.master-course-configuration-edit-form .management-tag-list {
+  margin-bottom: 0.25rem;
+}
+
+.master-course-configuration-weight-diagnostic {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.master-course-configuration-weight-copy {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.master-course-configuration-status-stack {
+  display: grid;
+  justify-items: end;
+  gap: 0.5rem;
+}
+
+.master-course-configuration-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.master-course-configuration-card-actions {
+  margin-top: 1rem;
+  align-items: flex-start;
+}
+
+.master-course-configuration-card-content {
+  margin-top: 1rem;
+}
+
+.master-course-offers-table {
+  min-width: 860px;
+}
+
+.master-course-contexts-table {
+  min-width: 980px;
+}
+
+.master-contexts-user-table th,
+.master-contexts-user-table td,
+.master-contexts-structure-table th,
+.master-contexts-structure-table td,
+.master-contexts-master-course-table th,
+.master-contexts-master-course-table td,
+.master-institution-management-table th,
+.master-institution-management-table td,
+.master-course-management-course-table th,
+.master-course-management-course-table td,
+.master-course-management-offer-table th,
+.master-course-management-offer-table td,
+.master-course-configuration-course-table th,
+.master-course-configuration-course-table td,
+.master-course-configuration-detail-table th,
+.master-course-configuration-detail-table td,
+.master-course-offers-table th,
+.master-course-offers-table td,
+.master-course-contexts-table th,
+.master-course-contexts-table td {
+  padding: 0.85rem 0.9rem;
+}
+
+.master-institution-actions {
+  display: grid;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.master-institution-actions .button {
+  white-space: normal;
+}
+
+.master-institution-inline-disclosure {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.master-institution-inline-card {
+  margin-top: 0.85rem;
+  min-width: min(100%, 460px);
+}
+
+.master-context-alert-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.master-context-alert-card {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.62);
+  min-width: 0;
+}
+
+.master-context-alert-card-alert {
+  border-color: rgba(190, 24, 93, 0.24);
+  background: rgba(255, 241, 242, 0.75);
+}
+
+.master-context-alert-card-positive {
+  border-color: rgba(22, 163, 74, 0.22);
+  background: rgba(240, 253, 244, 0.82);
+}
+
+.master-context-alert-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.85rem;
+}
+
+.master-context-alert-header h3 {
+  margin: 0;
+}
+
+.master-context-alert-header p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.master-context-alert-header strong {
+  font-size: 1.65rem;
+  line-height: 1;
+}
+
 .master-audit-dashboard .card,
 .master-audit-dashboard .table-wrap {
   min-width: 0;
@@ -3694,8 +4164,15 @@ textarea.input:focus {
 }
 
 .master-audit-table-wrap {
+  overflow: visible;
+}
+
+.master-audit-events-table-scroll {
+  max-height: 40rem;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .master-audit-table {

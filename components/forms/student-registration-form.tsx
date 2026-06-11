@@ -375,6 +375,13 @@ export function StudentRegistrationForm({
         </label>
       </div>
 
+      {!allAreas.length ? (
+        <div className="form-notice form-notice-error">
+          Cadastre ao menos uma área supervisionada na oferta atual antes de criar vínculos
+          iniciais de estágio para o aluno.
+        </div>
+      ) : null}
+
       <div className="management-slots">
         {draft.assignments.map((assignment, assignmentIndex) => {
           const areaFieldName = getAssignmentFieldName(assignmentIndex, "area_id");
@@ -443,18 +450,14 @@ export function StudentRegistrationForm({
                         ? "Selecione uma área"
                         : "Escolha o semestre inicial primeiro"}
                     </option>
-                    {areaBlocks.map((block) => (
-                      <optgroup key={block.id} label={block.name}>
-                        {block.areas.map((área) => (
-                          <option
-                            key={área.id}
-                            value={área.id}
-                            disabled={isAreaTakenByAnotherAssignment(área.id, assignment.row_id)}
-                          >
-                            {área.name}
-                          </option>
-                        ))}
-                      </optgroup>
+                    {allAreas.map((area) => (
+                      <option
+                        key={area.id}
+                        value={area.id}
+                        disabled={isAreaTakenByAnotherAssignment(area.id, assignment.row_id)}
+                      >
+                        {area.name}
+                      </option>
                     ))}
                   </select>
                   {!draft.semestre_id ? (
@@ -540,7 +543,11 @@ export function StudentRegistrationForm({
           type="button"
           className="button button-secondary"
           onClick={addAssignment}
-          disabled={!draft.semestre_id || draft.assignments.length >= allAreas.length}
+          disabled={
+            !allAreas.length ||
+            !draft.semestre_id ||
+            draft.assignments.length >= allAreas.length
+          }
         >
           Adicionar área
         </button>

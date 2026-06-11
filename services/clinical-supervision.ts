@@ -1,4 +1,9 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  loadScopedOperationalGraph,
+  resolveScopedDataAccess,
+  type ResolvedSessionDataScope
+} from "@/lib/auth/data-scope";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatMaskedFirstName } from "@/lib/utils/format";
 import {
@@ -35,6 +40,7 @@ import type {
 type UserRow = Database["public"]["Tables"]["usuarios"]["Row"];
 type StudentRow = Database["public"]["Tables"]["alunos"]["Row"];
 type ProfessorRow = Database["public"]["Tables"]["professores"]["Row"];
+type InstitutionRow = Database["public"]["Tables"]["instituicoes"]["Row"];
 type EnrollmentRow = Database["public"]["Tables"]["matriculas_turma"]["Row"];
 type ClassRow = Database["public"]["Tables"]["turmas"]["Row"];
 type SemesterRow = Database["public"]["Tables"]["semestres"]["Row"];
@@ -263,11 +269,13 @@ export interface ClinicalPatientBasePageData {
   viewerName: string;
   patients: ClinicalInstitutionalPatientListItem[];
   filterOptions: {
+    units: Array<{ id: string; name: string }>;
     semesters: Array<{ id: string; code: string }>;
     areas: Array<{ id: string; name: string }>;
   };
   filters: {
     query: string;
+    unitId: string;
     status: "todos" | "com_caso_ativo" | "alta" | "com_historico";
     semesterId: string;
     areaId: string;
@@ -312,12 +320,24 @@ export interface ClinicalInstitutionalDashboardCaseRow {
   hasRecentEvolutionGap: boolean;
 }
 
+export interface ClinicalInstitutionalDashboardInstitutionOption {
+  id: string;
+  name: string;
+}
+
+export interface ClinicalInstitutionalDashboardUnitOption {
+  id: string;
+  name: string;
+  institutionId: string | null;
+}
+
 export interface ClinicalInstitutionalDashboardPageData {
   viewerRole: ClinicalInstitutionalViewerRole;
   viewerName: string;
   generatedAt: string;
   filters: {
     query: string;
+    institutionId: string;
     unitId: string;
     semesterId: string;
     areaId: string;
@@ -326,7 +346,8 @@ export interface ClinicalInstitutionalDashboardPageData {
     status: "todos" | ClinicalCaseSummary["status"];
   };
   filterOptions: {
-    units: Array<{ id: string; name: string }>;
+    institutions: ClinicalInstitutionalDashboardInstitutionOption[];
+    units: ClinicalInstitutionalDashboardUnitOption[];
     semesters: Array<{ id: string; code: string }>;
     areas: Array<{ id: string; name: string }>;
     professors: Array<{ id: string; name: string }>;
@@ -944,6 +965,107 @@ async function loadProfessorClinicalContext(
   }
 
   const currentUnitId = currentUser.unitId;
+  /*
+  try {
+    const cases = (await loadClinicalInstitutionalCaseSummaries(currentUser)).filter(
+      (caseItem) => caseItem.patient.id === patientId
+    );
+    const [patientData] = await loadInstitutionalPatientRows({
+      currentUser,
+      patientIds: [patientId]
+    });
+
+    if (!cases.length || !patientData) {
+      return {
+        pageData: null,
+        emptyState: buildEmptyState(
+          "Paciente institucional nÃ£o encontrado",
+          "NÃ£o foi possÃ­vel localizar este cadastro-base de paciente no escopo do usuÃ¡rio autenticado."
+        )
+      };
+    }
+
+    const supabase = await createSupabaseServerClient();
+    const { data: recordRowsData, error: recordError } = cases.length
+      ? await supabase
+          .from("registros_clinicos")
+          .select("caso_clinico_id, tipo, status, updated_at")
+          .in("caso_clinico_id", cases.map((caseItem) => caseItem.id))
+          .order("updated_at", { ascending: false })
+      : { data: [], error: null };
+
+    if (recordError) {
+      throw new Error("clinical-patient-history-record-load-failed");
+    }
+
+    const latestRecordByCaseAndType = new Map<string, ClinicalRecordStatus>();
+
+    for (const recordRow of (recordRowsData ?? []) as Array<{
+      caso_clinico_id: string;
+      tipo: ClinicalRecordType;
+      status: ClinicalRecordStatus;
+      updated_at: string;
+    }>) {
+      const mapKey = `${recordRow.caso_clinico_id}:${recordRow.tipo}`;
+      const currentValue = latestRecordByCaseAndType.get(mapKey);
+
+      if (!currentValue) {
+        latestRecordByCaseAndType.set(mapKey, recordRow.status);
+      }
+    }
+
+    const history = [...cases]
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .map((caseItem) => ({
+        caseItem,
+        latestEvaluationStatus:
+          latestRecordByCaseAndType.get(`${caseItem.id}:avaliacao`) ?? null,
+        latestTreatmentPlanStatus:
+          latestRecordByCaseAndType.get(`${caseItem.id}:plano_tratamento`) ?? null,
+        latestEvolutionStatus:
+          latestRecordByCaseAndType.get(`${caseItem.id}:evolucao`) ?? null
+      }));
+    const patientSummary = buildClinicalPatientSummary(patientData);
+    const patientListItem = buildClinicalInstitutionalPatientListItem({
+      patient: patientData,
+      cases
+    });
+
+    return {
+      pageData: {
+        viewerRole: currentUser.role,
+        viewerName: currentUser.name,
+        patient: patientSummary,
+        patientStatusLabel: patientListItem.currentStatusLabel,
+        activeCaseId: patientListItem.activeCaseId,
+        latestCaseId: patientListItem.latestCaseId,
+        history
+      },
+      emptyState: null
+    };
+  } catch {
+    return {
+      pageData: null,
+      emptyState: buildEmptyState(
+        "NÃ£o foi possÃ­vel carregar o histÃ³rico institucional do paciente",
+        "O cadastro-base foi encontrado, mas os casos clÃ­nicos vinculados ainda nÃ£o puderam ser consolidados nesta sessÃ£o."
+      )
+    };
+  }
+
+  const accessibleCaseRow = true;
+
+  if (!accessibleCaseRow) {
+    return {
+      pageData: null,
+      emptyState: buildEmptyState(
+        "Caso clÃ­nico nÃ£o encontrado",
+        "NÃ£o foi possÃ­vel localizar este caso clÃ­nico no escopo do usuÃ¡rio autenticado."
+      )
+    };
+  }
+
+  */
   const supabase = await createSupabaseServerClient();
   const { data: professorRowData, error: professorError } = await supabase
     .from("professores")
@@ -1728,6 +1850,253 @@ async function loadClinicalOperatorContext(
   };
 }
 
+async function loadScopedClinicalOperatorContext(
+  currentUser: SessionUser
+): Promise<{
+  context: ClinicalOperatorContext | null;
+  emptyState: EmptyState | null;
+}> {
+  if (currentUser.role === "professor") {
+    return loadClinicalOperatorContext(currentUser);
+  }
+
+  if (
+    currentUser.role !== "coordenador" &&
+    currentUser.role !== "coordenador_master" &&
+    currentUser.role !== "secretaria"
+  ) {
+    return {
+      context: null,
+      emptyState: buildEmptyState(
+        "Modulo disponivel apenas para professores e coordenacao",
+        "Nesta fase, a base institucional de pacientes e a operacao clinica podem ser consultadas apenas por professores e coordenacao."
+      )
+    };
+  }
+
+  const serverSupabase = await createSupabaseServerClient();
+  const supabase =
+    currentUser.role === "secretaria"
+      ? createSupabaseAdminClient()
+      : serverSupabase;
+  const scopedGraph = await loadScopedOperationalGraph(currentUser, {
+    supabase: serverSupabase
+  });
+
+  if (
+    scopedGraph.scope.scopeKind === "none" ||
+    (scopedGraph.scope.restrictToCourse &&
+      scopedGraph.scope.offerIds.length === 0)
+  ) {
+    return {
+      context: buildClinicalOperatorContext(
+        currentUser,
+        [],
+        "O contexto institucional ativo ainda nao possui matriculas operacionais seguras para a abertura de casos clinicos."
+      ),
+      emptyState: null
+    };
+  }
+
+  const enrollmentRows = scopedGraph.enrollmentRows.filter(
+    (enrollment) => enrollment.status === "ativa"
+  );
+
+  if (!enrollmentRows.length) {
+    return {
+      context: buildClinicalOperatorContext(
+        currentUser,
+        [],
+        "Ainda nao ha matriculas ativas dentro do contexto institucional selecionado."
+      ),
+      emptyState: null
+    };
+  }
+
+  const classRows = scopedGraph.classRows;
+  const semesterRows = scopedGraph.semesterRows;
+  const enrollmentIds = uniqueStringValues(enrollmentRows.map((row) => row.id));
+  const studentIds = uniqueStringValues(enrollmentRows.map((row) => row.aluno_id));
+  const { data: linksData, error: linksError } = enrollmentIds.length
+    ? await supabase
+        .from("vinculos_professor_aluno")
+        .select("*")
+        .eq("ativo", true)
+        .in("matricula_turma_id", enrollmentIds)
+    : { data: [], error: null };
+
+  if (linksError) {
+    return {
+      context: null,
+      emptyState: buildEmptyState(
+        "Nao foi possivel carregar os vinculos clinicos",
+        "Houve um problema ao consultar os vinculos ativos entre supervisores e estagiarios do contexto visivel."
+      )
+    };
+  }
+
+  const today = getTodayInSaoPaulo();
+  const professorLinks = ((linksData ?? []) as ProfessorLinkRow[]).filter(
+    (link) => !link.data_fim || link.data_fim >= today
+  );
+
+  if (!professorLinks.length) {
+    return {
+      context: buildClinicalOperatorContext(
+        currentUser,
+        [],
+        "Ainda nao ha vinculos ativos entre estagiarios e supervisores para a abertura de novos casos neste contexto."
+      ),
+      emptyState: null
+    };
+  }
+
+  const professorIds = uniqueStringValues(
+    professorLinks.map((link) => link.professor_id)
+  );
+  const [studentRowsResult, studentUsersResult, professorUsersResult] =
+    await Promise.all([
+      studentIds.length
+        ? supabase.from("alunos").select("*").in("usuario_id", studentIds)
+        : Promise.resolve({ data: [], error: null }),
+      studentIds.length
+        ? supabase.from("usuarios").select("*").in("id", studentIds).eq("ativo", true)
+        : Promise.resolve({ data: [], error: null }),
+      professorIds.length
+        ? supabase.from("usuarios").select("*").in("id", professorIds).eq("ativo", true)
+        : Promise.resolve({ data: [], error: null })
+    ]);
+
+  if (
+    studentRowsResult.error ||
+    studentUsersResult.error ||
+    professorUsersResult.error
+  ) {
+    return {
+      context: null,
+      emptyState: buildEmptyState(
+        "Nao foi possivel consolidar a operacao clinica",
+        "Faltaram dados de turma, aluno ou supervisor para preparar a abertura de novos casos."
+      )
+    };
+  }
+
+  const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
+  const studentUsers = filterActiveStudentUsers(
+    (studentUsersResult.data ?? []) as UserRow[]
+  );
+  const professorUsers = (professorUsersResult.data ?? []) as UserRow[];
+  const activeStudentIdSet = new Set(studentUsers.map((studentUser) => studentUser.id));
+  const visibleEnrollments = filterEnrollmentsToStudentIds(
+    filterEnrollmentsToClasses(enrollmentRows, classRows),
+    activeStudentIdSet
+  );
+
+  if (!visibleEnrollments.length) {
+    return {
+      context: buildClinicalOperatorContext(
+        currentUser,
+        [],
+        "Ainda nao ha estagiarios ativos do contexto institucional com matricula operacional disponivel para atribuicao clinica."
+      ),
+      emptyState: null
+    };
+  }
+
+  const areaIds = uniqueStringValues(
+    classRows.map((classGroup) => classGroup.area_estagio_id)
+  );
+  const { data: areaRowsData, error: areaError } = areaIds.length
+    ? await supabase.from("areas_estagio").select("*").in("id", areaIds)
+    : { data: [], error: null };
+
+  if (areaError) {
+    return {
+      context: null,
+      emptyState: buildEmptyState(
+        "Nao foi possivel carregar as areas do estagio",
+        "Os estagiarios foram encontrados, mas a area de estagio vinculada a operacao clinica nao pode ser consultada."
+      )
+    };
+  }
+
+  const studentRowMap = new Map(studentRows.map((row) => [row.usuario_id, row]));
+  const studentUserMap = new Map(studentUsers.map((row) => [row.id, row]));
+  const professorUserMap = new Map(professorUsers.map((row) => [row.id, row]));
+  const classMap = new Map(classRows.map((row) => [row.id, row]));
+  const semesterMap = new Map(semesterRows.map((row) => [row.id, row]));
+  const areaMap = new Map(((areaRowsData ?? []) as AreaRow[]).map((row) => [row.id, row]));
+  const professorLinksByEnrollmentId = new Map<string, ProfessorLinkRow[]>();
+
+  for (const professorLink of professorLinks) {
+    const enrollmentLinks =
+      professorLinksByEnrollmentId.get(professorLink.matricula_turma_id) ?? [];
+    enrollmentLinks.push(professorLink);
+    professorLinksByEnrollmentId.set(professorLink.matricula_turma_id, enrollmentLinks);
+  }
+
+  const baseStudentOptions = visibleEnrollments
+    .map((enrollment) => {
+      const studentRow = studentRowMap.get(enrollment.aluno_id);
+      const studentUser = studentUserMap.get(enrollment.aluno_id);
+      const classGroup = classMap.get(enrollment.turma_id);
+      const semester = classGroup
+        ? semesterMap.get(classGroup.semestre_id)
+        : undefined;
+      const area =
+        classGroup?.area_estagio_id ? areaMap.get(classGroup.area_estagio_id) : undefined;
+      const professorLink = selectInstitutionalProfessorLink(
+        professorLinksByEnrollmentId.get(enrollment.id) ?? []
+      );
+      const professorName = professorLink
+        ? professorUserMap.get(professorLink.professor_id)?.nome_completo ?? null
+        : null;
+
+      if (!studentRow || !studentUser || !classGroup || !semester || !professorName) {
+        return null;
+      }
+
+      const studentName = studentRow.nome_social ?? studentUser.nome_completo;
+      const areaName = area?.nome ?? classGroup.area_estagio;
+
+      return {
+        enrollmentId: enrollment.id,
+        studentId: studentUser.id,
+        studentName,
+        registration: studentRow.matricula,
+        classId: classGroup.id,
+        className: classGroup.nome,
+        semesterId: semester.id,
+        semesterCode: semester.codigo,
+        areaId: area?.id ?? classGroup.area_estagio_id,
+        areaName,
+        professorName,
+        exceptionalReleaseNotice: null,
+        label: `${studentName} - ${studentRow.matricula} - ${areaName} - ${classGroup.nome} - ${semester.codigo} - Supervisor: ${professorName}`
+      } satisfies ClinicalStudentOption;
+    })
+    .filter(Boolean)
+    .sort((left, right) =>
+      left!.studentName.localeCompare(right!.studentName, "pt-BR")
+    ) as ClinicalStudentOption[];
+
+  const studentOptions = await applyProfessorClinicalExceptionalReleaseNotices(
+    currentUser,
+    baseStudentOptions
+  );
+
+  return {
+    context: buildClinicalOperatorContext(
+      currentUser,
+      studentOptions,
+      studentOptions.length
+        ? null
+        : "Ainda nao ha matriculas com supervisor responsavel definido para abrir novos casos no contexto institucional selecionado."
+    ),
+    emptyState: null
+  };
+}
+
 async function loadClinicalReferenceBundle(
   caseRows: ClinicalCaseRow[],
   currentUser?: SessionUser | null
@@ -1786,12 +2155,7 @@ async function loadClinicalReferenceBundle(
       ? supabase.from("alunos").select("*").in("usuario_id", studentIds)
       : Promise.resolve({ data: [], error: null }),
     studentIds.length
-      ? (() => {
-          const baseQuery = supabase.from("usuarios").select("*").in("id", studentIds);
-          return currentUser?.unitId && currentUser.role !== "coordenador_master"
-            ? baseQuery.eq("unidade_id", currentUser.unitId).eq("ativo", true)
-            : baseQuery.eq("ativo", true);
-        })()
+      ? supabase.from("usuarios").select("*").in("id", studentIds).eq("ativo", true)
       : Promise.resolve({ data: [], error: null })
   ]);
 
@@ -1817,9 +2181,7 @@ async function loadClinicalReferenceBundle(
     throw new Error("clinical-reference-load-failed");
   }
 
-  const semesterRows = currentUser
-    ? filterSemestersToCurrentUnit((semesterRowsData ?? []) as SemesterRow[], currentUser)
-    : ((semesterRowsData ?? []) as SemesterRow[]);
+  const semesterRows = (semesterRowsData ?? []) as SemesterRow[];
   classRows = filterClassesToSemesters(classRows, semesterRows);
   enrollmentRows = filterEnrollmentsToClasses(enrollmentRows, classRows);
   const studentUsers = filterActiveStudentUsers(
@@ -1869,6 +2231,104 @@ async function loadClinicalReferenceBundle(
     areasById: new Map(((areaRowsData ?? []) as AreaRow[]).map((row) => [row.id, row])),
     schedulesByCaseId
   };
+}
+
+async function loadAccessibleClinicalCaseRows(input: {
+  currentUser: SessionUser;
+  caseId?: string;
+  patientId?: string;
+  onlyActive?: boolean;
+}) {
+  const serverSupabase = await createSupabaseServerClient();
+  const queryClient =
+    input.currentUser.role === "coordenador_master" ||
+    input.currentUser.role === "secretaria"
+      ? createSupabaseAdminClient()
+      : serverSupabase;
+  let query = queryClient.from("casos_clinicos").select("*");
+
+  if (input.caseId) {
+    query = query.eq("id", input.caseId);
+  }
+
+  if (input.patientId) {
+    query = query.eq("paciente_id", input.patientId);
+  }
+
+  if (input.onlyActive) {
+    query = query.eq("ativo", true);
+  }
+
+  if (input.currentUser.role === "professor") {
+    query = query.eq("professor_id", input.currentUser.id);
+  } else if (input.currentUser.role === "aluno") {
+    const { data: studentEnrollmentRowsData, error: studentEnrollmentRowsError } =
+      await serverSupabase
+        .from("matriculas_turma")
+        .select("id")
+        .eq("aluno_id", input.currentUser.id);
+
+    if (studentEnrollmentRowsError) {
+      throw new Error("clinical-student-enrollment-scope-load-failed");
+    }
+
+    const enrollmentIds = uniqueStringValues(
+      ((studentEnrollmentRowsData ?? []) as Array<{ id: string }>).map((row) => row.id)
+    );
+
+    if (!enrollmentIds.length) {
+      return [] as ClinicalCaseRow[];
+    }
+
+    query = query.in("matricula_turma_id", enrollmentIds);
+  } else if (
+    input.currentUser.role === "coordenador" ||
+    input.currentUser.role === "secretaria"
+  ) {
+    const scopedGraph = await loadScopedOperationalGraph(input.currentUser, {
+      supabase: serverSupabase
+    });
+
+    if (
+      scopedGraph.scope.scopeKind === "none" ||
+      (scopedGraph.scope.restrictToCourse &&
+        scopedGraph.scope.offerIds.length === 0)
+    ) {
+      return [] as ClinicalCaseRow[];
+    }
+
+    const enrollmentIds = uniqueStringValues(
+      scopedGraph.enrollmentRows.map((row) => row.id)
+    );
+
+    if (!enrollmentIds.length) {
+      return [] as ClinicalCaseRow[];
+    }
+
+    query = query.in("matricula_turma_id", enrollmentIds);
+  } else if (input.currentUser.role !== "coordenador_master") {
+    return [] as ClinicalCaseRow[];
+  }
+
+  const { data, error } = await query.order("updated_at", { ascending: false });
+
+  if (error) {
+    throw new Error("clinical-institutional-case-load-failed");
+  }
+
+  return (data ?? []) as ClinicalCaseRow[];
+}
+
+async function loadAccessibleClinicalCaseRow(
+  currentUser: SessionUser,
+  caseId: string
+) {
+  const caseRows = await loadAccessibleClinicalCaseRows({
+    currentUser,
+    caseId
+  });
+
+  return caseRows[0] ?? null;
 }
 
 function mapClinicalCaseSummaries(
@@ -2314,14 +2774,14 @@ export async function getClinicalSupervisionPageData(
   }
 
   if (currentUser.role === "aluno") {
-    const supabase = await createSupabaseServerClient();
-    const { data: caseRowsData, error: caseError } = await supabase
-      .from("casos_clinicos")
-      .select("*")
-      .eq("ativo", true)
-      .order("updated_at", { ascending: false });
+    let caseRows: ClinicalCaseRow[] = [];
 
-    if (caseError) {
+    try {
+      caseRows = await loadAccessibleClinicalCaseRows({
+        currentUser,
+        onlyActive: true
+      });
+    } catch {
       return {
         pageData: null,
         emptyState: buildEmptyState(
@@ -2330,8 +2790,6 @@ export async function getClinicalSupervisionPageData(
         )
       };
     }
-
-    const caseRows = (caseRowsData ?? []) as ClinicalCaseRow[];
 
     try {
       const bundle = await loadClinicalReferenceBundle(caseRows, currentUser);
@@ -2390,12 +2848,47 @@ export async function getClinicalSupervisionPageData(
   }
 
   if (currentUser.role === "secretaria") {
-    const { context, emptyState } = await loadClinicalOperatorContext(currentUser);
+    const { context, emptyState } = await loadScopedClinicalOperatorContext(currentUser);
 
     if (!context || emptyState) {
       return {
         pageData: null,
         emptyState
+      };
+    }
+
+    const activeContext = context;
+    let caseRows: ClinicalCaseRow[] = [];
+
+    try {
+      caseRows = await loadAccessibleClinicalCaseRows({
+        currentUser
+      });
+      const bundle = await loadClinicalReferenceBundle(caseRows, currentUser);
+      const cases = mapClinicalCaseSummaries(caseRows, bundle);
+
+      return {
+        pageData: {
+          view: "secretaria",
+          operator: activeContext.operator,
+          studentOptions: activeContext.studentOptions,
+          cases,
+          metrics: {
+            totalCases: cases.length,
+            activeCases: cases.filter((caseItem) => caseItem.active).length,
+            linkedStudents: new Set(cases.map((caseItem) => caseItem.studentId)).size
+          },
+          emptyHint: activeContext.emptyHint
+        },
+        emptyState: null
+      };
+    } catch {
+      return {
+        pageData: null,
+        emptyState: buildEmptyState(
+          "NÃ£o foi possÃ­vel consolidar a rotina administrativa da clÃ­nica",
+          "Os casos clÃ­nicos visÃ­veis foram encontrados, mas os dados de aluno, Ã¡rea, paciente ou agenda nÃ£o puderam ser consolidados."
+        )
       };
     }
 
@@ -2413,7 +2906,7 @@ export async function getClinicalSupervisionPageData(
     const { data: caseRowsData, error: caseError } = await adminClient
       .from("casos_clinicos")
       .select("*")
-      .eq("unidade_id", currentUser.unitId)
+      .eq("unidade_id", currentUser.unitId ?? "__no_unit__")
       .order("updated_at", { ascending: false });
 
     if (caseError) {
@@ -2426,8 +2919,6 @@ export async function getClinicalSupervisionPageData(
       };
     }
 
-    const caseRows = (caseRowsData ?? []) as ClinicalCaseRow[];
-
     try {
       const bundle = await loadClinicalReferenceBundle(caseRows, currentUser);
       const cases = mapClinicalCaseSummaries(caseRows, bundle);
@@ -2435,15 +2926,15 @@ export async function getClinicalSupervisionPageData(
       return {
         pageData: {
           view: "secretaria",
-          operator: context.operator,
-          studentOptions: context.studentOptions,
+          operator: activeContext.operator,
+          studentOptions: activeContext.studentOptions,
           cases,
           metrics: {
             totalCases: cases.length,
             activeCases: cases.filter((caseItem) => caseItem.active).length,
             linkedStudents: new Set(cases.map((caseItem) => caseItem.studentId)).size
           },
-          emptyHint: context.emptyHint
+          emptyHint: activeContext.emptyHint
         },
         emptyState: null
       };
@@ -2626,7 +3117,7 @@ export async function getClinicalCaseFormPageData(
     return getProfessorClinicalCaseFormPageData(currentUser, options?.caseId);
   }
 
-  const { context, emptyState } = await loadClinicalOperatorContext(currentUser);
+  const { context, emptyState } = await loadScopedClinicalOperatorContext(currentUser);
 
   if (!context || emptyState) {
     return {
@@ -2642,18 +3133,16 @@ export async function getClinicalCaseFormPageData(
   let initialValues = createEmptyClinicalCaseInitialValues();
 
   if (options?.patientId) {
-    let patientQuery = supabase
-      .from("pacientes_clinica")
-      .select("*")
-      .eq("id", options.patientId);
+    const [patientData] = await loadInstitutionalPatientRows({
+      currentUser,
+      patientIds: [options.patientId]
+    });
+    const patientCases = await loadAccessibleClinicalCaseRows({
+      currentUser,
+      patientId: options.patientId
+    });
 
-    if (currentUser.unitId) {
-      patientQuery = patientQuery.eq("unidade_id", currentUser.unitId);
-    }
-
-    const { data: patientData, error: patientError } = await patientQuery.maybeSingle();
-
-    if (patientError || !patientData) {
+    if (!patientData || !patientCases.length) {
       return {
         formData: null,
         emptyState: buildEmptyState(
@@ -2663,7 +3152,7 @@ export async function getClinicalCaseFormPageData(
       };
     }
 
-    const patient = patientData as ClinicalPatientRow;
+    const patient = patientData;
     initialValues = {
       ...initialValues,
       patientId: patient.id,
@@ -2773,54 +3262,183 @@ function buildClinicalInstitutionalPatientListItem(input: {
 }
 
 async function loadClinicalInstitutionalCaseSummaries(currentUser: SessionUser) {
-  const supabase =
-    currentUser.role === "coordenador_master" || currentUser.role === "secretaria"
-      ? createSupabaseAdminClient()
-      : await createSupabaseServerClient();
-  const casesQuery = supabase
-    .from("casos_clinicos")
-    .select("*")
-    .order("updated_at", { ascending: false });
-  const scopedQuery =
-    currentUser.role === "professor"
-      ? casesQuery.eq("professor_id", currentUser.id)
-      : (currentUser.role === "coordenador" || currentUser.role === "secretaria") &&
-          currentUser.unitId
-        ? casesQuery.eq("unidade_id", currentUser.unitId)
-        : currentUser.role === "coordenador_master"
-          ? casesQuery
-          : casesQuery.eq("id", "__no_case__");
-  const { data: caseRowsData, error: caseError } = await scopedQuery;
-
-  if (caseError) {
-    throw new Error("clinical-institutional-case-load-failed");
-  }
-
-  const caseRows = (caseRowsData ?? []) as ClinicalCaseRow[];
+  const caseRows = await loadAccessibleClinicalCaseRows({
+    currentUser
+  });
   const bundle = await loadClinicalReferenceBundle(caseRows, currentUser);
   return mapClinicalCaseSummaries(caseRows, bundle);
 }
 
 async function loadClinicalInstitutionalUnitOptions(
-  currentUser: SessionUser
+  currentUser: SessionUser,
+  scope?: ResolvedSessionDataScope | null
 ) {
   if (currentUser.role !== "coordenador_master") {
-    return [] as Array<{ id: string; name: string }>;
+    if (currentUser.role === "coordenador" && scope?.scopeKind === "course_manager") {
+      const allowedUnitIds = uniqueStringValues(scope.unitIds);
+
+      if (!allowedUnitIds.length) {
+        return {
+          institutions: [] as ClinicalInstitutionalDashboardInstitutionOption[],
+          units: [] as ClinicalInstitutionalDashboardUnitOption[]
+        };
+      }
+
+      const adminClient = createSupabaseAdminClient();
+      const { data: unitRowsData, error: unitRowsError } = await adminClient
+        .from("unidades")
+        .select("*")
+        .in("id", allowedUnitIds)
+        .order("nome");
+
+      if (unitRowsError) {
+        throw new Error("clinical-institutional-unit-load-failed");
+      }
+
+      return {
+        institutions: [] as ClinicalInstitutionalDashboardInstitutionOption[],
+        units: ((unitRowsData ?? []) as UnitRow[])
+          .map((unit) => ({
+            id: unit.id,
+            institutionId: unit.instituicao_id,
+            name: unit.nome
+          }))
+          .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"))
+      };
+    }
+
+    return {
+      institutions: [] as ClinicalInstitutionalDashboardInstitutionOption[],
+      units: [] as ClinicalInstitutionalDashboardUnitOption[]
+    };
   }
 
   const adminClient = createSupabaseAdminClient();
-  const { data, error } = await adminClient.from("unidades").select("*").order("nome");
+  const [institutionsResult, unitsResult] = await Promise.all([
+    adminClient.from("instituicoes").select("*").order("nome"),
+    adminClient.from("unidades").select("*").order("nome")
+  ]);
 
-  if (error) {
+  if (institutionsResult.error || unitsResult.error) {
     throw new Error("clinical-institutional-unit-load-failed");
   }
 
-  return ((data ?? []) as UnitRow[])
-    .map((unit) => ({
-      id: unit.id,
-      name: unit.nome
-    }))
+  return {
+    institutions: ((institutionsResult.data ?? []) as InstitutionRow[])
+      .map((institution) => ({
+        id: institution.id,
+        name: institution.nome
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name, "pt-BR")),
+    units: ((unitsResult.data ?? []) as UnitRow[])
+      .map((unit) => ({
+        id: unit.id,
+        institutionId: unit.instituicao_id,
+        name: unit.nome
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"))
+  };
+}
+
+function normalizeClinicalInstitutionalScopeFilters(input: {
+  institutions: ClinicalInstitutionalDashboardInstitutionOption[];
+  units: ClinicalInstitutionalDashboardUnitOption[];
+  allowInstitutionFilter: boolean;
+  allowUnitFilter: boolean;
+  filters?: {
+    institutionId?: string | null;
+    unitId?: string | null;
+  };
+}) {
+  const requestedInstitutionId = input.allowInstitutionFilter
+    ? input.filters?.institutionId?.trim() ?? ""
+    : "";
+  const validInstitutionId = input.institutions.some(
+    (institution) => institution.id === requestedInstitutionId
+  )
+    ? requestedInstitutionId
+    : "";
+
+  const requestedUnitId = input.allowUnitFilter
+    ? input.filters?.unitId?.trim() ?? ""
+    : "";
+  const requestedUnit = input.units.find((unit) => unit.id === requestedUnitId) ?? null;
+  const validUnitId =
+    requestedUnit &&
+    (!validInstitutionId || requestedUnit.institutionId === validInstitutionId)
+      ? requestedUnitId
+      : "";
+
+  return {
+    institutionId: validInstitutionId,
+    unitId: validUnitId
+  };
+}
+
+function filterClinicalCasesToInstitutionAndUnitScope(
+  cases: ClinicalCaseSummary[],
+  units: ClinicalInstitutionalDashboardUnitOption[],
+  filters: {
+    institutionId: string;
+    unitId: string;
+  }
+) {
+  const visibleUnitIds = filters.institutionId
+    ? new Set(
+        units
+          .filter((unit) => unit.institutionId === filters.institutionId)
+          .map((unit) => unit.id)
+      )
+    : null;
+
+  return cases
+    .filter((caseItem) =>
+      visibleUnitIds ? Boolean(caseItem.unitId && visibleUnitIds.has(caseItem.unitId)) : true
+    )
+    .filter((caseItem) => (filters.unitId ? caseItem.unitId === filters.unitId : true));
+}
+
+function buildClinicalInstitutionalSemesterOptions(cases: ClinicalCaseSummary[]) {
+  return [
+    ...new Map(cases.map((caseItem) => [caseItem.semesterId, caseItem.semesterCode])).entries()
+  ]
+    .map(([id, code]) => ({ id, code }))
+    .sort((left, right) => right.code.localeCompare(left.code, "pt-BR"));
+}
+
+function buildClinicalInstitutionalAreaOptions(cases: ClinicalCaseSummary[]) {
+  return [
+    ...new Map(
+      cases
+        .filter((caseItem) => caseItem.areaId)
+        .map((caseItem) => [caseItem.areaId as string, caseItem.areaName])
+    ).entries()
+  ]
+    .map(([id, name]) => ({ id, name }))
     .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+}
+
+function buildClinicalInstitutionalProfessorOptions(cases: ClinicalCaseSummary[]) {
+  return [
+    ...new Map(cases.map((caseItem) => [caseItem.professorId, caseItem.professorName])).entries()
+  ]
+    .map(([id, name]) => ({ id, name }))
+    .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+}
+
+function buildClinicalInstitutionalStudentOptions(cases: ClinicalCaseSummary[]) {
+  return [
+    ...new Map(
+      cases.map((caseItem) => [
+        caseItem.studentId,
+        {
+          id: caseItem.studentId,
+          name: caseItem.studentName,
+          registration: caseItem.registration
+        }
+      ])
+    ).values()
+  ].sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
 }
 
 async function loadInstitutionalPatientRows(input: {
@@ -2833,16 +3451,12 @@ async function loadInstitutionalPatientRows(input: {
       : await createSupabaseServerClient();
   let query = supabase.from("pacientes_clinica").select("*");
 
-  if (
-    (input.currentUser.role === "coordenador" ||
-      input.currentUser.role === "secretaria") &&
-    input.currentUser.unitId
-  ) {
-    query = query.eq("unidade_id", input.currentUser.unitId);
-  } else if (input.patientIds?.length) {
+  if (input.patientIds?.length) {
     query = query.in("id", input.patientIds);
-  } else {
+  } else if (input.currentUser.role !== "coordenador_master") {
     return [] as ClinicalPatientRow[];
+  } else {
+    query = query.order("nome", { ascending: true });
   }
 
   const { data, error } = await query.order("nome", { ascending: true });
@@ -2858,6 +3472,7 @@ export async function getClinicalPatientBasePageData(
   currentUser: SessionUser,
   filters?: {
     query?: string | null;
+    unitId?: string | null;
     status?: string | null;
     semesterId?: string | null;
     areaId?: string | null;
@@ -2878,13 +3493,40 @@ export async function getClinicalPatientBasePageData(
   }
 
   try {
-    const cases = await loadClinicalInstitutionalCaseSummaries(currentUser);
+    const supabase =
+      currentUser.role === "coordenador"
+        ? await createSupabaseServerClient()
+        : null;
+    const scopedAccess =
+      currentUser.role === "coordenador" && supabase
+        ? await resolveScopedDataAccess(currentUser, {
+            supabase
+          })
+        : null;
+    const { units: scopedUnitOptions } = await loadClinicalInstitutionalUnitOptions(
+      currentUser,
+      scopedAccess
+    );
+    const requestedUnitId =
+      currentUser.role === "coordenador" && scopedUnitOptions.length > 0
+        ? filters?.unitId?.trim() ?? ""
+        : "";
+    const validUnitId = scopedUnitOptions.some((unit) => unit.id === requestedUnitId)
+      ? requestedUnitId
+      : "";
+    const visibleCases = (await loadClinicalInstitutionalCaseSummaries(currentUser)).filter(
+      (caseItem) => (validUnitId ? caseItem.unitId === validUnitId : true)
+    );
     const patients = await loadInstitutionalPatientRows({
       currentUser,
-      patientIds: uniqueStringValues(cases.map((caseItem) => caseItem.patient.id))
+      patientIds: uniqueStringValues(visibleCases.map((caseItem) => caseItem.patient.id))
     });
     const filtersState = {
-      query: filters?.query?.trim() ?? "",
+      query:
+        currentUser.role === "coordenador" && scopedUnitOptions.length > 0
+          ? ""
+          : filters?.query?.trim() ?? "",
+      unitId: validUnitId,
       status:
         filters?.status === "com_caso_ativo" ||
         filters?.status === "alta" ||
@@ -2896,7 +3538,7 @@ export async function getClinicalPatientBasePageData(
     } as const;
     const casesByPatientId = new Map<string, ClinicalCaseSummary[]>();
 
-    for (const caseItem of cases) {
+    for (const caseItem of visibleCases) {
       const patientCases = casesByPatientId.get(caseItem.patient.id) ?? [];
       patientCases.push(caseItem);
       casesByPatientId.set(caseItem.patient.id, patientCases);
@@ -2943,16 +3585,22 @@ export async function getClinicalPatientBasePageData(
         viewerName: currentUser.name,
         patients: patientItems,
         filterOptions: {
+          units: scopedUnitOptions
+            .map((unitOption) => ({
+              id: unitOption.id,
+              name: unitOption.name
+            }))
+            .sort((left, right) => left.name.localeCompare(right.name, "pt-BR")),
           semesters: [
             ...new Map(
-              cases.map((caseItem) => [caseItem.semesterId, caseItem.semesterCode])
+              visibleCases.map((caseItem) => [caseItem.semesterId, caseItem.semesterCode])
             ).entries()
           ]
             .map(([id, code]) => ({ id, code }))
             .sort((left, right) => right.code.localeCompare(left.code, "pt-BR")),
           areas: [
             ...new Map(
-              cases
+              visibleCases
                 .filter((caseItem) => caseItem.areaId)
                 .map((caseItem) => [caseItem.areaId as string, caseItem.areaName])
             ).entries()
@@ -2962,6 +3610,7 @@ export async function getClinicalPatientBasePageData(
         },
         filters: {
           query: filtersState.query,
+          unitId: filtersState.unitId,
           status: filtersState.status,
           semesterId: filtersState.semesterId,
           areaId: filtersState.areaId
@@ -3004,9 +3653,17 @@ export async function getClinicalPatientHistoryPageData(
   }
 
   const supabase = await createSupabaseServerClient();
+  const scopedAccess =
+    currentUser.role === "coordenador"
+      ? await resolveScopedDataAccess(currentUser, {
+          supabase
+        })
+      : null;
   const patientQuery = supabase.from("pacientes_clinica").select("*").eq("id", patientId);
   const scopedPatientQuery =
-    currentUser.role === "coordenador" && currentUser.unitId
+    currentUser.role === "coordenador" &&
+    scopedAccess?.scopeKind !== "course_manager" &&
+    currentUser.unitId
       ? patientQuery.eq("unidade_id", currentUser.unitId)
       : patientQuery;
   const { data: patientData, error: patientError } = await scopedPatientQuery.maybeSingle();
@@ -3025,6 +3682,16 @@ export async function getClinicalPatientHistoryPageData(
     const cases = (await loadClinicalInstitutionalCaseSummaries(currentUser)).filter(
       (caseItem) => caseItem.patient.id === patientId
     );
+
+    if (!cases.length) {
+      return {
+        pageData: null,
+        emptyState: buildEmptyState(
+          "Paciente institucional nÃ£o encontrado",
+          "NÃ£o foi possÃ­vel localizar este cadastro-base de paciente no escopo do usuÃ¡rio autenticado."
+        )
+      };
+    }
 
     const { data: recordRowsData, error: recordError } = cases.length
       ? await supabase
@@ -3210,6 +3877,7 @@ export async function getClinicalInstitutionalDashboardPageData(
   currentUser: SessionUser,
   filters?: {
     query?: string | null;
+    institutionId?: string | null;
     unitId?: string | null;
     semesterId?: string | null;
     areaId?: string | null;
@@ -3231,7 +3899,7 @@ export async function getClinicalInstitutionalDashboardPageData(
     };
   }
 
-  if (currentUser.role === "coordenador" && !currentUser.unitId) {
+  if (false && currentUser.role === "coordenador" && !currentUser.unitId) {
     return {
       pageData: null,
       emptyState: buildEmptyState(
@@ -3242,19 +3910,48 @@ export async function getClinicalInstitutionalDashboardPageData(
   }
 
   try {
-      const supabase =
-        currentUser.role === "coordenador_master"
-          ? createSupabaseAdminClient()
-          : await createSupabaseServerClient();
-      const unitOptions = await loadClinicalInstitutionalUnitOptions(currentUser);
-      const baseCases = await loadClinicalInstitutionalCaseSummaries(currentUser);
-    const caseIds = baseCases.map((caseItem) => caseItem.id);
+    const serverSupabase = await createSupabaseServerClient();
+    const scopedAccess =
+      currentUser.role === "coordenador"
+        ? await resolveScopedDataAccess(currentUser, {
+            supabase: serverSupabase
+          })
+        : null;
+    const supabase =
+      currentUser.role === "coordenador_master"
+        ? createSupabaseAdminClient()
+        : serverSupabase;
+    const showInstitutionFilter = currentUser.role === "coordenador_master";
+    const showUnitFilter =
+      currentUser.role === "coordenador_master" ||
+      scopedAccess?.scopeKind === "course_manager";
+    const { institutions: institutionOptions, units: unitOptions } =
+      await loadClinicalInstitutionalUnitOptions(currentUser, scopedAccess);
+    const baseCases = await loadClinicalInstitutionalCaseSummaries(currentUser);
+    const normalizedScopeFilters = normalizeClinicalInstitutionalScopeFilters({
+      institutions: institutionOptions,
+      units: unitOptions,
+      allowInstitutionFilter: showInstitutionFilter,
+      allowUnitFilter: showUnitFilter,
+      filters: {
+        institutionId: filters?.institutionId ?? null,
+        unitId: filters?.unitId ?? null
+      }
+    });
+    const scopeFilteredCases = filterClinicalCasesToInstitutionAndUnitScope(
+      baseCases,
+      unitOptions,
+      normalizedScopeFilters
+    );
+    const caseIds = scopeFilteredCases.map((caseItem) => caseItem.id);
     const normalizedFilters = {
-      query: filters?.query?.trim() ?? "",
-      unitId:
-        currentUser.role === "coordenador_master"
-          ? filters?.unitId?.trim() ?? ""
-          : "",
+      query:
+        currentUser.role === "coordenador_master" ||
+        scopedAccess?.scopeKind === "course_manager"
+          ? ""
+          : filters?.query?.trim() ?? "",
+      institutionId: normalizedScopeFilters.institutionId,
+      unitId: normalizedScopeFilters.unitId,
       semesterId: filters?.semesterId?.trim() ?? "",
       areaId: filters?.areaId?.trim() ?? "",
       professorId: filters?.professorId?.trim() ?? "",
@@ -3327,12 +4024,9 @@ export async function getClinicalInstitutionalDashboardPageData(
       recordSnapshotsByCaseId.set(recordRow.caso_clinico_id, currentSnapshot);
     }
 
-    const cases = baseCases
+    const cases = scopeFilteredCases
       .filter((caseItem) =>
         matchesClinicalInstitutionalCaseQuery(caseItem, normalizedFilters.query)
-      )
-      .filter((caseItem) =>
-        normalizedFilters.unitId ? caseItem.unitId === normalizedFilters.unitId : true
       )
       .filter((caseItem) =>
         normalizedFilters.semesterId
@@ -3512,44 +4206,12 @@ export async function getClinicalInstitutionalDashboardPageData(
         generatedAt: new Date().toISOString(),
         filters: normalizedFilters,
         filterOptions: {
+          institutions: institutionOptions,
           units: unitOptions,
-          semesters: [
-            ...new Map(
-              baseCases.map((caseItem) => [caseItem.semesterId, caseItem.semesterCode])
-            ).entries()
-          ]
-            .map(([id, code]) => ({ id, code }))
-            .sort((left, right) => right.code.localeCompare(left.code, "pt-BR")),
-          areas: [
-            ...new Map(
-              baseCases
-                .filter((caseItem) => caseItem.areaId)
-                .map((caseItem) => [caseItem.areaId as string, caseItem.areaName])
-            ).entries()
-          ]
-            .map(([id, name]) => ({ id, name }))
-            .sort((left, right) => left.name.localeCompare(right.name, "pt-BR")),
-          professors: [
-            ...new Map(
-              baseCases.map((caseItem) => [caseItem.professorId, caseItem.professorName])
-            ).entries()
-          ]
-            .map(([id, name]) => ({ id, name }))
-            .sort((left, right) => left.name.localeCompare(right.name, "pt-BR")),
-          students: [
-            ...new Map(
-              baseCases.map((caseItem) => [
-                caseItem.studentId,
-                {
-                  id: caseItem.studentId,
-                  name: caseItem.studentName,
-                  registration: caseItem.registration
-                }
-              ])
-            ).values()
-          ].sort((left, right) =>
-            left.name.localeCompare(right.name, "pt-BR")
-          )
+          semesters: buildClinicalInstitutionalSemesterOptions(scopeFilteredCases),
+          areas: buildClinicalInstitutionalAreaOptions(scopeFilteredCases),
+          professors: buildClinicalInstitutionalProfessorOptions(scopeFilteredCases),
+          students: buildClinicalInstitutionalStudentOptions(scopeFilteredCases)
         },
         metrics: {
           totalActivePatients: activePatientIds.size,
@@ -3644,6 +4306,18 @@ export async function getClinicalCaseDetailPageData(
     };
   }
 
+  const accessibleCaseRow = await loadAccessibleClinicalCaseRow(currentUser, caseId);
+
+  if (!accessibleCaseRow) {
+    return {
+      pageData: null,
+      emptyState: buildEmptyState(
+        "Caso clÃ­nico nÃ£o encontrado",
+        "NÃ£o foi possÃ­vel localizar este caso clÃ­nico no escopo do usuÃ¡rio autenticado."
+      )
+    };
+  }
+
   const supabase = await createSupabaseServerClient();
   const caseQuery = supabase.from("casos_clinicos").select("*").eq("id", caseId);
   const scopedQuery =
@@ -3654,7 +4328,7 @@ export async function getClinicalCaseDetailPageData(
       : caseQuery;
   const { data: caseRowData, error: caseError } = await scopedQuery.maybeSingle();
 
-  if (caseError || !caseRowData) {
+  if (false && (caseError || !caseRowData)) {
     return {
       pageData: null,
       emptyState: buildEmptyState(
@@ -3664,7 +4338,7 @@ export async function getClinicalCaseDetailPageData(
     };
   }
 
-  const caseRow = caseRowData as ClinicalCaseRow;
+  const caseRow = accessibleCaseRow as ClinicalCaseRow;
 
   try {
     const bundle = await loadClinicalReferenceBundle([caseRow], currentUser);
@@ -3804,6 +4478,18 @@ export async function getClinicalEvaluationPageData(
     };
   }
 
+  const accessibleCaseRow = await loadAccessibleClinicalCaseRow(currentUser, caseId);
+
+  if (!accessibleCaseRow) {
+    return {
+      pageData: null,
+      emptyState: buildEmptyState(
+        "Caso clÃ­nico nÃ£o encontrado",
+        "NÃ£o foi possÃ­vel localizar este caso clÃ­nico no escopo do usuÃ¡rio autenticado."
+      )
+    };
+  }
+
   const supabase = await createSupabaseServerClient();
   const caseQuery = supabase.from("casos_clinicos").select("*").eq("id", caseId);
   const scopedQuery =
@@ -3814,7 +4500,7 @@ export async function getClinicalEvaluationPageData(
       : caseQuery;
   const { data: caseRowData, error: caseError } = await scopedQuery.maybeSingle();
 
-  if (caseError || !caseRowData) {
+  if (false && (caseError || !caseRowData)) {
     return {
       pageData: null,
       emptyState: buildEmptyState(
@@ -3824,7 +4510,7 @@ export async function getClinicalEvaluationPageData(
     };
   }
 
-  const caseRow = caseRowData as ClinicalCaseRow;
+  const caseRow = accessibleCaseRow as ClinicalCaseRow;
 
   let caseItem: ClinicalCaseSummary | null = null;
   let semesterStatus: SemesterRow["status"] | null = null;
@@ -3939,6 +4625,18 @@ export async function getClinicalTreatmentPlanPageData(
     };
   }
 
+  const accessibleCaseRow = await loadAccessibleClinicalCaseRow(currentUser, caseId);
+
+  if (!accessibleCaseRow) {
+    return {
+      pageData: null,
+      emptyState: buildEmptyState(
+        "Caso clÃ­nico indisponÃ­vel",
+        "NÃ£o foi possÃ­vel localizar um caso vÃ¡lido dentro do escopo autenticado."
+      )
+    };
+  }
+
   const supabase = await createSupabaseServerClient();
   const caseQuery = supabase.from("casos_clinicos").select("*").eq("id", caseId);
     const scopedQuery =
@@ -3949,7 +4647,7 @@ export async function getClinicalTreatmentPlanPageData(
         : caseQuery;
   const { data: caseRowData, error: caseError } = await scopedQuery.maybeSingle();
 
-  if (caseError || !caseRowData) {
+  if (false && (caseError || !caseRowData)) {
     return {
       pageData: null,
       emptyState: buildEmptyState(
@@ -3959,7 +4657,7 @@ export async function getClinicalTreatmentPlanPageData(
     };
   }
 
-  const caseRow = caseRowData as ClinicalCaseRow;
+  const caseRow = accessibleCaseRow as ClinicalCaseRow;
 
   let caseItem: ClinicalCaseSummary | null = null;
   let semesterStatus: SemesterRow["status"] | null = null;
@@ -4074,6 +4772,18 @@ export async function getClinicalEvolutionListPageData(
     };
   }
 
+  const accessibleCaseRow = await loadAccessibleClinicalCaseRow(currentUser, caseId);
+
+  if (!accessibleCaseRow) {
+    return {
+      pageData: null,
+      emptyState: buildEmptyState(
+        "Caso clÃ­nico indisponÃ­vel",
+        "NÃ£o foi possÃ­vel localizar um caso vÃ¡lido dentro do escopo autenticado."
+      )
+    };
+  }
+
   const supabase = await createSupabaseServerClient();
   const caseQuery = supabase.from("casos_clinicos").select("*").eq("id", caseId);
     const scopedQuery =
@@ -4084,7 +4794,7 @@ export async function getClinicalEvolutionListPageData(
         : caseQuery;
   const { data: caseRowData, error: caseError } = await scopedQuery.maybeSingle();
 
-  if (caseError || !caseRowData) {
+  if (false && (caseError || !caseRowData)) {
     return {
       pageData: null,
       emptyState: buildEmptyState(
@@ -4094,7 +4804,7 @@ export async function getClinicalEvolutionListPageData(
     };
   }
 
-  const caseRow = caseRowData as ClinicalCaseRow;
+  const caseRow = accessibleCaseRow as ClinicalCaseRow;
 
   let caseItem: ClinicalCaseSummary | null = null;
   let semesterStatus: SemesterRow["status"] | null = null;
@@ -4197,6 +4907,18 @@ export async function getClinicalEvolutionPageData(
     };
   }
 
+  const accessibleCaseRow = await loadAccessibleClinicalCaseRow(currentUser, caseId);
+
+  if (!accessibleCaseRow) {
+    return {
+      pageData: null,
+      emptyState: buildEmptyState(
+        "Caso clÃ­nico indisponÃ­vel",
+        "NÃ£o foi possÃ­vel localizar um caso vÃ¡lido dentro do escopo autenticado."
+      )
+    };
+  }
+
   const supabase = await createSupabaseServerClient();
   const caseQuery = supabase.from("casos_clinicos").select("*").eq("id", caseId);
     const scopedQuery =
@@ -4207,7 +4929,7 @@ export async function getClinicalEvolutionPageData(
         : caseQuery;
   const { data: caseRowData, error: caseError } = await scopedQuery.maybeSingle();
 
-  if (caseError || !caseRowData) {
+  if (false && (caseError || !caseRowData)) {
     return {
       pageData: null,
       emptyState: buildEmptyState(
@@ -4217,7 +4939,7 @@ export async function getClinicalEvolutionPageData(
     };
   }
 
-  const caseRow = caseRowData as ClinicalCaseRow;
+  const caseRow = accessibleCaseRow as ClinicalCaseRow;
 
   let caseItem: ClinicalCaseSummary | null = null;
   let semesterStatus: SemesterRow["status"] | null = null;

@@ -6,7 +6,7 @@ import { getClinicalInstitutionalDashboardPageData } from "@/services/clinical-s
 
 export default async function MasterClinicalInstitutionalDashboardPage(props: {
   searchParams?: Promise<{
-    q?: string;
+    institution_id?: string;
     unit_id?: string;
     semester_id?: string;
     area_id?: string;
@@ -20,7 +20,7 @@ export default async function MasterClinicalInstitutionalDashboardPage(props: {
   const { pageData, emptyState } = await getClinicalInstitutionalDashboardPageData(
     currentUser,
     {
-      query: searchParams.q ?? null,
+      institutionId: searchParams.institution_id ?? null,
       unitId: searchParams.unit_id ?? null,
       semesterId: searchParams.semester_id ?? null,
       areaId: searchParams.area_id ?? null,
@@ -37,8 +37,8 @@ export default async function MasterClinicalInstitutionalDashboardPage(props: {
           <p className="eyebrow">Gestão clínica global</p>
           <h1>Clínica Supervisionada</h1>
           <p>
-            Acompanhamento institucional multiunidade da operação clínica, com
-            foco em indicadores globais, filtros e visão consolidada dos casos.
+            Acompanhamento institucional multiunidade da operação clínica, com foco em
+            indicadores globais, filtros e visão consolidada dos casos.
           </p>
         </section>
 
@@ -50,8 +50,8 @@ export default async function MasterClinicalInstitutionalDashboardPage(props: {
           }
         >
           <p className="empty-message">
-            Assim que os casos clínicos estiverem disponíveis nas unidades, os
-            relatórios e indicadores aparecerão aqui.
+            Assim que os casos clínicos estiverem disponíveis nas unidades, os relatórios e
+            indicadores aparecerão aqui.
           </p>
         </SectionCard>
       </div>
@@ -72,6 +72,7 @@ export default async function MasterClinicalInstitutionalDashboardPage(props: {
           label: "Unidades"
         }
       ]}
+      hideCaseTable
     />
   );
 }

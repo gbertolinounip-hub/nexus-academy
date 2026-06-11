@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
 import { createProfessorRegistrationAction } from "@/app/(app)/gestao/alunos/actions";
 import {
   initialProfessorRegistrationActionState,
@@ -29,6 +29,11 @@ export function ProfessorRegistrationForm({
   const safeState = state ?? initialProfessorRegistrationActionState;
   const fieldErrors = safeState.fieldErrors ?? {};
   const [draft, setDraft] = useState<ProfessorRegistrationFormValues>(buildInitialDraft);
+  const availableAreas = useMemo(
+    () => areaBlocks.flatMap((block) => block.areas),
+    [areaBlocks]
+  );
+  const hasAreas = availableAreas.length > 0;
 
   useEffect(() => {
     if (safeState.status !== "error" || !safeState.formValues) {
@@ -149,34 +154,33 @@ export function ProfessorRegistrationForm({
 
       <div className={getFieldClassName("area_ids")}>
         <span>Áreas supervisionadas</span>
-        <div className="management-checkbox-grid">
-          {areaBlocks.map((block) => (
-            <div key={block.id} className="management-checkbox-card">
-              <strong>{block.name}</strong>
-              <div className="management-checkbox-list">
-                {block.areas.map((area) => (
-                  <label key={area.id} className="management-checkbox-item">
-                    <input
-                      type="checkbox"
-                      name="area_ids"
-                      value={area.id}
-                      checked={draft.area_ids.includes(area.id)}
-                      onChange={() => toggleArea(area.id)}
-                    />
-                    <span>{area.name}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+        {hasAreas ? (
+          <div className="management-checkbox-list">
+            {availableAreas.map((area) => (
+              <label key={area.id} className="management-checkbox-item">
+                <input
+                  type="checkbox"
+                  name="area_ids"
+                  value={area.id}
+                  checked={draft.area_ids.includes(area.id)}
+                  onChange={() => toggleArea(area.id)}
+                />
+                <span>{area.name}</span>
+              </label>
+            ))}
+          </div>
+        ) : (
+          <p className="field-help">
+            Cadastre ao menos uma área supervisionada nesta oferta antes de liberar o professor.
+          </p>
+        )}
         {fieldErrors.area_ids ? (
           <span className="field-error">{fieldErrors.area_ids}</span>
         ) : null}
       </div>
 
       <div className="actions-row">
-        <button className="button" type="submit">
+        <button className="button" type="submit" disabled={!hasAreas}>
           Cadastrar professor e vincular áreas
         </button>
       </div>

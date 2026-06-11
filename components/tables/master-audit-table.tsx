@@ -36,7 +36,7 @@ export function MasterAuditTable({ entries }: MasterAuditTableProps) {
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
 
   return (
-    <div className="table-wrap master-audit-table-wrap">
+    <div className="table-wrap master-audit-table-wrap master-audit-events-table-scroll">
       <table className="table master-audit-table">
         <colgroup>
           <col className="master-audit-col-when" />

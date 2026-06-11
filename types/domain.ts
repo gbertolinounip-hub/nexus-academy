@@ -5,6 +5,28 @@ export type ProfileCode =
   | "coordenador"
   | "coordenador_master";
 
+export type ContextProfileCode = ProfileCode | "master_curso";
+
+export interface SessionUserContext {
+  id: string;
+  perfilCodigo: ContextProfileCode;
+  perfilNome: string;
+  instituicaoId: string | null;
+  instituicaoNome: string | null;
+  instituicaoSigla?: string | null;
+  cursoId: string | null;
+  cursoNome: string | null;
+  cursoCodigo?: string | null;
+  ofertaCursoUnidadeId: string | null;
+  ofertaNome: string | null;
+  unidadeId: string | null;
+  unidadeNome: string | null;
+  unidadeSigla?: string | null;
+  unidadeSlug?: string | null;
+  principal: boolean;
+  ativo: boolean;
+}
+
 export interface SessionUser {
   id: string;
   name: string;
@@ -13,6 +35,15 @@ export interface SessionUser {
   unitId?: string | null;
   unitName?: string | null;
   unitSlug?: string | null;
+  contextoPadraoId?: string | null;
+  contextoAtivo?: SessionUserContext | null;
+  instituicaoId?: string | null;
+  instituicaoNome?: string | null;
+  cursoId?: string | null;
+  cursoNome?: string | null;
+  ofertaCursoUnidadeId?: string | null;
+  ofertaCursoUnidadeNome?: string | null;
+  contextosDisponiveis: SessionUserContext[];
   passwordChangeRecommended?: boolean;
 }
 

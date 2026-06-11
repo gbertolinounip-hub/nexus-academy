@@ -69,7 +69,7 @@ export default async function MasterUnitDetailPage({
         <p className="eyebrow">Visão por unidade</p>
         <h1>{unitDetail.unit.name}</h1>
         <p>
-          {unitDetail.unit.acronym} · {unitDetail.unit.slug} ·{" "}
+          {unitDetail.unit.institutionName} · {unitDetail.unit.acronym} · {unitDetail.unit.slug} ·{" "}
           {formatLocation(unitDetail.unit.city, unitDetail.unit.state)}
         </p>
         <div className="actions-row">

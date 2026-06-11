@@ -1,0 +1,338 @@
+import { getActiveMasterCourseContext } from "@/lib/auth/roles";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { Database } from "@/types/database";
+import type { SessionUser } from "@/types/domain";
+
+type OfferRow = Database["public"]["Tables"]["ofertas_curso_unidade"]["Row"];
+type SemesterRow = Database["public"]["Tables"]["semestres"]["Row"];
+type ClassRow = Database["public"]["Tables"]["turmas"]["Row"];
+type EnrollmentRow = Database["public"]["Tables"]["matriculas_turma"]["Row"];
+type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
+
+export interface SessionDataScope {
+  isGlobalMaster: boolean;
+  isCourseManager: boolean;
+  isLocalCoordinator: boolean;
+  instituicaoId: string | null;
+  cursoId: string | null;
+  ofertaCursoUnidadeId: string | null;
+  unidadeId: string | null;
+}
+
+export interface ResolvedSessionDataScope extends SessionDataScope {
+  scopeKind:
+    | "global_master"
+    | "course_manager"
+    | "course_context"
+    | "offer_context"
+    | "unit_fallback"
+    | "none";
+  restrictToCourse: boolean;
+  usesLegacyUnitFallback: boolean;
+  offerIds: string[];
+  unitIds: string[];
+}
+
+export interface ScopedOperationalGraph {
+  scope: ResolvedSessionDataScope;
+  semesterRows: SemesterRow[];
+  classRows: ClassRow[];
+  enrollmentRows: EnrollmentRow[];
+}
+
+function uniqueStringValues(values: Array<string | null | undefined>) {
+  return Array.from(
+    new Set(values.filter((value): value is string => Boolean(value?.trim())))
+  );
+}
+
+export function resolveDataScopeForSession(currentUser: SessionUser): SessionDataScope {
+  const activeMasterCourseContext = getActiveMasterCourseContext(currentUser);
+  const activeContext = currentUser.contextoAtivo?.ativo ? currentUser.contextoAtivo : null;
+  const scopedUnitId =
+    activeContext?.unidadeId ??
+    currentUser.ofertaCursoUnidadeId ??
+    currentUser.unitId ??
+    null;
+
+  if (currentUser.role === "coordenador_master") {
+    return {
+      isGlobalMaster: true,
+      isCourseManager: false,
+      isLocalCoordinator: false,
+      instituicaoId: currentUser.instituicaoId ?? null,
+      cursoId: currentUser.cursoId ?? null,
+      ofertaCursoUnidadeId: currentUser.ofertaCursoUnidadeId ?? null,
+      unidadeId: scopedUnitId
+    };
+  }
+
+  if (activeMasterCourseContext) {
+    return {
+      isGlobalMaster: false,
+      isCourseManager: true,
+      isLocalCoordinator: false,
+      instituicaoId: activeMasterCourseContext.instituicaoId,
+      cursoId: activeMasterCourseContext.cursoId,
+      ofertaCursoUnidadeId: activeMasterCourseContext.ofertaCursoUnidadeId ?? null,
+      unidadeId: activeMasterCourseContext.unidadeId ?? currentUser.unitId ?? null
+    };
+  }
+
+  return {
+    isGlobalMaster: false,
+    isCourseManager: false,
+    isLocalCoordinator: currentUser.role === "coordenador",
+    instituicaoId:
+      activeContext?.instituicaoId ?? currentUser.instituicaoId ?? null,
+    cursoId: activeContext?.cursoId ?? currentUser.cursoId ?? null,
+    ofertaCursoUnidadeId:
+      activeContext?.ofertaCursoUnidadeId ?? currentUser.ofertaCursoUnidadeId ?? null,
+    unidadeId: scopedUnitId
+  };
+}
+
+async function loadOfferRowsForScope(
+  supabase: SupabaseServerClient,
+  scope: SessionDataScope
+) {
+  if (scope.ofertaCursoUnidadeId) {
+    const { data, error } = await supabase
+      .from("ofertas_curso_unidade")
+      .select("*")
+      .eq("id", scope.ofertaCursoUnidadeId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(
+        "Não foi possível carregar a oferta ativa do contexto autenticado."
+      );
+    }
+
+    return data ? [data as OfferRow] : [];
+  }
+
+  if (scope.instituicaoId && scope.cursoId) {
+    let query = supabase
+      .from("ofertas_curso_unidade")
+      .select("*")
+      .eq("instituicao_id", scope.instituicaoId)
+      .eq("curso_id", scope.cursoId);
+
+    if (!scope.isCourseManager && scope.unidadeId) {
+      query = query.eq("unidade_id", scope.unidadeId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new Error(
+        "Não foi possível carregar as ofertas vinculadas ao contexto institucional ativo."
+      );
+    }
+
+    return (data ?? []) as OfferRow[];
+  }
+
+  return [] as OfferRow[];
+}
+
+export async function resolveScopedDataAccess(
+  currentUser: SessionUser,
+  input?: {
+    supabase?: SupabaseServerClient;
+  }
+): Promise<ResolvedSessionDataScope> {
+  const baseScope = resolveDataScopeForSession(currentUser);
+
+  if (baseScope.isGlobalMaster) {
+    return {
+      ...baseScope,
+      scopeKind: "global_master",
+      restrictToCourse: false,
+      usesLegacyUnitFallback: false,
+      offerIds: [],
+      unitIds: uniqueStringValues([baseScope.unidadeId])
+    };
+  }
+
+  const supabase = input?.supabase ?? (await createSupabaseServerClient());
+  const scopedOffers = await loadOfferRowsForScope(supabase, baseScope);
+  const offerIds = scopedOffers.map((offer) => offer.id);
+  const unitIds = uniqueStringValues(
+    scopedOffers.map((offer) => offer.unidade_id)
+  );
+
+  if (baseScope.isCourseManager) {
+    return {
+      ...baseScope,
+      scopeKind: "course_manager",
+      restrictToCourse: true,
+      usesLegacyUnitFallback: false,
+      offerIds,
+      unitIds
+    };
+  }
+
+  if (baseScope.ofertaCursoUnidadeId) {
+    return {
+      ...baseScope,
+      scopeKind: "offer_context",
+      restrictToCourse: Boolean(baseScope.cursoId),
+      usesLegacyUnitFallback: false,
+      offerIds,
+      unitIds:
+        unitIds.length > 0
+          ? unitIds
+          : uniqueStringValues([baseScope.unidadeId])
+    };
+  }
+
+  if (baseScope.cursoId) {
+    return {
+      ...baseScope,
+      scopeKind: "course_context",
+      restrictToCourse: true,
+      usesLegacyUnitFallback: false,
+      offerIds,
+      unitIds
+    };
+  }
+
+  if (baseScope.unidadeId) {
+    return {
+      ...baseScope,
+      scopeKind: "unit_fallback",
+      restrictToCourse: false,
+      usesLegacyUnitFallback: true,
+      offerIds: [],
+      unitIds: [baseScope.unidadeId]
+    };
+  }
+
+  return {
+    ...baseScope,
+    scopeKind: "none",
+    restrictToCourse: false,
+    usesLegacyUnitFallback: false,
+    offerIds: [],
+    unitIds: []
+  };
+}
+
+export async function loadScopedOperationalGraph(
+  currentUser: SessionUser,
+  input?: {
+    supabase?: SupabaseServerClient;
+  }
+): Promise<ScopedOperationalGraph> {
+  const supabase = input?.supabase ?? (await createSupabaseServerClient());
+  const scope = await resolveScopedDataAccess(currentUser, {
+    supabase
+  });
+
+  if (scope.isGlobalMaster || scope.scopeKind === "none") {
+    return {
+      scope,
+      semesterRows: [],
+      classRows: [],
+      enrollmentRows: []
+    };
+  }
+
+  if (scope.restrictToCourse && scope.offerIds.length === 0) {
+    return {
+      scope,
+      semesterRows: [],
+      classRows: [],
+      enrollmentRows: []
+    };
+  }
+
+  let semesterQuery = supabase.from("semestres").select("*");
+
+  if (scope.offerIds.length > 0) {
+    semesterQuery = semesterQuery.in("oferta_curso_unidade_id", scope.offerIds);
+  } else if (scope.unitIds.length > 0) {
+    semesterQuery = semesterQuery.in("unidade_id", scope.unitIds);
+  } else {
+    return {
+      scope,
+      semesterRows: [],
+      classRows: [],
+      enrollmentRows: []
+    };
+  }
+
+  const { data: semesterRowsData, error: semesterRowsError } = await semesterQuery;
+
+  if (semesterRowsError) {
+    throw new Error(
+      "Não foi possível carregar os semestres visíveis para o contexto autenticado."
+    );
+  }
+
+  const semesterRows = (semesterRowsData ?? []) as SemesterRow[];
+  const semesterIds = semesterRows.map((semester) => semester.id);
+  const classRowsResult = semesterIds.length
+    ? await supabase.from("turmas").select("*").in("semestre_id", semesterIds)
+    : { data: [], error: null };
+
+  if (classRowsResult.error) {
+    throw new Error(
+      "Não foi possível carregar as turmas visíveis para o contexto autenticado."
+    );
+  }
+
+  const classRows = (classRowsResult.data ?? []) as ClassRow[];
+  const classIds = classRows.map((classGroup) => classGroup.id);
+  const enrollmentRowsResult = classIds.length
+    ? await supabase
+        .from("matriculas_turma")
+        .select("*")
+        .in("turma_id", classIds)
+    : { data: [], error: null };
+
+  if (enrollmentRowsResult.error) {
+    throw new Error(
+      "Não foi possível carregar as matrículas visíveis para o contexto autenticado."
+    );
+  }
+
+  return {
+    scope,
+    semesterRows,
+    classRows,
+    enrollmentRows: (enrollmentRowsResult.data ?? []) as EnrollmentRow[]
+  };
+}
+
+export function isOfferVisibleInScope(
+  scope: ResolvedSessionDataScope,
+  offerId: string | null | undefined
+) {
+  if (scope.isGlobalMaster) {
+    return true;
+  }
+
+  if (!offerId) {
+    return !scope.restrictToCourse;
+  }
+
+  return scope.offerIds.includes(offerId);
+}
+
+export function isUnitVisibleInScope(
+  scope: ResolvedSessionDataScope,
+  unitId: string | null | undefined
+) {
+  if (scope.isGlobalMaster) {
+    return true;
+  }
+
+  if (!unitId) {
+    return false;
+  }
+
+  return scope.unitIds.includes(unitId);
+}

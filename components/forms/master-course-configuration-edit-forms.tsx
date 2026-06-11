@@ -1,0 +1,1337 @@
+"use client";
+
+import { useActionState, useEffect, useMemo, useState } from "react";
+import {
+  createCourseConfigurationCriterionAction,
+  createCourseConfigurationGroupAction,
+  createCourseRequiredDocumentAction,
+  deleteCourseConfigurationCriterionAction,
+  deleteCourseConfigurationGroupAction,
+  deleteCourseRequiredDocumentAction,
+  updateCourseConfigurationCriterionAction,
+  updateCourseConfigurationGroupAction,
+  updateCourseConfigurationModelAction,
+  updateCourseConfigurationRequiredDocumentAction
+} from "@/app/(app)/master/cursos/configuracoes/actions";
+import {
+  createEmptyCourseConfigurationCreateCriterionFormValues,
+  createEmptyCourseConfigurationCreateGroupFormValues,
+  createEmptyCourseConfigurationCreateRequiredDocumentFormValues,
+  createInitialCourseConfigurationActionState,
+  initialCourseConfigurationDeleteCriterionActionState,
+  initialCourseConfigurationDeleteGroupActionState,
+  initialCourseConfigurationDeleteRequiredDocumentActionState,
+  initialCourseConfigurationCreateCriterionActionState,
+  initialCourseConfigurationCreateGroupActionState,
+  initialCourseConfigurationCreateRequiredDocumentActionState,
+  type CourseConfigurationActionState,
+  type CourseConfigurationCreateCriterionFormValues,
+  type CourseConfigurationCreateGroupFormValues,
+  type CourseConfigurationCreateRequiredDocumentFormValues,
+  type CourseConfigurationDeleteCriterionFormValues,
+  type CourseConfigurationDeleteGroupFormValues,
+  type CourseConfigurationDeleteRequiredDocumentFormValues,
+  type CourseConfigurationCriterionFormValues,
+  type CourseConfigurationGroupFormValues,
+  type CourseConfigurationModelFormValues,
+  type CourseConfigurationRequiredDocumentFormValues
+} from "@/app/(app)/master/cursos/configuracoes/state";
+import type {
+  CourseConfigurationCriterionEntry,
+  CourseConfigurationDocumentTypeOption,
+  CourseConfigurationGroupEntry,
+  CourseConfigurationModelEntry,
+  CourseConfigurationRequiredDocumentEntry
+} from "@/services/course-configurations";
+
+function getFieldClassName(fieldErrors: Record<string, string>, fieldName: string) {
+  return fieldErrors[fieldName] ? "field field-invalid" : "field";
+}
+
+function getInputClassName(fieldErrors: Record<string, string>, fieldName: string) {
+  return fieldErrors[fieldName] ? "input input-invalid" : "input";
+}
+
+function renderNotice<TFormValues>(state: CourseConfigurationActionState<TFormValues>) {
+  if (!state.message) {
+    return null;
+  }
+
+  return (
+    <div
+      className={
+        state.status === "success"
+          ? "form-notice form-notice-success"
+          : "form-notice form-notice-error"
+      }
+    >
+      {state.message}
+    </div>
+  );
+}
+
+function normalizeCodeInput(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function getNextOrderValue(values: Array<number | null | undefined>) {
+  let maxValue = 0;
+
+  for (const value of values) {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+      continue;
+    }
+
+    if (value > maxValue) {
+      maxValue = value;
+    }
+  }
+
+  return String(maxValue + 1);
+}
+
+function buildModelDraft(model: CourseConfigurationModelEntry): CourseConfigurationModelFormValues {
+  return {
+    model_id: model.id,
+    nome: model.name,
+    descricao: model.description ?? "",
+    ativo: model.isActive ? "true" : "false"
+  };
+}
+
+function buildGroupDraft(group: CourseConfigurationGroupEntry): CourseConfigurationGroupFormValues {
+  return {
+    group_id: group.id,
+    nome: group.name,
+    ordem: String(group.order),
+    peso_percentual: String(group.weightPercent),
+    ativo: group.isActive ? "true" : "false"
+  };
+}
+
+function buildCriterionDraft(
+  criterion: CourseConfigurationCriterionEntry
+): CourseConfigurationCriterionFormValues {
+  return {
+    criterion_id: criterion.id,
+    nome: criterion.name,
+    descricao: criterion.description ?? "",
+    ordem: String(criterion.order),
+    peso_percentual: String(criterion.weightPercent),
+    escala_maxima: String(criterion.maxScale),
+    ativo: criterion.isActive ? "true" : "false"
+  };
+}
+
+function buildRequiredDocumentDraft(
+  requiredDocument: CourseConfigurationRequiredDocumentEntry
+): CourseConfigurationRequiredDocumentFormValues {
+  return {
+    required_document_id: requiredDocument.id,
+    nome_exibicao: requiredDocument.displayName ?? "",
+    descricao: requiredDocument.description ?? "",
+    obrigatorio: requiredDocument.isRequired ? "true" : "false",
+    ordem: requiredDocument.order ? String(requiredDocument.order) : "",
+    ativo: requiredDocument.isActive ? "true" : "false"
+  };
+}
+
+function buildCreateGroupDraft(
+  courseId: string,
+  models: CourseConfigurationModelEntry[],
+  groups: CourseConfigurationGroupEntry[],
+  preferredModelId?: string
+) {
+  const fallbackModelId =
+    preferredModelId && models.some((model) => model.id === preferredModelId)
+      ? preferredModelId
+      : (models[0]?.id ?? "");
+  const groupsForModel = groups.filter((group) => group.modelId === fallbackModelId);
+
+  return createEmptyCourseConfigurationCreateGroupFormValues(
+    courseId,
+    fallbackModelId,
+    getNextOrderValue(groupsForModel.map((group) => group.order)),
+    groupsForModel.length ? "" : "100"
+  );
+}
+
+function buildCreateCriterionDraft(
+  courseId: string,
+  groups: CourseConfigurationGroupEntry[],
+  criteria: CourseConfigurationCriterionEntry[],
+  preferredGroupId?: string
+) {
+  const fallbackGroupId =
+    preferredGroupId && groups.some((group) => group.id === preferredGroupId)
+      ? preferredGroupId
+      : (groups[0]?.id ?? "");
+  const criteriaForGroup = criteria.filter((criterion) => criterion.groupId === fallbackGroupId);
+
+  return createEmptyCourseConfigurationCreateCriterionFormValues(
+    courseId,
+    fallbackGroupId,
+    getNextOrderValue(criteriaForGroup.map((criterion) => criterion.order)),
+    criteriaForGroup.length ? "" : "100",
+    "10"
+  );
+}
+
+function buildCreateRequiredDocumentDraft(
+  courseId: string,
+  availableDocumentTypes: CourseConfigurationDocumentTypeOption[],
+  requiredDocuments: CourseConfigurationRequiredDocumentEntry[],
+  preferredDocumentTypeId?: string
+) {
+  const fallbackDocumentTypeId =
+    preferredDocumentTypeId &&
+    availableDocumentTypes.some((documentType) => documentType.id === preferredDocumentTypeId)
+      ? preferredDocumentTypeId
+      : (availableDocumentTypes[0]?.id ?? "");
+
+  return createEmptyCourseConfigurationCreateRequiredDocumentFormValues(
+    courseId,
+    fallbackDocumentTypeId,
+    getNextOrderValue(requiredDocuments.map((requiredDocument) => requiredDocument.order))
+  );
+}
+
+export function MasterCourseConfigurationModelForm({
+  model
+}: {
+  model: CourseConfigurationModelEntry;
+}) {
+  const [state, formAction] = useActionState(
+    updateCourseConfigurationModelAction,
+    createInitialCourseConfigurationActionState<CourseConfigurationModelFormValues>()
+  );
+  const safeState =
+    state ?? createInitialCourseConfigurationActionState<CourseConfigurationModelFormValues>();
+  const fieldErrors = safeState.fieldErrors ?? {};
+  const [draft, setDraft] = useState<CourseConfigurationModelFormValues>(() =>
+    buildModelDraft(model)
+  );
+
+  useEffect(() => {
+    setDraft(buildModelDraft(model));
+  }, [model]);
+
+  useEffect(() => {
+    if (safeState.formValues) {
+      setDraft({ ...safeState.formValues });
+    }
+  }, [safeState.formValues, safeState.status, safeState.submittedAt]);
+
+  return (
+    <form action={formAction} className="form-stack master-course-configuration-edit-form">
+      <input type="hidden" name="model_id" value={draft.model_id} />
+      {renderNotice(safeState)}
+
+      <div className="management-tag-list">
+        <span className="badge badge-muted">Codigo fixo: {model.code}</span>
+        <span className="badge badge-muted">Versao fixa: {model.version}</span>
+      </div>
+
+      <div className="form-grid">
+        <label className={getFieldClassName(fieldErrors, "nome")}>
+          <span>Nome</span>
+          <input
+            className={getInputClassName(fieldErrors, "nome")}
+            name="nome"
+            value={draft.nome}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+
+              setDraft((currentDraft) => ({ ...currentDraft, nome: value }));
+            }}
+          />
+          {fieldErrors.nome ? <span className="field-error">{fieldErrors.nome}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "ativo")}>
+          <span>Status</span>
+          <select
+            className={getInputClassName(fieldErrors, "ativo")}
+            name="ativo"
+            value={draft.ativo}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+
+              setDraft((currentDraft) => ({ ...currentDraft, ativo: value }));
+            }}
+          >
+            <option value="true">Ativo</option>
+            <option value="false">Inativo</option>
+          </select>
+          {fieldErrors.ativo ? <span className="field-error">{fieldErrors.ativo}</span> : null}
+        </label>
+      </div>
+
+      <label className={getFieldClassName(fieldErrors, "descricao")}>
+        <span>Descricao</span>
+        <textarea
+          className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
+          name="descricao"
+          rows={3}
+          value={draft.descricao}
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+
+            setDraft((currentDraft) => ({
+              ...currentDraft,
+              descricao: value
+            }));
+          }}
+        />
+        {fieldErrors.descricao ? (
+          <span className="field-error">{fieldErrors.descricao}</span>
+        ) : null}
+      </label>
+
+      <div className="actions-row">
+        <button className="button button-secondary" type="submit">
+          Salvar modelo
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function MasterCourseConfigurationCreateGroupForm({
+  courseId,
+  models,
+  groups
+}: {
+  courseId: string;
+  models: CourseConfigurationModelEntry[];
+  groups: CourseConfigurationGroupEntry[];
+}) {
+  const [state, formAction] = useActionState(
+    createCourseConfigurationGroupAction,
+    initialCourseConfigurationCreateGroupActionState
+  );
+  const safeState = state ?? initialCourseConfigurationCreateGroupActionState;
+  const fieldErrors = safeState.fieldErrors ?? {};
+  const [draft, setDraft] = useState<CourseConfigurationCreateGroupFormValues>(() =>
+    buildCreateGroupDraft(courseId, models, groups)
+  );
+
+  useEffect(() => {
+    if (safeState.status === "error" && safeState.formValues) {
+      setDraft({ ...safeState.formValues });
+      return;
+    }
+
+    setDraft(buildCreateGroupDraft(courseId, models, groups, draft.model_id));
+  }, [
+    courseId,
+    groups,
+    models,
+    safeState.formValues,
+    safeState.status,
+    safeState.submittedAt
+  ]);
+
+  function updateDraft(field: keyof CourseConfigurationCreateGroupFormValues, value: string) {
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value
+    }));
+  }
+
+  function handleModelChange(nextModelId: string) {
+    const nextDraft = buildCreateGroupDraft(courseId, models, groups, nextModelId);
+
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      model_id: nextDraft.model_id,
+      ordem: nextDraft.ordem,
+      peso_percentual: nextDraft.peso_percentual
+    }));
+  }
+
+  return (
+    <form action={formAction} className="form-stack master-course-configuration-edit-form">
+      <input type="hidden" name="course_id" value={draft.course_id} />
+      {renderNotice(safeState)}
+
+      <div className="form-grid">
+        <label className={getFieldClassName(fieldErrors, "model_id")}>
+          <span>Modelo</span>
+          <select
+            className={getInputClassName(fieldErrors, "model_id")}
+            name="model_id"
+            value={draft.model_id}
+            onChange={(event) => handleModelChange(event.currentTarget.value)}
+          >
+            <option value="">Selecione</option>
+            {models.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.name} ({model.code})
+              </option>
+            ))}
+          </select>
+          {fieldErrors.model_id ? (
+            <span className="field-error">{fieldErrors.model_id}</span>
+          ) : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "codigo")}>
+          <span>Codigo</span>
+          <input
+            className={getInputClassName(fieldErrors, "codigo")}
+            name="codigo"
+            value={draft.codigo}
+            onChange={(event) => updateDraft("codigo", normalizeCodeInput(event.currentTarget.value))}
+          />
+          {fieldErrors.codigo ? <span className="field-error">{fieldErrors.codigo}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "nome")}>
+          <span>Nome</span>
+          <input
+            className={getInputClassName(fieldErrors, "nome")}
+            name="nome"
+            value={draft.nome}
+            onChange={(event) => updateDraft("nome", event.currentTarget.value)}
+          />
+          {fieldErrors.nome ? <span className="field-error">{fieldErrors.nome}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "ordem")}>
+          <span>Ordem</span>
+          <input
+            className={getInputClassName(fieldErrors, "ordem")}
+            name="ordem"
+            type="number"
+            min="1"
+            step="1"
+            value={draft.ordem}
+            onChange={(event) => updateDraft("ordem", event.currentTarget.value)}
+          />
+          {fieldErrors.ordem ? <span className="field-error">{fieldErrors.ordem}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "peso_percentual")}>
+          <span>Peso percentual</span>
+          <input
+            className={getInputClassName(fieldErrors, "peso_percentual")}
+            name="peso_percentual"
+            type="number"
+            min="0.01"
+            max="100"
+            step="0.01"
+            value={draft.peso_percentual}
+            onChange={(event) => updateDraft("peso_percentual", event.currentTarget.value)}
+          />
+          {fieldErrors.peso_percentual ? (
+            <span className="field-error">{fieldErrors.peso_percentual}</span>
+          ) : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "ativo")}>
+          <span>Status</span>
+          <select
+            className={getInputClassName(fieldErrors, "ativo")}
+            name="ativo"
+            value={draft.ativo}
+            onChange={(event) => updateDraft("ativo", event.currentTarget.value)}
+          >
+            <option value="true">Ativo</option>
+            <option value="false">Inativo</option>
+          </select>
+          {fieldErrors.ativo ? <span className="field-error">{fieldErrors.ativo}</span> : null}
+        </label>
+      </div>
+
+      <div className="actions-row">
+        <button className="button button-secondary" type="submit" disabled={!models.length}>
+          Salvar novo grupo
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function MasterCourseConfigurationGroupForm({
+  group
+}: {
+  group: CourseConfigurationGroupEntry;
+}) {
+  const [state, formAction] = useActionState(
+    updateCourseConfigurationGroupAction,
+    createInitialCourseConfigurationActionState<CourseConfigurationGroupFormValues>()
+  );
+  const [deleteState, deleteFormAction] = useActionState(
+    deleteCourseConfigurationGroupAction,
+    initialCourseConfigurationDeleteGroupActionState
+  );
+  const safeState =
+    state ?? createInitialCourseConfigurationActionState<CourseConfigurationGroupFormValues>();
+  const safeDeleteState = deleteState ?? initialCourseConfigurationDeleteGroupActionState;
+  const fieldErrors = safeState.fieldErrors ?? {};
+  const [draft, setDraft] = useState<CourseConfigurationGroupFormValues>(() =>
+    buildGroupDraft(group)
+  );
+
+  useEffect(() => {
+    setDraft(buildGroupDraft(group));
+  }, [group]);
+
+  useEffect(() => {
+    if (safeState.formValues) {
+      setDraft({ ...safeState.formValues });
+    }
+  }, [safeState.formValues, safeState.status, safeState.submittedAt]);
+
+  return (
+    <>
+      <form action={formAction} className="form-stack master-course-configuration-edit-form">
+        <input type="hidden" name="group_id" value={draft.group_id} />
+        {renderNotice(safeState)}
+        {renderNotice(safeDeleteState)}
+
+        <div className="management-tag-list">
+          <span className="badge badge-muted">Codigo fixo: {group.code}</span>
+          <span className="badge badge-muted">Modelo fixo: {group.modelCode}</span>
+        </div>
+
+        <div className="form-grid">
+          <label className={getFieldClassName(fieldErrors, "nome")}>
+            <span>Nome</span>
+            <input
+              className={getInputClassName(fieldErrors, "nome")}
+              name="nome"
+              value={draft.nome}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({ ...currentDraft, nome: value }));
+              }}
+            />
+            {fieldErrors.nome ? <span className="field-error">{fieldErrors.nome}</span> : null}
+          </label>
+
+          <label className={getFieldClassName(fieldErrors, "ordem")}>
+            <span>Ordem</span>
+            <input
+              className={getInputClassName(fieldErrors, "ordem")}
+              name="ordem"
+              type="number"
+              min="1"
+              step="1"
+              value={draft.ordem}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({ ...currentDraft, ordem: value }));
+              }}
+            />
+            {fieldErrors.ordem ? <span className="field-error">{fieldErrors.ordem}</span> : null}
+          </label>
+
+          <label className={getFieldClassName(fieldErrors, "peso_percentual")}>
+            <span>Peso percentual</span>
+            <input
+              className={getInputClassName(fieldErrors, "peso_percentual")}
+              name="peso_percentual"
+              type="number"
+              min="0.01"
+              max="100"
+              step="0.01"
+              value={draft.peso_percentual}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({
+                  ...currentDraft,
+                  peso_percentual: value
+                }));
+              }}
+            />
+            {fieldErrors.peso_percentual ? (
+              <span className="field-error">{fieldErrors.peso_percentual}</span>
+            ) : null}
+          </label>
+
+          <label className={getFieldClassName(fieldErrors, "ativo")}>
+            <span>Status</span>
+            <select
+              className={getInputClassName(fieldErrors, "ativo")}
+              name="ativo"
+              value={draft.ativo}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({ ...currentDraft, ativo: value }));
+              }}
+            >
+              <option value="true">Ativo</option>
+              <option value="false">Inativo</option>
+            </select>
+            {fieldErrors.ativo ? <span className="field-error">{fieldErrors.ativo}</span> : null}
+          </label>
+        </div>
+
+        <div className="actions-row">
+          <button className="button button-secondary" type="submit">
+            Salvar grupo
+          </button>
+        </div>
+      </form>
+      <form
+        action={deleteFormAction}
+        className="actions-row"
+        onSubmit={(event) => {
+          if (
+            !window.confirm(
+              `Excluir o grupo ${group.name}? Se ele tiver criterios vinculados, a exclusao sera bloqueada.`
+            )
+          ) {
+            event.preventDefault();
+          }
+        }}
+      >
+        <input type="hidden" name="group_id" value={group.id} />
+        <button className="button button-danger button-small" type="submit">
+          Excluir grupo
+        </button>
+      </form>
+    </>
+  );
+}
+
+export function MasterCourseConfigurationCreateCriterionForm({
+  courseId,
+  groups,
+  criteria
+}: {
+  courseId: string;
+  groups: CourseConfigurationGroupEntry[];
+  criteria: CourseConfigurationCriterionEntry[];
+}) {
+  const [state, formAction] = useActionState(
+    createCourseConfigurationCriterionAction,
+    initialCourseConfigurationCreateCriterionActionState
+  );
+  const safeState = state ?? initialCourseConfigurationCreateCriterionActionState;
+  const fieldErrors = safeState.fieldErrors ?? {};
+  const [draft, setDraft] = useState<CourseConfigurationCreateCriterionFormValues>(() =>
+    buildCreateCriterionDraft(courseId, groups, criteria)
+  );
+
+  useEffect(() => {
+    if (safeState.status === "error" && safeState.formValues) {
+      setDraft({ ...safeState.formValues });
+      return;
+    }
+
+    setDraft(buildCreateCriterionDraft(courseId, groups, criteria, draft.group_id));
+  }, [
+    courseId,
+    criteria,
+    draft.group_id,
+    groups,
+    safeState.formValues,
+    safeState.status,
+    safeState.submittedAt
+  ]);
+
+  function updateDraft(field: keyof CourseConfigurationCreateCriterionFormValues, value: string) {
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value
+    }));
+  }
+
+  function handleGroupChange(nextGroupId: string) {
+    const nextDraft = buildCreateCriterionDraft(courseId, groups, criteria, nextGroupId);
+
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      group_id: nextDraft.group_id,
+      ordem: nextDraft.ordem,
+      peso_percentual: nextDraft.peso_percentual
+    }));
+  }
+
+  return (
+    <form action={formAction} className="form-stack master-course-configuration-edit-form">
+      <input type="hidden" name="course_id" value={draft.course_id} />
+      {renderNotice(safeState)}
+
+      <div className="form-grid">
+        <label className={getFieldClassName(fieldErrors, "group_id")}>
+          <span>Grupo</span>
+          <select
+            className={getInputClassName(fieldErrors, "group_id")}
+            name="group_id"
+            value={draft.group_id}
+            onChange={(event) => handleGroupChange(event.currentTarget.value)}
+          >
+            <option value="">Selecione</option>
+            {groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name} ({group.modelCode})
+              </option>
+            ))}
+          </select>
+          {fieldErrors.group_id ? (
+            <span className="field-error">{fieldErrors.group_id}</span>
+          ) : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "codigo")}>
+          <span>Codigo</span>
+          <input
+            className={getInputClassName(fieldErrors, "codigo")}
+            name="codigo"
+            value={draft.codigo}
+            onChange={(event) => updateDraft("codigo", normalizeCodeInput(event.currentTarget.value))}
+          />
+          {fieldErrors.codigo ? <span className="field-error">{fieldErrors.codigo}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "nome")}>
+          <span>Nome</span>
+          <input
+            className={getInputClassName(fieldErrors, "nome")}
+            name="nome"
+            value={draft.nome}
+            onChange={(event) => updateDraft("nome", event.currentTarget.value)}
+          />
+          {fieldErrors.nome ? <span className="field-error">{fieldErrors.nome}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "ordem")}>
+          <span>Ordem</span>
+          <input
+            className={getInputClassName(fieldErrors, "ordem")}
+            name="ordem"
+            type="number"
+            min="1"
+            step="1"
+            value={draft.ordem}
+            onChange={(event) => updateDraft("ordem", event.currentTarget.value)}
+          />
+          {fieldErrors.ordem ? <span className="field-error">{fieldErrors.ordem}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "peso_percentual")}>
+          <span>Peso percentual</span>
+          <input
+            className={getInputClassName(fieldErrors, "peso_percentual")}
+            name="peso_percentual"
+            type="number"
+            min="0.01"
+            max="100"
+            step="0.01"
+            value={draft.peso_percentual}
+            onChange={(event) => updateDraft("peso_percentual", event.currentTarget.value)}
+          />
+          {fieldErrors.peso_percentual ? (
+            <span className="field-error">{fieldErrors.peso_percentual}</span>
+          ) : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "escala_maxima")}>
+          <span>Escala maxima</span>
+          <input
+            className={getInputClassName(fieldErrors, "escala_maxima")}
+            name="escala_maxima"
+            type="number"
+            min="0.01"
+            step="0.01"
+            value={draft.escala_maxima}
+            onChange={(event) => updateDraft("escala_maxima", event.currentTarget.value)}
+          />
+          {fieldErrors.escala_maxima ? (
+            <span className="field-error">{fieldErrors.escala_maxima}</span>
+          ) : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "ativo")}>
+          <span>Status</span>
+          <select
+            className={getInputClassName(fieldErrors, "ativo")}
+            name="ativo"
+            value={draft.ativo}
+            onChange={(event) => updateDraft("ativo", event.currentTarget.value)}
+          >
+            <option value="true">Ativo</option>
+            <option value="false">Inativo</option>
+          </select>
+          {fieldErrors.ativo ? <span className="field-error">{fieldErrors.ativo}</span> : null}
+        </label>
+      </div>
+
+      <label className={getFieldClassName(fieldErrors, "descricao")}>
+        <span>Descricao</span>
+        <textarea
+          className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
+          name="descricao"
+          rows={3}
+          value={draft.descricao}
+          onChange={(event) => updateDraft("descricao", event.currentTarget.value)}
+        />
+        {fieldErrors.descricao ? (
+          <span className="field-error">{fieldErrors.descricao}</span>
+        ) : null}
+      </label>
+
+      <div className="actions-row">
+        <button className="button button-secondary" type="submit" disabled={!groups.length}>
+          Salvar novo criterio
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function MasterCourseConfigurationCriterionForm({
+  criterion
+}: {
+  criterion: CourseConfigurationCriterionEntry;
+}) {
+  const [state, formAction] = useActionState(
+    updateCourseConfigurationCriterionAction,
+    createInitialCourseConfigurationActionState<CourseConfigurationCriterionFormValues>()
+  );
+  const [deleteState, deleteFormAction] = useActionState(
+    deleteCourseConfigurationCriterionAction,
+    initialCourseConfigurationDeleteCriterionActionState
+  );
+  const safeState =
+    state ?? createInitialCourseConfigurationActionState<CourseConfigurationCriterionFormValues>();
+  const safeDeleteState = deleteState ?? initialCourseConfigurationDeleteCriterionActionState;
+  const fieldErrors = safeState.fieldErrors ?? {};
+  const [draft, setDraft] = useState<CourseConfigurationCriterionFormValues>(() =>
+    buildCriterionDraft(criterion)
+  );
+
+  useEffect(() => {
+    setDraft(buildCriterionDraft(criterion));
+  }, [criterion]);
+
+  useEffect(() => {
+    if (safeState.formValues) {
+      setDraft({ ...safeState.formValues });
+    }
+  }, [safeState.formValues, safeState.status, safeState.submittedAt]);
+
+  return (
+    <>
+      <form action={formAction} className="form-stack master-course-configuration-edit-form">
+        <input type="hidden" name="criterion_id" value={draft.criterion_id} />
+        {renderNotice(safeState)}
+        {renderNotice(safeDeleteState)}
+
+        <div className="management-tag-list">
+          <span className="badge badge-muted">Codigo fixo: {criterion.code}</span>
+          <span className="badge badge-muted">Grupo fixo: {criterion.groupName}</span>
+        </div>
+
+        <div className="form-grid">
+          <label className={getFieldClassName(fieldErrors, "nome")}>
+            <span>Nome</span>
+            <input
+              className={getInputClassName(fieldErrors, "nome")}
+              name="nome"
+              value={draft.nome}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({ ...currentDraft, nome: value }));
+              }}
+            />
+            {fieldErrors.nome ? <span className="field-error">{fieldErrors.nome}</span> : null}
+          </label>
+
+          <label className={getFieldClassName(fieldErrors, "ordem")}>
+            <span>Ordem</span>
+            <input
+              className={getInputClassName(fieldErrors, "ordem")}
+              name="ordem"
+              type="number"
+              min="1"
+              step="1"
+              value={draft.ordem}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({ ...currentDraft, ordem: value }));
+              }}
+            />
+            {fieldErrors.ordem ? <span className="field-error">{fieldErrors.ordem}</span> : null}
+          </label>
+
+          <label className={getFieldClassName(fieldErrors, "peso_percentual")}>
+            <span>Peso percentual</span>
+            <input
+              className={getInputClassName(fieldErrors, "peso_percentual")}
+              name="peso_percentual"
+              type="number"
+              min="0.01"
+              max="100"
+              step="0.01"
+              value={draft.peso_percentual}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({
+                  ...currentDraft,
+                  peso_percentual: value
+                }));
+              }}
+            />
+            {fieldErrors.peso_percentual ? (
+              <span className="field-error">{fieldErrors.peso_percentual}</span>
+            ) : null}
+          </label>
+
+          <label className={getFieldClassName(fieldErrors, "escala_maxima")}>
+            <span>Escala maxima</span>
+            <input
+              className={getInputClassName(fieldErrors, "escala_maxima")}
+              name="escala_maxima"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={draft.escala_maxima}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({
+                  ...currentDraft,
+                  escala_maxima: value
+                }));
+              }}
+            />
+            {fieldErrors.escala_maxima ? (
+              <span className="field-error">{fieldErrors.escala_maxima}</span>
+            ) : null}
+          </label>
+
+          <label className={getFieldClassName(fieldErrors, "ativo")}>
+            <span>Status</span>
+            <select
+              className={getInputClassName(fieldErrors, "ativo")}
+              name="ativo"
+              value={draft.ativo}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({ ...currentDraft, ativo: value }));
+              }}
+            >
+              <option value="true">Ativo</option>
+              <option value="false">Inativo</option>
+            </select>
+            {fieldErrors.ativo ? <span className="field-error">{fieldErrors.ativo}</span> : null}
+          </label>
+        </div>
+
+        <label className={getFieldClassName(fieldErrors, "descricao")}>
+          <span>Descricao</span>
+          <textarea
+            className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
+            name="descricao"
+            rows={3}
+            value={draft.descricao}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+
+              setDraft((currentDraft) => ({
+                ...currentDraft,
+                descricao: value
+              }));
+            }}
+          />
+          {fieldErrors.descricao ? (
+            <span className="field-error">{fieldErrors.descricao}</span>
+          ) : null}
+        </label>
+
+        <div className="actions-row">
+          <button className="button button-secondary" type="submit">
+            Salvar criterio
+          </button>
+        </div>
+      </form>
+      <form
+        action={deleteFormAction}
+        className="actions-row"
+        onSubmit={(event) => {
+          if (
+            !window.confirm(
+              `Excluir o criterio ${criterion.name}? Se ele ja tiver historico de avaliacoes, sera desativado para preservar os registros.`
+            )
+          ) {
+            event.preventDefault();
+          }
+        }}
+      >
+        <input type="hidden" name="criterion_id" value={criterion.id} />
+        <button className="button button-danger button-small" type="submit">
+          Excluir criterio
+        </button>
+      </form>
+    </>
+  );
+}
+
+export function MasterCourseConfigurationCreateRequiredDocumentForm({
+  courseId,
+  requiredDocuments,
+  documentTypeOptions
+}: {
+  courseId: string;
+  requiredDocuments: CourseConfigurationRequiredDocumentEntry[];
+  documentTypeOptions: CourseConfigurationDocumentTypeOption[];
+}) {
+  const [state, formAction] = useActionState(
+    createCourseRequiredDocumentAction,
+    initialCourseConfigurationCreateRequiredDocumentActionState
+  );
+  const safeState = state ?? initialCourseConfigurationCreateRequiredDocumentActionState;
+  const fieldErrors = safeState.fieldErrors ?? {};
+  const availableDocumentTypes = useMemo(() => {
+    const usedTypeIds = new Set(requiredDocuments.map((requiredDocument) => requiredDocument.typeId));
+
+    return documentTypeOptions.filter((documentType) => !usedTypeIds.has(documentType.id));
+  }, [documentTypeOptions, requiredDocuments]);
+  const [draft, setDraft] = useState<CourseConfigurationCreateRequiredDocumentFormValues>(() =>
+    buildCreateRequiredDocumentDraft(courseId, availableDocumentTypes, requiredDocuments)
+  );
+
+  useEffect(() => {
+    if (safeState.status === "error" && safeState.formValues) {
+      setDraft({ ...safeState.formValues });
+      return;
+    }
+
+    setDraft(
+      buildCreateRequiredDocumentDraft(
+        courseId,
+        availableDocumentTypes,
+        requiredDocuments,
+        draft.tipo_documento_id
+      )
+    );
+  }, [
+    availableDocumentTypes,
+    courseId,
+    draft.tipo_documento_id,
+    requiredDocuments,
+    safeState.formValues,
+    safeState.status,
+    safeState.submittedAt
+  ]);
+
+  function updateDraft(
+    field: keyof CourseConfigurationCreateRequiredDocumentFormValues,
+    value: string
+  ) {
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value
+    }));
+  }
+
+  return (
+    <form action={formAction} className="form-stack master-course-configuration-edit-form">
+      <input type="hidden" name="course_id" value={draft.course_id} />
+      {renderNotice(safeState)}
+
+      <div className="form-grid">
+        <label className={getFieldClassName(fieldErrors, "tipo_documento_id")}>
+          <span>Tipo documental</span>
+          <select
+            className={getInputClassName(fieldErrors, "tipo_documento_id")}
+            name="tipo_documento_id"
+            value={draft.tipo_documento_id}
+            onChange={(event) => updateDraft("tipo_documento_id", event.currentTarget.value)}
+          >
+            <option value="">Selecione</option>
+            {availableDocumentTypes.map((documentType) => (
+              <option key={documentType.id} value={documentType.id}>
+                {documentType.name} ({documentType.code})
+              </option>
+            ))}
+          </select>
+          {fieldErrors.tipo_documento_id ? (
+            <span className="field-error">{fieldErrors.tipo_documento_id}</span>
+          ) : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "nome_exibicao")}>
+          <span>Nome de exibicao</span>
+          <input
+            className={getInputClassName(fieldErrors, "nome_exibicao")}
+            name="nome_exibicao"
+            value={draft.nome_exibicao}
+            onChange={(event) => updateDraft("nome_exibicao", event.currentTarget.value)}
+          />
+          {fieldErrors.nome_exibicao ? (
+            <span className="field-error">{fieldErrors.nome_exibicao}</span>
+          ) : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "ordem")}>
+          <span>Ordem</span>
+          <input
+            className={getInputClassName(fieldErrors, "ordem")}
+            name="ordem"
+            type="number"
+            min="1"
+            step="1"
+            value={draft.ordem}
+            onChange={(event) => updateDraft("ordem", event.currentTarget.value)}
+          />
+          <span className="field-help">Deixe vazio se o documento nao tiver ordem fixa.</span>
+          {fieldErrors.ordem ? <span className="field-error">{fieldErrors.ordem}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "obrigatorio")}>
+          <span>Obrigatoriedade</span>
+          <select
+            className={getInputClassName(fieldErrors, "obrigatorio")}
+            name="obrigatorio"
+            value={draft.obrigatorio}
+            onChange={(event) => updateDraft("obrigatorio", event.currentTarget.value)}
+          >
+            <option value="true">Obrigatorio</option>
+            <option value="false">Opcional</option>
+          </select>
+          {fieldErrors.obrigatorio ? (
+            <span className="field-error">{fieldErrors.obrigatorio}</span>
+          ) : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "ativo")}>
+          <span>Status</span>
+          <select
+            className={getInputClassName(fieldErrors, "ativo")}
+            name="ativo"
+            value={draft.ativo}
+            onChange={(event) => updateDraft("ativo", event.currentTarget.value)}
+          >
+            <option value="true">Ativo</option>
+            <option value="false">Inativo</option>
+          </select>
+          {fieldErrors.ativo ? <span className="field-error">{fieldErrors.ativo}</span> : null}
+        </label>
+      </div>
+
+      <label className={getFieldClassName(fieldErrors, "descricao")}>
+        <span>Descricao</span>
+        <textarea
+          className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
+          name="descricao"
+          rows={3}
+          value={draft.descricao}
+          onChange={(event) => updateDraft("descricao", event.currentTarget.value)}
+        />
+        {fieldErrors.descricao ? (
+          <span className="field-error">{fieldErrors.descricao}</span>
+        ) : null}
+      </label>
+
+      <div className="actions-row">
+        <button
+          className="button button-secondary"
+          type="submit"
+          disabled={!availableDocumentTypes.length}
+        >
+          Salvar novo documento
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function MasterCourseConfigurationRequiredDocumentForm({
+  requiredDocument
+}: {
+  requiredDocument: CourseConfigurationRequiredDocumentEntry;
+}) {
+  const [state, formAction] = useActionState(
+    updateCourseConfigurationRequiredDocumentAction,
+    createInitialCourseConfigurationActionState<CourseConfigurationRequiredDocumentFormValues>()
+  );
+  const [deleteState, deleteFormAction] = useActionState(
+    deleteCourseRequiredDocumentAction,
+    initialCourseConfigurationDeleteRequiredDocumentActionState
+  );
+  const safeState =
+    state ??
+    createInitialCourseConfigurationActionState<CourseConfigurationRequiredDocumentFormValues>();
+  const safeDeleteState =
+    deleteState ?? initialCourseConfigurationDeleteRequiredDocumentActionState;
+  const fieldErrors = safeState.fieldErrors ?? {};
+  const [draft, setDraft] = useState<CourseConfigurationRequiredDocumentFormValues>(() =>
+    buildRequiredDocumentDraft(requiredDocument)
+  );
+
+  useEffect(() => {
+    setDraft(buildRequiredDocumentDraft(requiredDocument));
+  }, [requiredDocument]);
+
+  useEffect(() => {
+    if (safeState.formValues) {
+      setDraft({ ...safeState.formValues });
+    }
+  }, [safeState.formValues, safeState.status, safeState.submittedAt]);
+
+  return (
+    <>
+      <form action={formAction} className="form-stack master-course-configuration-edit-form">
+        <input type="hidden" name="required_document_id" value={draft.required_document_id} />
+        {renderNotice(safeState)}
+        {renderNotice(safeDeleteState)}
+
+        <div className="management-tag-list">
+          <span className="badge badge-muted">
+            Tipo fixo: {requiredDocument.typeName} ({requiredDocument.typeCode})
+          </span>
+          {requiredDocument.code ? (
+            <span className="badge badge-muted">Codigo fixo: {requiredDocument.code}</span>
+          ) : null}
+        </div>
+
+        <div className="form-grid">
+          <label className={getFieldClassName(fieldErrors, "nome_exibicao")}>
+            <span>Nome de exibicao</span>
+            <input
+              className={getInputClassName(fieldErrors, "nome_exibicao")}
+              name="nome_exibicao"
+              value={draft.nome_exibicao}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({
+                  ...currentDraft,
+                  nome_exibicao: value
+                }));
+              }}
+            />
+            {fieldErrors.nome_exibicao ? (
+              <span className="field-error">{fieldErrors.nome_exibicao}</span>
+            ) : null}
+          </label>
+
+          <label className={getFieldClassName(fieldErrors, "ordem")}>
+            <span>Ordem</span>
+            <input
+              className={getInputClassName(fieldErrors, "ordem")}
+              name="ordem"
+              type="number"
+              min="1"
+              step="1"
+              value={draft.ordem}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({ ...currentDraft, ordem: value }));
+              }}
+            />
+            <span className="field-help">Deixe vazio se o documento nao tiver ordem fixa.</span>
+            {fieldErrors.ordem ? <span className="field-error">{fieldErrors.ordem}</span> : null}
+          </label>
+
+          <label className={getFieldClassName(fieldErrors, "obrigatorio")}>
+            <span>Obrigatoriedade</span>
+            <select
+              className={getInputClassName(fieldErrors, "obrigatorio")}
+              name="obrigatorio"
+              value={draft.obrigatorio}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({
+                  ...currentDraft,
+                  obrigatorio: value
+                }));
+              }}
+            >
+              <option value="true">Obrigatorio</option>
+              <option value="false">Opcional</option>
+            </select>
+            {fieldErrors.obrigatorio ? (
+              <span className="field-error">{fieldErrors.obrigatorio}</span>
+            ) : null}
+          </label>
+
+          <label className={getFieldClassName(fieldErrors, "ativo")}>
+            <span>Status</span>
+            <select
+              className={getInputClassName(fieldErrors, "ativo")}
+              name="ativo"
+              value={draft.ativo}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({ ...currentDraft, ativo: value }));
+              }}
+            >
+              <option value="true">Ativo</option>
+              <option value="false">Inativo</option>
+            </select>
+            {fieldErrors.ativo ? <span className="field-error">{fieldErrors.ativo}</span> : null}
+          </label>
+        </div>
+
+        <label className={getFieldClassName(fieldErrors, "descricao")}>
+          <span>Descricao</span>
+          <textarea
+            className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
+            name="descricao"
+            rows={3}
+            value={draft.descricao}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+
+              setDraft((currentDraft) => ({
+                ...currentDraft,
+                descricao: value
+              }));
+            }}
+          />
+          {fieldErrors.descricao ? (
+            <span className="field-error">{fieldErrors.descricao}</span>
+          ) : null}
+        </label>
+
+        <div className="actions-row">
+          <button className="button button-secondary" type="submit">
+            Salvar documento
+          </button>
+        </div>
+      </form>
+      <form
+        action={deleteFormAction}
+        className="actions-row"
+        onSubmit={(event) => {
+          if (
+            !window.confirm(
+              `Excluir o documento obrigatorio ${requiredDocument.displayName ?? requiredDocument.typeName}? Se ele ja tiver documentos de alunos vinculados, sera desativado para preservar o historico.`
+            )
+          ) {
+            event.preventDefault();
+          }
+        }}
+      >
+        <input type="hidden" name="required_document_id" value={requiredDocument.id} />
+        <button className="button button-danger button-small" type="submit">
+          Excluir documento
+        </button>
+      </form>
+    </>
+  );
+}

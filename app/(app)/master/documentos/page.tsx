@@ -6,6 +6,7 @@ import { getStudentDocumentDirectoryPageData } from "@/services/student-document
 export default async function MasterStudentDocumentsPage(props: {
   searchParams?: Promise<{
     q?: string;
+    institution_id?: string;
     unit_id?: string;
     area_id?: string;
     status?: string;
@@ -17,6 +18,7 @@ export default async function MasterStudentDocumentsPage(props: {
     currentUser,
     viewerRole: "coordenador_master",
     search: searchParams.q ?? null,
+    institutionId: searchParams.institution_id ?? null,
     areaId: searchParams.area_id ?? null,
     status: searchParams.status ?? null,
     unitId: searchParams.unit_id ?? null

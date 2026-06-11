@@ -6,6 +6,7 @@ import { getStudentDocumentDirectoryPageData } from "@/services/student-document
 export default async function CoordinatorStudentDocumentsPage(props: {
   searchParams?: Promise<{
     q?: string;
+    unit_id?: string;
     area_id?: string;
     status?: string;
   }>;
@@ -16,6 +17,7 @@ export default async function CoordinatorStudentDocumentsPage(props: {
     currentUser,
     viewerRole: "coordenador",
     search: searchParams.q ?? null,
+    unitId: searchParams.unit_id ?? null,
     areaId: searchParams.area_id ?? null,
     status: searchParams.status ?? null
   });
@@ -26,7 +28,11 @@ export default async function CoordinatorStudentDocumentsPage(props: {
       basePath={"/coordenador/documentos" as Route}
       heroEyebrow="Documentos institucionais"
       heroTitle="Documentos dos alunos"
-      heroDescription="A coordenação acompanha os documentos da unidade, pode intervir na validação e garante a coerência institucional da carteira de vacinação e dos TCEs."
+      heroDescription={
+        pageData.unitOptions.length > 0
+          ? "A coordenação institucional acompanha os documentos do curso por unidade, pode intervir na validação e garante a coerência documental da carteira de vacinação e dos TCEs."
+          : "A coordenação acompanha os documentos da unidade, pode intervir na validação e garante a coerência institucional da carteira de vacinação e dos TCEs."
+      }
     />
   );
 }

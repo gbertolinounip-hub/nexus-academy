@@ -253,17 +253,44 @@ create table if not exists public.blocos_estagio (
 create table if not exists public.areas_estagio (
   id uuid primary key default gen_random_uuid(),
   bloco_id smallint not null references public.blocos_estagio (id) on delete restrict,
-  codigo text not null unique,
-  nome text not null unique,
+  oferta_curso_unidade_id uuid references public.ofertas_curso_unidade (id) on delete restrict,
+  codigo text not null,
+  nome text not null,
   ordem smallint not null,
   ativa boolean not null default true,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint areas_estagio_ordem_uk unique (bloco_id, ordem)
+  updated_at timestamptz not null default now()
 );
 
 create index if not exists idx_areas_estagio_bloco_id
   on public.areas_estagio (bloco_id, ativa, ordem);
+
+create unique index if not exists idx_areas_estagio_codigo_legacy_uk
+  on public.areas_estagio (codigo)
+  where oferta_curso_unidade_id is null;
+
+create unique index if not exists idx_areas_estagio_codigo_oferta_uk
+  on public.areas_estagio (oferta_curso_unidade_id, codigo)
+  where oferta_curso_unidade_id is not null;
+
+create unique index if not exists idx_areas_estagio_nome_legacy_uk
+  on public.areas_estagio (nome)
+  where oferta_curso_unidade_id is null;
+
+create unique index if not exists idx_areas_estagio_nome_oferta_uk
+  on public.areas_estagio (oferta_curso_unidade_id, nome)
+  where oferta_curso_unidade_id is not null;
+
+create unique index if not exists idx_areas_estagio_ordem_legacy_uk
+  on public.areas_estagio (bloco_id, ordem)
+  where oferta_curso_unidade_id is null;
+
+create unique index if not exists idx_areas_estagio_ordem_oferta_uk
+  on public.areas_estagio (oferta_curso_unidade_id, bloco_id, ordem)
+  where oferta_curso_unidade_id is not null;
+
+create index if not exists idx_areas_estagio_oferta_bloco_ordem
+  on public.areas_estagio (oferta_curso_unidade_id, ativa, bloco_id, ordem);
 
 create table if not exists public.turmas (
   id uuid primary key default gen_random_uuid(),
@@ -1387,6 +1414,20 @@ begin
       )
       limit 1;
 
+    when 'blocos_estagio' then
+      resolved_unit_id := p_actor_unit_id;
+
+    when 'areas_estagio' then
+      select ocu.unidade_id
+      into resolved_unit_id
+      from public.areas_estagio a
+      left join public.ofertas_curso_unidade ocu on ocu.id = a.oferta_curso_unidade_id
+      where a.id = coalesce(
+        nullif(p_record_data ->> 'id', '')::uuid,
+        nullif(p_record_data ->> 'area_estagio_id', '')::uuid
+      )
+      limit 1;
+
     when 'professor_areas_estagio' then
       select coalesce(p.unidade_id, u.unidade_id)
       into resolved_unit_id
@@ -1477,6 +1518,50 @@ begin
 end;
 $$;
 
+create or replace function private.resolve_audit_record_id(
+  p_record_data jsonb
+)
+returns uuid
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  candidate_key text;
+  candidate_value text;
+begin
+  if p_record_data is null then
+    return null;
+  end if;
+
+  foreach candidate_key in array array[
+    'id',
+    'usuario_id',
+    'matricula_turma_id',
+    'aluno_id',
+    'documento_id',
+    'caso_clinico_id'
+  ]
+  loop
+    candidate_value := nullif(trim(coalesce(p_record_data ->> candidate_key, '')), '');
+
+    if candidate_value is null then
+      continue;
+    end if;
+
+    begin
+      return candidate_value::uuid;
+    exception
+      when invalid_text_representation then
+        continue;
+    end;
+  end loop;
+
+  return null;
+end;
+$$;
+
 create or replace function public.audit_changes()
 returns trigger
 language plpgsql
@@ -1487,6 +1572,7 @@ declare
   current_user_id uuid;
   current_user_unit_id uuid;
   record_unit_id uuid;
+  record_id uuid;
   current_exceptional_release_id uuid;
   record_payload jsonb;
 begin
@@ -1511,6 +1597,7 @@ begin
     record_payload,
     current_user_unit_id
   );
+  record_id := private.resolve_audit_record_id(record_payload);
 
   if tg_op = 'INSERT' then
     insert into public.historico_alteracoes (
@@ -1524,7 +1611,7 @@ begin
     )
     values (
       tg_table_name,
-      new.id,
+      record_id,
       tg_op,
       to_jsonb(new),
       current_user_id,
@@ -1545,7 +1632,7 @@ begin
     )
     values (
       tg_table_name,
-      new.id,
+      record_id,
       tg_op,
       to_jsonb(old),
       to_jsonb(new),
@@ -1566,7 +1653,7 @@ begin
     )
     values (
       tg_table_name,
-      old.id,
+      record_id,
       tg_op,
       to_jsonb(old),
       current_user_id,

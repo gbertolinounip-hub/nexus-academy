@@ -1,10 +1,12 @@
 ﻿import Link from "next/link";
 import { MetricCard } from "@/components/common/metric-card";
 import type { Route } from "next";
+import { redirect } from "next/navigation";
 import { SectionCard } from "@/components/common/section-card";
 import { ProgressBars } from "@/components/dashboard/progress-bars";
 import { ConfirmActionForm } from "@/components/forms/confirm-action-form";
 import { updateSemesterStatusAction } from "@/app/(app)/gestao/alunos/actions";
+import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/session";
 import { formatPercentage } from "@/lib/utils/format";
 import { getAuthenticatedCoordinatorDashboard } from "@/services/dashboard";
@@ -32,6 +34,11 @@ export default async function CoordinatorDashboardPage({
   searchParams
 }: CoordinatorDashboardPageProps) {
   const currentUser = await requireRole(["coordenador"]);
+
+  if (getActiveMasterCourseContext(currentUser)) {
+    redirect("/master-curso");
+  }
+
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const notice = resolvedSearchParams?.notice?.trim() ?? "";
   const noticeType =

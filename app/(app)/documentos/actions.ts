@@ -8,8 +8,10 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatStudentDocumentType } from "@/lib/utils/format";
 import {
+  assertCanReviewStudentDocument,
   buildStudentDocumentS3StoragePath,
   getStudentDocumentScopeForCurrentStudent,
+  resolveStudentDocumentUploadContext,
   removeStudentDocumentBinary,
   STUDENT_DOCUMENT_ACCEPTED_EXTENSIONS,
   STUDENT_DOCUMENT_ACCEPTED_MIME_TYPES,
@@ -37,7 +39,7 @@ const studentDocumentUploadSchema = z.object({
 
 const studentDocumentReviewSchema = z
   .object({
-    document_id: z.string().uuid("Documento inválido."),
+    document_id: z.string().uuid("Documento invalido."),
     decision: z.enum(["aprovado", "reprovado"]),
     rejection_reason: z.string().trim().max(3000)
   })
@@ -46,13 +48,13 @@ const studentDocumentReviewSchema = z
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["rejection_reason"],
-        message: "A justificativa é obrigatória quando o documento é reprovado."
+        message: "A justificativa e obrigatoria quando o documento e reprovado."
       });
     }
   });
 
 const markStudentDocumentNotificationAsReadSchema = z.object({
-  notification_id: z.string().uuid("Notificação inválida.")
+  notification_id: z.string().uuid("Notificacao invalida.")
 });
 
 function readStringField(formData: FormData, name: string) {
@@ -135,20 +137,20 @@ function buildDocumentNotificationContent(input: {
   areaName: string | null;
 }) {
   const documentLabel = formatStudentDocumentType(input.documentType);
-  const areaLabel = input.areaName ? ` · ${input.areaName}` : "";
+  const areaLabel = input.areaName ? ` - ${input.areaName}` : "";
 
   if (input.reviewerRole === "coordenador") {
     return {
       type: "documento_reprovado_coordenador" as StudentDocumentNotificationType,
-      title: "Documento reprovado pela coordenação",
-      message: `A coordenação reprovou seu ${documentLabel.toLowerCase()}${areaLabel}. Verifique a justificativa e envie uma nova versão.`
+      title: "Documento reprovado pela coordenacao",
+      message: `A coordenacao reprovou seu ${documentLabel.toLowerCase()}${areaLabel}. Verifique a justificativa e envie uma nova versao.`
     };
   }
 
   return {
     type: "documento_reprovado_professor" as StudentDocumentNotificationType,
     title: "Documento reprovado pelo professor",
-    message: `O professor supervisor reprovou seu ${documentLabel.toLowerCase()}${areaLabel}. Verifique a justificativa e envie uma nova versão.`
+    message: `O professor supervisor reprovou seu ${documentLabel.toLowerCase()}${areaLabel}. Verifique a justificativa e envie uma nova versao.`
   };
 }
 
@@ -174,14 +176,18 @@ export async function submitStudentDocumentAction(
   });
 
   if (!parsedData.success) {
-    const fallbackType = readStringField(formData, "document_type") === "tce" ? "tce" : "carteira_vacinacao";
+    const fallbackType =
+      readStringField(formData, "document_type") === "tce"
+        ? "tce"
+        : "carteira_vacinacao";
+
     return buildUploadState({
       status: "error",
       message: "Revise o tipo de documento antes de continuar.",
       documentType: fallbackType,
       enrollmentId: readStringField(formData, "enrollment_id"),
       fieldErrors: {
-        document_type: "Tipo de documento inválido."
+        document_type: "Tipo de documento invalido."
       }
     });
   }
@@ -203,11 +209,11 @@ export async function submitStudentDocumentAction(
   if (uploadedFile.size > STUDENT_DOCUMENT_MAX_BYTES) {
     return buildUploadState({
       status: "error",
-      message: "O arquivo excede o tamanho máximo suportado nesta etapa.",
+      message: "O arquivo excede o tamanho maximo suportado nesta etapa.",
       documentType: parsedData.data.document_type,
       enrollmentId: parsedData.data.enrollment_id,
       fieldErrors: {
-        document_file: "Use um arquivo com até 10 MB."
+        document_file: "Use um arquivo com ate 10 MB."
       }
     });
   }
@@ -217,7 +223,7 @@ export async function submitStudentDocumentAction(
   if (!STUDENT_DOCUMENT_ACCEPTED_EXTENSIONS.includes(fileExtension as never)) {
     return buildUploadState({
       status: "error",
-      message: "Formato de arquivo não suportado para este envio.",
+      message: "Formato de arquivo nao suportado para este envio.",
       documentType: parsedData.data.document_type,
       enrollmentId: parsedData.data.enrollment_id,
       fieldErrors: {
@@ -231,21 +237,12 @@ export async function submitStudentDocumentAction(
   if (!resolvedMimeType) {
     return buildUploadState({
       status: "error",
-      message: "O arquivo enviado não pôde ser validado com segurança.",
+      message: "O arquivo enviado nao pode ser validado com seguranca.",
       documentType: parsedData.data.document_type,
       enrollmentId: parsedData.data.enrollment_id,
       fieldErrors: {
-        document_file: "O tipo MIME do arquivo não é aceito nesta etapa."
+        document_file: "O tipo MIME do arquivo nao e aceito nesta etapa."
       }
-    });
-  }
-
-  if (!currentUser.unitId) {
-    return buildUploadState({
-      status: "error",
-      message: "Seu usuário não está vinculado a uma unidade operacional.",
-      documentType: parsedData.data.document_type,
-      enrollmentId: parsedData.data.enrollment_id
     });
   }
 
@@ -262,11 +259,11 @@ export async function submitStudentDocumentAction(
     if (documentType === "tce" && !selectedEnrollment) {
       return buildUploadState({
         status: "error",
-        message: "Selecione a área e o bloco corretos antes de enviar o TCE.",
+        message: "Selecione a area e o bloco corretos antes de enviar o TCE.",
         documentType,
         enrollmentId: parsedData.data.enrollment_id,
         fieldErrors: {
-          enrollment_id: "Escolha uma área/bloco válido para este TCE."
+          enrollment_id: "Escolha uma area/bloco valido para este TCE."
         }
       });
     }
@@ -279,10 +276,30 @@ export async function submitStudentDocumentAction(
               document.active &&
               document.enrollmentId === selectedEnrollment?.enrollmentId
           ) ?? null;
+    const uploadContext = await resolveStudentDocumentUploadContext({
+      currentUser,
+      documentType,
+      enrollmentId: selectedEnrollment?.enrollmentId ?? null
+    });
+    const resolvedUnitId =
+      uploadContext.offer.unidade_id ??
+      uploadContext.student.unidade_id ??
+      currentUser.unitId ??
+      null;
+
+    if (!resolvedUnitId) {
+      return buildUploadState({
+        status: "error",
+        message:
+          "Nao foi possivel identificar a unidade vinculada a este documento. Procure a coordenacao.",
+        documentType,
+        enrollmentId: selectedEnrollment?.enrollmentId ?? ""
+      });
+    }
 
     const documentId = randomUUID();
     const storagePath = buildStudentDocumentS3StoragePath({
-      unitId: currentUser.unitId,
+      unitId: resolvedUnitId,
       studentId: currentUser.id,
       documentId,
       documentType,
@@ -304,7 +321,7 @@ export async function submitStudentDocumentAction(
       return buildUploadState({
         status: "error",
         message:
-          "Não foi possível enviar o arquivo para o storage privado do aluno.",
+          "Nao foi possivel enviar o arquivo para o storage privado do aluno.",
         documentType,
         enrollmentId: selectedEnrollment?.enrollmentId ?? "",
         fieldErrors: {
@@ -325,7 +342,7 @@ export async function submitStudentDocumentAction(
 
         return buildUploadState({
           status: "error",
-          message: "Não foi possível preparar o reenvio deste documento.",
+          message: "Nao foi possivel preparar o reenvio deste documento.",
           documentType,
           enrollmentId: selectedEnrollment?.enrollmentId ?? ""
         });
@@ -335,9 +352,12 @@ export async function submitStudentDocumentAction(
     const supabase = await createSupabaseServerClient();
     const documentInsertPayload: DocumentInsert = {
       id: documentId,
-      unidade_id: currentUser.unitId,
+      unidade_id: resolvedUnitId,
       aluno_id: currentUser.id,
-      matricula_turma_id: selectedEnrollment?.enrollmentId ?? null,
+      matricula_turma_id:
+        uploadContext.enrollment?.id ?? selectedEnrollment?.enrollmentId ?? null,
+      oferta_curso_unidade_id: uploadContext.offer.id,
+      documento_obrigatorio_curso_id: uploadContext.requiredCourseDocument.id,
       area_estagio_id: selectedEnrollment?.areaId ?? null,
       tipo: documentType,
       status: "enviado",
@@ -370,11 +390,12 @@ export async function submitStudentDocumentAction(
 
       return buildUploadState({
         status: "error",
-        message: "Não foi possível registrar o documento enviado no banco.",
+        message: "Nao foi possivel registrar o documento enviado no banco.",
         documentType,
         enrollmentId: selectedEnrollment?.enrollmentId ?? "",
         fieldErrors: {
-          document_file: "O arquivo foi recebido, mas o cadastro do documento falhou."
+          document_file:
+            "O arquivo foi recebido, mas o cadastro do documento falhou."
         }
       });
     }
@@ -385,7 +406,7 @@ export async function submitStudentDocumentAction(
       status: "success",
       message:
         documentType === "carteira_vacinacao"
-          ? "Carteira de vacinação enviada com sucesso."
+          ? "Carteira de vacinacao enviada com sucesso."
           : "TCE enviado com sucesso.",
       documentType,
       enrollmentId: selectedEnrollment?.enrollmentId ?? "",
@@ -397,7 +418,7 @@ export async function submitStudentDocumentAction(
       message:
         error instanceof Error
           ? error.message
-          : "Não foi possível enviar o documento do aluno.",
+          : "Nao foi possivel enviar o documento do aluno.",
       documentType: parsedData.data.document_type,
       enrollmentId: parsedData.data.enrollment_id
     });
@@ -419,7 +440,7 @@ export async function reviewStudentDocumentAction(
     const fieldErrors = parsedData.error.flatten().fieldErrors;
     return buildReviewState({
       status: "error",
-      message: "Revise a decisão e a justificativa antes de salvar a validação.",
+      message: "Revise a decisao e a justificativa antes de salvar a validacao.",
       documentId: readStringField(formData, "document_id"),
       decision:
         readStringField(formData, "decision") === "reprovado"
@@ -442,26 +463,12 @@ export async function reviewStudentDocumentAction(
       : "";
 
   try {
+    const reviewContext = await assertCanReviewStudentDocument(
+      currentUser,
+      parsedData.data.document_id
+    );
     const supabase = await createSupabaseServerClient();
-    const { data: documentRowData, error: documentRowError } = await supabase
-      .from("documentos_aluno")
-      .select("*")
-      .eq("id", parsedData.data.document_id)
-      .maybeSingle();
-    const documentRow = (documentRowData ?? null) as
-      | Database["public"]["Tables"]["documentos_aluno"]["Row"]
-      | null;
-
-    if (documentRowError || !documentRow) {
-      return buildReviewState({
-        status: "error",
-        message: "O documento solicitado não está disponível para esta validação.",
-        documentId: parsedData.data.document_id,
-        decision: parsedData.data.decision,
-        rejectionReason
-      });
-    }
-
+    const documentRow = reviewContext.document;
     const reviewedAt = new Date().toISOString();
     const { error: updateError } = await (supabase.from("documentos_aluno") as any)
       .update({
@@ -476,7 +483,7 @@ export async function reviewStudentDocumentAction(
     if (updateError) {
       return buildReviewState({
         status: "error",
-        message: "Não foi possível salvar a validação deste documento.",
+        message: "Nao foi possivel salvar a validacao deste documento.",
         documentId: parsedData.data.document_id,
         decision: parsedData.data.decision,
         rejectionReason
@@ -520,7 +527,7 @@ export async function reviewStudentDocumentAction(
         return buildReviewState({
           status: "error",
           message:
-            "A validação foi salva, mas a notificação ao aluno não pôde ser registrada.",
+            "A validacao foi salva, mas a notificacao ao aluno nao pode ser registrada.",
           documentId: parsedData.data.document_id,
           decision: parsedData.data.decision,
           rejectionReason
@@ -535,7 +542,7 @@ export async function reviewStudentDocumentAction(
       message:
         parsedData.data.decision === "aprovado"
           ? "Documento aprovado com sucesso."
-          : "Documento reprovado e notificação enviada ao aluno.",
+          : "Documento reprovado e notificacao enviada ao aluno.",
       documentId: parsedData.data.document_id,
       decision: parsedData.data.decision,
       rejectionReason
@@ -546,7 +553,7 @@ export async function reviewStudentDocumentAction(
       message:
         error instanceof Error
           ? error.message
-          : "Não foi possível concluir a validação do documento.",
+          : "Nao foi possivel concluir a validacao do documento.",
       documentId: parsedData.data.document_id,
       decision: parsedData.data.decision,
       rejectionReason

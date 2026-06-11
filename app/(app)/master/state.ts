@@ -1,5 +1,6 @@
 export interface UnitFormValues {
   unit_id: string;
+  instituicao_id: string;
   nome: string;
   sigla: string;
   slug: string;
@@ -67,6 +68,7 @@ export const initialMasterUserProfileActionState:
 export function createEmptyUnitFormValues(): UnitFormValues {
   return {
     unit_id: "",
+    instituicao_id: "",
     nome: "",
     sigla: "",
     slug: "",

@@ -66,6 +66,21 @@ export interface SemesterManagementFormValues {
   status: "planejado" | "ativo" | "encerrado";
 }
 
+export interface StageAreaRegistrationFormValues {
+  nome: string;
+  codigo: string;
+  ativo: "true" | "false";
+}
+
+export interface CourseManagerUnitCoordinatorFormValues {
+  unidade_id: string;
+  nome_completo: string;
+  email: string;
+  senha: string;
+  cargo: string;
+  ativo: "true" | "false";
+}
+
 export interface StudentRegistrationActionState {
   status: "idle" | "success" | "error" | "conflict";
   message: string | null;
@@ -112,6 +127,22 @@ export interface SemesterManagementActionState {
   message: string | null;
   fieldErrors: Record<string, string>;
   formValues?: SemesterManagementFormValues;
+  submittedAt?: number;
+}
+
+export interface StageAreaRegistrationActionState {
+  status: "idle" | "success" | "error";
+  message: string | null;
+  fieldErrors: Record<string, string>;
+  formValues?: StageAreaRegistrationFormValues;
+  submittedAt?: number;
+}
+
+export interface CourseManagerUnitCoordinatorActionState {
+  status: "idle" | "success" | "error";
+  message: string | null;
+  fieldErrors: Record<string, string>;
+  formValues?: CourseManagerUnitCoordinatorFormValues;
   submittedAt?: number;
 }
 
@@ -268,6 +299,46 @@ export const initialSemesterManagementActionState: SemesterManagementActionState
     status: "planejado"
   }
 };
+
+export function createInitialStageAreaRegistrationFormValues(
+  overrides?: Partial<StageAreaRegistrationFormValues>
+): StageAreaRegistrationFormValues {
+  return {
+    nome: "",
+    codigo: "",
+    ativo: "true",
+    ...overrides
+  };
+}
+
+export const initialStageAreaRegistrationActionState: StageAreaRegistrationActionState = {
+  status: "idle",
+  message: null,
+  fieldErrors: {},
+  formValues: createInitialStageAreaRegistrationFormValues()
+};
+
+export function createInitialCourseManagerUnitCoordinatorFormValues(
+  overrides?: Partial<CourseManagerUnitCoordinatorFormValues>
+): CourseManagerUnitCoordinatorFormValues {
+  return {
+    unidade_id: "",
+    nome_completo: "",
+    email: "",
+    senha: "",
+    cargo: "Coordenador da unidade",
+    ativo: "true",
+    ...overrides
+  };
+}
+
+export const initialCourseManagerUnitCoordinatorActionState:
+  CourseManagerUnitCoordinatorActionState = {
+    status: "idle",
+    message: null,
+    fieldErrors: {},
+    formValues: createInitialCourseManagerUnitCoordinatorFormValues()
+  };
 
 export const initialStudentImportActionState: StudentImportActionState = {
   status: "idle",

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
-import { defaultDashboardPath } from "@/lib/auth/roles";
+import { getDefaultDashboardPathForUser } from "@/lib/auth/roles";
 import { registerAuthenticatedAccess } from "@/services/access-logs";
 
 function readLoginFlag(value?: string | string[]) {
@@ -31,5 +31,5 @@ export default async function RedirectByRolePage(props: {
     }
   }
 
-  redirect(defaultDashboardPath[currentUser.role]);
+  redirect(getDefaultDashboardPathForUser(currentUser));
 }
