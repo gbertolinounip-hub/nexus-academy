@@ -5,7 +5,6 @@ import type { Database } from "@/types/database";
 type AreaRow = Database["public"]["Tables"]["areas_estagio"]["Row"];
 type BlockRow = Database["public"]["Tables"]["blocos_estagio"]["Row"];
 type OfferRow = Database["public"]["Tables"]["ofertas_curso_unidade"]["Row"];
-type CourseRow = Database["public"]["Tables"]["cursos"]["Row"];
 type ClassRow = Database["public"]["Tables"]["turmas"]["Row"];
 type ProfessorAreaRow = Database["public"]["Tables"]["professor_areas_estagio"]["Row"];
 type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
@@ -18,26 +17,6 @@ export interface VisibleStageAreaCatalog {
 function uniqueStringValues(values: Array<string | null | undefined>) {
   return Array.from(
     new Set(values.filter((value): value is string => Boolean(value?.trim())))
-  );
-}
-
-function normalizeToken(value: string | null | undefined) {
-  return (value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
-}
-
-function isPhysiotherapyCourse(course: Pick<CourseRow, "codigo" | "nome" | "slug"> | null) {
-  const normalizedValues = [
-    normalizeToken(course?.codigo),
-    normalizeToken(course?.nome),
-    normalizeToken(course?.slug)
-  ];
-
-  return normalizedValues.some(
-    (value) => value === "fisio" || value.includes("fisioterapia")
   );
 }
 
@@ -120,26 +99,12 @@ async function loadVisibleOfferRows(input: {
   return fetchedOfferRows.filter((offer) => offer.unidade_id === input.selectedUnitId);
 }
 
-async function loadCourseRow(
-  supabase: SupabaseServerClient,
-  courseId: string | null | undefined
-) {
-  if (!courseId) {
-    return null;
-  }
-
-  const { data } = await supabase
-    .from("cursos")
-    .select("id, codigo, nome, slug")
-    .eq("id", courseId)
-    .maybeSingle();
-
-  return ((data ?? null) as Pick<CourseRow, "id" | "codigo" | "nome" | "slug"> | null);
-}
-
 export async function loadVisibleStageAreaCatalog(input: {
   supabase: SupabaseServerClient;
-  scope: Pick<ResolvedSessionDataScope, "offerIds" | "cursoId" | "restrictToCourse">;
+  scope: Pick<
+    ResolvedSessionDataScope,
+    "offerIds" | "cursoId" | "restrictToCourse" | "usesLegacyUnitFallback"
+  >;
   selectedUnitId?: string | null;
   offerRows?: Array<Pick<OfferRow, "id" | "unidade_id" | "curso_id">>;
   visibleClassRows?: Array<Pick<ClassRow, "area_estagio_id" | "oferta_curso_unidade_id">>;
@@ -152,11 +117,8 @@ export async function loadVisibleStageAreaCatalog(input: {
     offerRows: input.offerRows
   });
   const visibleOfferIds = visibleOfferRows.map((offer) => offer.id);
-  const scopedCourseId =
-    input.scope.cursoId ?? visibleOfferRows[0]?.curso_id ?? null;
-  const courseRow = await loadCourseRow(input.supabase, scopedCourseId);
   const allowGlobalLegacyAreas =
-    !input.scope.restrictToCourse || isPhysiotherapyCourse(courseRow);
+    visibleOfferIds.length === 0 && input.scope.usesLegacyUnitFallback;
 
   const legacyAreaIdsFromClasses = uniqueStringValues(
     (input.visibleClassRows ?? [])
@@ -192,21 +154,21 @@ export async function loadVisibleStageAreaCatalog(input: {
             .select("*")
             .in("oferta_curso_unidade_id", visibleOfferIds)
             .eq("ativa", true)
-        : Promise.resolve({ data: [], error: null }),
+        : Promise.resolve({ data: [], error: null } as const),
       referencedLegacyAreaIds.length
         ? input.supabase
             .from("areas_estagio")
             .select("*")
             .in("id", referencedLegacyAreaIds)
             .eq("ativa", true)
-        : Promise.resolve({ data: [], error: null }),
+        : Promise.resolve({ data: [], error: null } as const),
       allowGlobalLegacyAreas
         ? input.supabase
             .from("areas_estagio")
             .select("*")
             .is("oferta_curso_unidade_id", null)
             .eq("ativa", true)
-        : Promise.resolve({ data: [], error: null })
+        : Promise.resolve({ data: [], error: null } as const)
     ]);
 
   if (

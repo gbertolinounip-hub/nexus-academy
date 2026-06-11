@@ -5,7 +5,10 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/session";
-import { resolveScopedDataAccess } from "@/lib/auth/data-scope";
+import {
+  loadScopedOperationalGraph,
+  resolveScopedDataAccess
+} from "@/lib/auth/data-scope";
 import { loadVisibleStageAreaCatalog } from "@/services/stage-areas";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -1310,7 +1313,8 @@ async function loadAssignmentValidationContext(input: {
   assignmentsToPersist: PersistableStudentAssignment[];
 }) {
   const supabase = await createSupabaseServerClient();
-  const scope = await resolveScopedDataAccess(input.currentUser, { supabase });
+  const scopedGraph = await loadScopedOperationalGraph(input.currentUser, { supabase });
+  const scope = scopedGraph.scope;
   const areaIds = [
     ...new Set(input.assignmentsToPersist.map((assignment) => assignment.areaId).filter(Boolean))
   ];
@@ -1328,7 +1332,8 @@ async function loadAssignmentValidationContext(input: {
   const visibleStageAreaCatalog = await loadVisibleStageAreaCatalog({
     supabase,
     scope,
-    selectedUnitId: input.operationalScope.unitId
+    selectedUnitId: input.operationalScope.unitId,
+    visibleClassRows: scopedGraph.classRows.filter((classRow) => classRow.ativa)
   });
   const visibleAreaRows = visibleStageAreaCatalog.areaRows.filter(
     (areaRow) => areaIds.length === 0 || areaIds.includes(areaRow.id)
@@ -3614,7 +3619,8 @@ export async function createProfessorRegistrationAction(
   }
 
   const supabase = await createSupabaseServerClient();
-  const scope = await resolveScopedDataAccess(currentUser, { supabase });
+  const scopedGraph = await loadScopedOperationalGraph(currentUser, { supabase });
+  const scope = scopedGraph.scope;
   let profileMap: Map<string, ProfileRow>;
   let visibleStageAreaCatalog: Awaited<ReturnType<typeof loadVisibleStageAreaCatalog>>;
 
@@ -3624,7 +3630,8 @@ export async function createProfessorRegistrationAction(
       loadVisibleStageAreaCatalog({
         supabase,
         scope,
-        selectedUnitId: operationalScope.unitId
+        selectedUnitId: operationalScope.unitId,
+        visibleClassRows: scopedGraph.classRows.filter((classRow) => classRow.ativa)
       })
     ]);
   } catch (error) {
@@ -3827,7 +3834,8 @@ export async function createStageAreaAction(
   }
 
   const supabase = await createSupabaseServerClient();
-  const scope = await resolveScopedDataAccess(currentUser, { supabase });
+  const scopedGraph = await loadScopedOperationalGraph(currentUser, { supabase });
+  const scope = scopedGraph.scope;
   const [defaultBlockResult, existingOfferAreasResult] = await Promise.all([
     supabase
       .from("blocos_estagio")
@@ -3863,7 +3871,8 @@ export async function createStageAreaAction(
     visibleStageAreaCatalog = await loadVisibleStageAreaCatalog({
       supabase,
       scope,
-      selectedUnitId: operationalScope.unitId
+      selectedUnitId: operationalScope.unitId,
+      visibleClassRows: scopedGraph.classRows.filter((classRow) => classRow.ativa)
     });
   } catch (error) {
     return buildStageAreaErrorState(
