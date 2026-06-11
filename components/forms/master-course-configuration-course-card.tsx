@@ -179,7 +179,7 @@ export function MasterCourseConfigurationCourseCard({
           <form action={initializeFormAction}>
             <input type="hidden" name="course_id" value={course.id} />
             <button className="button" type="submit" disabled={!course.isActive}>
-              Iniciar configuracao
+              Iniciar configuracao vazia
             </button>
           </form>
         ) : (
@@ -205,6 +205,11 @@ export function MasterCourseConfigurationCourseCard({
           </form>
         ) : null}
       </div>
+      {shouldShowCopyAction && course.duplicateBaseSourceLabel ? (
+        <p className="field-help">
+          Base encontrada: {course.duplicateBaseSourceLabel}.
+        </p>
+      ) : null}
       {!shouldShowCopyAction && course.duplicateBaseBlockedReason ? (
         <p className="field-help">{course.duplicateBaseBlockedReason}</p>
       ) : null}

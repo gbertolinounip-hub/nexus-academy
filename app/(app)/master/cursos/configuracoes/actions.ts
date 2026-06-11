@@ -33,6 +33,7 @@ type GroupInsert = Database["public"]["Tables"]["grupos_modelo_avaliacao"]["Inse
 type CriterionInsert = Database["public"]["Tables"]["criterios_modelo_avaliacao"]["Insert"];
 type RequiredDocumentInsert =
   Database["public"]["Tables"]["documentos_obrigatorios_curso"]["Insert"];
+type FisioterapiaSourceScope = "same_institution" | "global_default";
 
 const copyConfigurationSchema = z.object({
   destination_course_id: z.string().uuid("Selecione um curso valido.")
@@ -530,20 +531,156 @@ async function loadCourse(courseId: string) {
   return data as Pick<CourseRow, "id" | "instituicao_id" | "codigo" | "nome" | "slug" | "ativo">;
 }
 
-async function loadSourceCourseForInstitution(institutionId: string) {
-  const adminClient = createSupabaseAdminClient();
-  const { data, error } = await adminClient
-    .from("cursos")
-    .select("id, instituicao_id, codigo, nome, slug, ativo")
-    .eq("instituicao_id", institutionId)
-    .eq("codigo", "FISIO")
-    .maybeSingle();
+function isCompleteCourseConfiguration(summary: Awaited<ReturnType<typeof loadCourseConfigurationSummary>>) {
+  return (
+    summary.modelCount > 0 &&
+    summary.groupCount > 0 &&
+    summary.criterionCount > 0 &&
+    summary.requiredDocumentCount > 0
+  );
+}
 
-  if (error || !data) {
+function compareFisioterapiaSourceCandidates(
+  left: Pick<CourseRow, "codigo" | "nome" | "instituicao_id" | "ativo"> & {
+    institutionName: string;
+    configurationSummary: Awaited<ReturnType<typeof loadCourseConfigurationSummary>>;
+  },
+  right: Pick<CourseRow, "codigo" | "nome" | "instituicao_id" | "ativo"> & {
+    institutionName: string;
+    configurationSummary: Awaited<ReturnType<typeof loadCourseConfigurationSummary>>;
+  }
+) {
+  const leftPriority = left.institutionName.toUpperCase().includes("UNIP") ? 0 : 1;
+  const rightPriority = right.institutionName.toUpperCase().includes("UNIP") ? 0 : 1;
+
+  if (leftPriority !== rightPriority) {
+    return leftPriority - rightPriority;
+  }
+
+  if (
+    left.configurationSummary.requiredDocumentCount !==
+    right.configurationSummary.requiredDocumentCount
+  ) {
+    return (
+      right.configurationSummary.requiredDocumentCount -
+      left.configurationSummary.requiredDocumentCount
+    );
+  }
+
+  if (left.configurationSummary.criterionCount !== right.configurationSummary.criterionCount) {
+    return right.configurationSummary.criterionCount - left.configurationSummary.criterionCount;
+  }
+
+  if (left.configurationSummary.groupCount !== right.configurationSummary.groupCount) {
+    return right.configurationSummary.groupCount - left.configurationSummary.groupCount;
+  }
+
+  if (left.configurationSummary.modelCount !== right.configurationSummary.modelCount) {
+    return right.configurationSummary.modelCount - left.configurationSummary.modelCount;
+  }
+
+  const institutionComparison = left.institutionName.localeCompare(
+    right.institutionName,
+    "pt-BR"
+  );
+
+  if (institutionComparison !== 0) {
+    return institutionComparison;
+  }
+
+  return left.nome.localeCompare(right.nome, "pt-BR");
+}
+
+function buildFisioterapiaSourceLabel(
+  institutionName: string,
+  courseName: string,
+  scope: FisioterapiaSourceScope
+) {
+  const suffix = scope === "same_institution" ? "mesma IES" : "base padrao global";
+
+  return `${institutionName} / ${courseName} (${suffix})`;
+}
+
+async function loadPreferredFisioterapiaSourceCourse(institutionId: string) {
+  const adminClient = createSupabaseAdminClient();
+  const candidatesResult = await adminClient
+    .from("cursos")
+    .select(
+      "id, instituicao_id, codigo, nome, slug, ativo, instituicoes!inner(nome)"
+    )
+    .eq("ativo", true)
+    .or("codigo.eq.FISIO,slug.eq.fisioterapia");
+
+  if (candidatesResult.error) {
+    throw new Error("Nao foi possivel localizar uma base configurada de Fisioterapia.");
+  }
+
+  const rawCandidates =
+    (candidatesResult.data ?? []) as Array<
+      Pick<CourseRow, "id" | "instituicao_id" | "codigo" | "nome" | "slug" | "ativo"> & {
+        instituicoes?: { nome: string } | { nome: string }[] | null;
+      }
+    >;
+  const configuredCandidates: Array<
+    Pick<CourseRow, "id" | "instituicao_id" | "codigo" | "nome" | "slug" | "ativo"> & {
+      institutionName: string;
+      configurationSummary: Awaited<ReturnType<typeof loadCourseConfigurationSummary>>;
+    }
+  > = [];
+
+  for (const candidate of rawCandidates) {
+    const institutionName = Array.isArray(candidate.instituicoes)
+      ? candidate.instituicoes[0]?.nome ?? "Instituicao nao identificada"
+      : candidate.instituicoes?.nome ?? "Instituicao nao identificada";
+    const configurationSummary = await loadCourseConfigurationSummary(candidate.id);
+
+    if (isCompleteCourseConfiguration(configurationSummary)) {
+      configuredCandidates.push({
+        id: candidate.id,
+        instituicao_id: candidate.instituicao_id,
+        codigo: candidate.codigo,
+        nome: candidate.nome,
+        slug: candidate.slug,
+        ativo: candidate.ativo,
+        institutionName,
+        configurationSummary
+      });
+    }
+  }
+
+  if (!configuredCandidates.length) {
     return null;
   }
 
-  return data as Pick<CourseRow, "id" | "instituicao_id" | "codigo" | "nome" | "slug" | "ativo">;
+  const sameInstitutionSource = configuredCandidates.find(
+    (candidate) => candidate.instituicao_id === institutionId
+  );
+
+  if (sameInstitutionSource) {
+    return {
+      course: sameInstitutionSource,
+      scope: "same_institution" as const,
+      label: buildFisioterapiaSourceLabel(
+        sameInstitutionSource.institutionName,
+        sameInstitutionSource.nome,
+        "same_institution"
+      )
+    };
+  }
+
+  const globalSource = [...configuredCandidates].sort(compareFisioterapiaSourceCandidates)[0];
+
+  return globalSource
+    ? {
+        course: globalSource,
+        scope: "global_default" as const,
+        label: buildFisioterapiaSourceLabel(
+          globalSource.institutionName,
+          globalSource.nome,
+          "global_default"
+        )
+      }
+    : null;
 }
 
 async function loadCourseConfigurationSummary(courseId: string) {
@@ -1677,22 +1814,32 @@ export async function copyFisioterapiaConfigurationAction(
     );
   }
 
-  const sourceCourse = await loadSourceCourseForInstitution(destinationCourse.instituicao_id);
+  const sourceResolution = await loadPreferredFisioterapiaSourceCourse(
+    destinationCourse.instituicao_id
+  );
 
-  if (!sourceCourse) {
+  if (!sourceResolution) {
     return buildActionState(
       "error",
-      "A instituicao do curso destino ainda nao possui o curso FISIO como origem padrao.",
-      { destination_course_id: "Nao existe curso FISIO na mesma instituicao." },
+      "Nenhuma base padrao de Fisioterapia configurada foi encontrada.",
+      {
+        destination_course_id:
+          "Nao existe uma base configurada de Fisioterapia disponivel para duplicacao."
+      },
       submittedFormValues
     );
   }
 
-  if (destinationCourse.id === sourceCourse.id || destinationCourse.codigo === "FISIO") {
+  const sourceCourse = sourceResolution.course;
+
+  if (destinationCourse.id === sourceCourse.id) {
     return buildActionState(
       "error",
       "Nao e permitido copiar a configuracao da Fisioterapia para o proprio curso de origem.",
-      { destination_course_id: "Escolha um curso diferente de FISIO." },
+      {
+        destination_course_id:
+          "Escolha um curso destino diferente da base de Fisioterapia usada como origem."
+      },
       submittedFormValues
     );
   }
@@ -1754,7 +1901,7 @@ export async function copyFisioterapiaConfigurationAction(
   if (!sourceModels.length && !sourceRequiredDocuments.length) {
     return buildActionState(
       "error",
-      "O curso FISIO da mesma instituicao ainda nao possui configuracao base para ser copiada.",
+      "A base de Fisioterapia localizada ainda nao possui configuracao completa para ser copiada.",
       {},
       submittedFormValues
     );
@@ -2090,6 +2237,6 @@ export async function copyFisioterapiaConfigurationAction(
 
   return buildActionState(
     "success",
-    `Base da Fisioterapia duplicada com sucesso para ${destinationCourse.nome}.`
+    `Base da Fisioterapia duplicada com sucesso para ${destinationCourse.nome} usando ${sourceResolution.label}.`
   );
 }

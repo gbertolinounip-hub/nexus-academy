@@ -86,6 +86,10 @@ export interface CourseConfigurationRequiredDocumentEntry {
   isActive: boolean;
 }
 
+export type CourseConfigurationCopySourceScope =
+  | "same_institution"
+  | "global_default";
+
 export interface CourseConfigurationDocumentTypeOption {
   id: string;
   code: string;
@@ -108,6 +112,7 @@ export interface CourseConfigurationCourseEntry {
   sourceConfigurationAvailable: boolean;
   canDuplicateFromFisioterapia: boolean;
   duplicateBaseBlockedReason: string | null;
+  duplicateBaseSourceLabel: string | null;
   hasReusableInitialModel: boolean;
   models: CourseConfigurationModelEntry[];
   groups: CourseConfigurationGroupEntry[];
@@ -122,6 +127,7 @@ export interface CourseConfigurationCopyTargetOption {
   courseCode: string;
   courseName: string;
   status: CourseConfigurationStatus;
+  sourceLabel: string;
 }
 
 export interface CourseConfigurationPageData {
@@ -129,6 +135,7 @@ export interface CourseConfigurationPageData {
   courses: CourseConfigurationCourseEntry[];
   copyTargetOptions: CourseConfigurationCopyTargetOption[];
   documentTypeOptions: CourseConfigurationDocumentTypeOption[];
+  fisioterapiaBaseSourceLabel: string | null;
 }
 
 function formatSupabaseErrorMessage(context: string, error: PostgrestError | null) {
@@ -258,26 +265,27 @@ function resolveConfigurationStatus(input: {
 }
 
 function resolveDuplicateBaseState(input: {
-  courseCode: string;
-  hasConfiguredFisioBase: boolean;
+  courseId: string;
+  sourceCourseId: string | null;
   modelCount: number;
   groupCount: number;
   criterionCount: number;
   requiredDocumentCount: number;
 }) {
-  if (input.courseCode === "FISIO") {
+  if (!input.sourceCourseId) {
     return {
       canDuplicateFromFisioterapia: false,
-      duplicateBaseBlockedReason: "A Fisioterapia ja e o curso-base desta instituicao.",
+      duplicateBaseBlockedReason:
+        "Nenhuma base padrao de Fisioterapia configurada foi encontrada.",
       hasReusableInitialModel: false
     };
   }
 
-  if (!input.hasConfiguredFisioBase) {
+  if (input.courseId === input.sourceCourseId) {
     return {
       canDuplicateFromFisioterapia: false,
       duplicateBaseBlockedReason:
-        "A instituicao ainda nao possui uma base configurada de Fisioterapia para duplicacao.",
+        "Este curso ja e a base de Fisioterapia usada como origem padrao da plataforma.",
       hasReusableInitialModel: false
     };
   }
@@ -306,6 +314,92 @@ function resolveDuplicateBaseState(input: {
     duplicateBaseBlockedReason:
       "Este curso ja possui configuracao academica em andamento. Revise manualmente os grupos, criterios e documentos antes de duplicar a base da Fisioterapia.",
     hasReusableInitialModel
+  };
+}
+
+function isConfiguredFisioterapiaCourse(course: CourseConfigurationCourseEntry) {
+  return course.courseCode === "FISIO" && course.status === "Configurado" && course.isActive;
+}
+
+function getConfiguredFisioterapiaSourcePriority(course: CourseConfigurationCourseEntry) {
+  return course.institutionName.toUpperCase().includes("UNIP") ? 0 : 1;
+}
+
+function compareConfiguredFisioterapiaSources(
+  left: CourseConfigurationCourseEntry,
+  right: CourseConfigurationCourseEntry
+) {
+  const priorityDifference =
+    getConfiguredFisioterapiaSourcePriority(left) -
+    getConfiguredFisioterapiaSourcePriority(right);
+
+  if (priorityDifference !== 0) {
+    return priorityDifference;
+  }
+
+  if (left.requiredDocumentCount !== right.requiredDocumentCount) {
+    return right.requiredDocumentCount - left.requiredDocumentCount;
+  }
+
+  if (left.criterionCount !== right.criterionCount) {
+    return right.criterionCount - left.criterionCount;
+  }
+
+  if (left.groupCount !== right.groupCount) {
+    return right.groupCount - left.groupCount;
+  }
+
+  if (left.modelCount !== right.modelCount) {
+    return right.modelCount - left.modelCount;
+  }
+
+  const institutionComparison = compareByLocale(left.institutionName, right.institutionName);
+
+  if (institutionComparison !== 0) {
+    return institutionComparison;
+  }
+
+  return compareByLocale(left.courseName, right.courseName);
+}
+
+function buildFisioterapiaSourceLabel(
+  sourceCourse: Pick<CourseConfigurationCourseEntry, "institutionName" | "courseName">,
+  scope: CourseConfigurationCopySourceScope
+) {
+  const suffix =
+    scope === "same_institution" ? "mesma IES" : "base padrao global";
+
+  return `${sourceCourse.institutionName} / ${sourceCourse.courseName} (${suffix})`;
+}
+
+function resolveFisioterapiaSourceForCourse(
+  course: CourseConfigurationCourseEntry,
+  configuredFisioterapiaCourses: CourseConfigurationCourseEntry[]
+) {
+  const sameInstitutionSource = configuredFisioterapiaCourses.find(
+    (candidate) => candidate.institutionId === course.institutionId
+  );
+
+  if (sameInstitutionSource) {
+    return {
+      course: sameInstitutionSource,
+      scope: "same_institution" as const,
+      label: buildFisioterapiaSourceLabel(sameInstitutionSource, "same_institution")
+    };
+  }
+
+  const globalSource =
+    configuredFisioterapiaCourses.find((candidate) => candidate.id !== course.id) ??
+    configuredFisioterapiaCourses[0];
+
+  if (!globalSource) {
+    return null;
+  }
+
+  return {
+    course: globalSource,
+    scope: "global_default" as const,
+    label: buildFisioterapiaSourceLabel(globalSource, "global_default")
   };
 }
 
@@ -480,6 +574,7 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
         sourceConfigurationAvailable: false,
         canDuplicateFromFisioterapia: false,
         duplicateBaseBlockedReason: null,
+        duplicateBaseSourceLabel: null,
         hasReusableInitialModel: false,
         models: sourceModels.map((modelRow) => {
           const modelGroups = [...(groupsByModelId.get(modelRow.id) ?? [])].sort(sortGroups);
@@ -556,28 +651,33 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
 
       return compareByLocale(left.courseName, right.courseName);
     });
-  const configuredFisioInstitutionIds = new Set(
-    baseCourses
-      .filter(
-        (course) =>
-          course.courseCode === "FISIO" &&
-          course.status === "Configurado"
-      )
-      .map((course) => course.institutionId)
-  );
-  const courses = baseCourses.map((course) => ({
-    ...course,
-    sourceConfigurationAvailable:
-      course.courseCode !== "FISIO" && configuredFisioInstitutionIds.has(course.institutionId),
-    ...resolveDuplicateBaseState({
-      courseCode: course.courseCode,
-      hasConfiguredFisioBase: configuredFisioInstitutionIds.has(course.institutionId),
-      modelCount: course.modelCount,
-      groupCount: course.groupCount,
-      criterionCount: course.criterionCount,
-      requiredDocumentCount: course.requiredDocumentCount
-    })
-  }));
+  const configuredFisioterapiaCourses = [...baseCourses]
+    .filter(isConfiguredFisioterapiaCourse)
+    .sort(compareConfiguredFisioterapiaSources);
+  const globalFisioterapiaSource = configuredFisioterapiaCourses[0] ?? null;
+  const globalFisioterapiaSourceLabel = globalFisioterapiaSource
+    ? buildFisioterapiaSourceLabel(globalFisioterapiaSource, "global_default")
+    : null;
+  const courses = baseCourses.map((course) => {
+    const resolvedCopySource = resolveFisioterapiaSourceForCourse(
+      course,
+      configuredFisioterapiaCourses
+    );
+
+    return {
+      ...course,
+      sourceConfigurationAvailable: Boolean(resolvedCopySource),
+      duplicateBaseSourceLabel: resolvedCopySource?.label ?? null,
+      ...resolveDuplicateBaseState({
+        courseId: course.id,
+        sourceCourseId: resolvedCopySource?.course.id ?? null,
+        modelCount: course.modelCount,
+        groupCount: course.groupCount,
+        criterionCount: course.criterionCount,
+        requiredDocumentCount: course.requiredDocumentCount
+      })
+    };
+  });
 
   return {
     summary: {
@@ -600,7 +700,9 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
         institutionName: course.institutionName,
         courseCode: course.courseCode,
         courseName: course.courseName,
-        status: course.status
+        status: course.status,
+        sourceLabel:
+          course.duplicateBaseSourceLabel ?? globalFisioterapiaSourceLabel ?? "Origem indisponivel"
       })),
     documentTypeOptions: documentTypeRows
       .filter((documentTypeRow) => documentTypeRow.ativo)
@@ -608,6 +710,7 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
         id: documentTypeRow.id,
         code: documentTypeRow.codigo,
         name: documentTypeRow.nome
-      }))
+      })),
+    fisioterapiaBaseSourceLabel: globalFisioterapiaSourceLabel
   };
 }

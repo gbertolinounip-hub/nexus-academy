@@ -69,13 +69,14 @@ export function MasterCourseConfigurationCopyForm({
           <option value="">Selecione</option>
           {destinationOptions.map((option) => (
             <option key={option.courseId} value={option.courseId}>
-              {`${option.institutionName} - ${option.courseName} (${option.courseCode}) - ${option.status}`}
+              {`${option.institutionName} - ${option.courseName} (${option.courseCode}) - ${option.status} - origem: ${option.sourceLabel}`}
             </option>
           ))}
         </select>
         <span className="field-help">
-          A origem e sempre o curso FISIO da mesma instituicao. Se o curso destino ja tiver
-          grupos, criterios ou documentos obrigatorios cadastrados, a duplicacao sera bloqueada.
+          O sistema usa primeiro a Fisioterapia configurada da mesma IES. Se ela nao existir,
+          tenta a base padrao global ja consolidada. Se o curso destino ja tiver grupos,
+          criterios ou documentos obrigatorios cadastrados, a duplicacao sera bloqueada.
         </span>
         {fieldErrors.destination_course_id ? (
           <span className="field-error">{fieldErrors.destination_course_id}</span>

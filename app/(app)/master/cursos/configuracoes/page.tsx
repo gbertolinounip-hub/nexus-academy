@@ -117,7 +117,7 @@ export default async function MasterCourseConfigurationsPage() {
 
       <SectionCard
         title="Duplicar base da Fisioterapia"
-        description="Use o curso FISIO da mesma instituicao como ponto de partida para novos cursos sem sobrescrever configuracoes ja iniciadas."
+        description="Use primeiro a Fisioterapia configurada da mesma IES. Se ela ainda nao existir, o sistema tenta a base padrao global ja consolidada sem sobrescrever configuracoes ja iniciadas."
       >
         <div className="management-block-card">
           <div className="management-block-header">
@@ -125,10 +125,16 @@ export default async function MasterCourseConfigurationsPage() {
               <h3>Duplicar configuracao inicial</h3>
               <p className="field-help">
                 A copia inclui modelos de avaliacao, grupos, criterios e documentos
-                obrigatorios. O curso destino precisa estar sem configuracao previa.
+                obrigatorios. O curso destino precisa estar sem configuracao real.
               </p>
             </div>
           </div>
+
+          {pageData.fisioterapiaBaseSourceLabel ? (
+            <p className="field-help">
+              Base padrao identificada: {pageData.fisioterapiaBaseSourceLabel}.
+            </p>
+          ) : null}
 
           {pageData.copyTargetOptions.length ? (
             <MasterCourseConfigurationCopyForm
@@ -136,7 +142,9 @@ export default async function MasterCourseConfigurationsPage() {
             />
           ) : (
             <p className="empty-message">
-              Nenhum curso elegivel para copiar a base da Fisioterapia foi encontrado.
+              {pageData.fisioterapiaBaseSourceLabel
+                ? "Nenhum curso elegivel para copiar a base da Fisioterapia foi encontrado."
+                : "Nenhuma base padrao de Fisioterapia configurada foi encontrada."}
             </p>
           )}
         </div>
