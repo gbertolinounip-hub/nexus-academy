@@ -1,5 +1,7 @@
 ﻿import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { resolveLaunchIdentity } from "@/lib/utils/format";
+import { loadScopedOperationalGraph } from "@/lib/auth/data-scope";
+import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import {
   buildProfessorStudentSummary,
   buildStudentDashboardFromRows
@@ -38,6 +40,8 @@ interface ReportScope {
   role: "coordenador" | "professor";
   description: string;
   accessibleEnrollmentIds: Set<string> | null;
+  scopedGraph: Awaited<ReturnType<typeof loadScopedOperationalGraph>> | null;
+  usesCourseManagerScope: boolean;
 }
 
 interface StudentSemesterAssignmentSummary {
@@ -422,6 +426,35 @@ function buildReportsEmptyState(
   };
 }
 
+function buildCoordinatorUnitRequiredEmptyState(): ReportEmptyState {
+  return {
+    title: "Unidade operacional não identificada",
+    description:
+      "O coordenador autenticado precisa estar vinculado a uma unidade para acessar os relatórios."
+  };
+}
+
+function buildCourseManagerInsufficientDataEmptyState(): ReportEmptyState {
+  return {
+    title: "Ainda não há dados acadêmicos suficientes para consolidar os relatórios finais deste curso.",
+    description:
+      "Assim que houver semestres, turmas, alunos e lançamentos avaliativos nas ofertas deste curso, os relatórios finais serão exibidos."
+  };
+}
+
+function buildCoordinatorReportEmptyState(
+  scope: ReportScope,
+  title: string,
+  description: string
+): ReportEmptyState {
+  return scope.usesCourseManagerScope
+    ? buildCourseManagerInsufficientDataEmptyState()
+    : {
+        title,
+        description
+      };
+}
+
 function buildStudentReportEmptyState(
   title: string,
   description: string
@@ -452,6 +485,10 @@ function filterSemestersToCurrentUnit(
   semesters: SemesterRow[],
   currentUser: SessionUser
 ) {
+  if (getActiveMasterCourseContext(currentUser)) {
+    return semesters;
+  }
+
   if (!currentUser.unitId) {
     return semesters;
   }
@@ -498,22 +535,45 @@ async function resolveReportScope(
   currentUser: SessionUser
 ): Promise<{ scope: ReportScope | null; emptyState: ReportEmptyState | null }> {
   if (currentUser.role === "coordenador") {
-    if (!currentUser.unitId) {
+    const activeCourseManagerContext = getActiveMasterCourseContext(currentUser);
+    const usesCourseManagerScope = Boolean(activeCourseManagerContext);
+
+    if (!usesCourseManagerScope && !currentUser.unitId) {
       return {
         scope: null,
-        emptyState: {
-          title: "Unidade operacional não identificada",
-          description:
-            "O coordenador autenticado precisa estar vinculado a uma unidade para acessar os relatórios."
-        }
+        emptyState: buildCoordinatorUnitRequiredEmptyState()
       };
     }
+
+    const supabase = await createSupabaseServerClient();
+    const scopedGraph = await loadScopedOperationalGraph(currentUser, {
+      supabase
+    });
+
+    if (
+      usesCourseManagerScope &&
+      (scopedGraph.scope.scopeKind === "none" ||
+        scopedGraph.scope.offerIds.length === 0 ||
+        scopedGraph.scope.unitIds.length === 0)
+    ) {
+      return {
+        scope: null,
+        emptyState: buildCourseManagerInsufficientDataEmptyState()
+      };
+    }
+
+    const courseName =
+      activeCourseManagerContext?.cursoNome ?? currentUser.cursoNome ?? "curso";
 
     return {
       scope: {
         role: "coordenador",
-        description: "Visão da coordenação restrita à unidade e ao semestre selecionados.",
-        accessibleEnrollmentIds: null
+        description: usesCourseManagerScope
+          ? `Visão consolidada de ${courseName}, restrita a ${scopedGraph.scope.offerIds.length} oferta(s) em ${scopedGraph.scope.unitIds.length} unidade(s) da IES atual.`
+          : "Visão da coordenação restrita à unidade e ao semestre selecionados.",
+        accessibleEnrollmentIds: null,
+        scopedGraph,
+        usesCourseManagerScope
       },
       emptyState: null
     };
@@ -563,16 +623,18 @@ async function resolveReportScope(
     };
   }
 
-  return {
-    scope: {
-      role: "professor",
-      description: "Escopo restrito aos alunos, áreas e turmas sob sua supervisão.",
-      accessibleEnrollmentIds: new Set(
-        professorLinks.map((link) => link.matricula_turma_id)
-      )
-    },
-    emptyState: null
-  };
+    return {
+      scope: {
+        role: "professor",
+        description: "Escopo restrito aos alunos, áreas e turmas sob sua supervisão.",
+        accessibleEnrollmentIds: new Set(
+          professorLinks.map((link) => link.matricula_turma_id)
+        ),
+        scopedGraph: null,
+        usesCourseManagerScope: false
+      },
+      emptyState: null
+    };
 }
 
 async function loadClassesForEnrollments(enrollmentRows: EnrollmentRow[]) {
@@ -1138,73 +1200,55 @@ export async function getAuthenticatedReportsPageData(
   let enrollmentRows: EnrollmentRow[] = [];
 
   if (scope.role === "coordenador") {
-    const semesterRowsResult = await supabase
-      .from("semestres")
-      .select("*")
-      .eq("unidade_id", currentUser.unitId!);
-
-    if (semesterRowsResult.error) {
-      return buildReportsEmptyState(
-        "Não foi possível carregar os semestres",
-      "Houve um problema ao consultar os semestres reais disponíveis para o fechamento acadêmico."
+    if (!scope.scopedGraph) {
+      const scopedState = buildCoordinatorReportEmptyState(
+        scope,
+        "Relatórios indisponíveis",
+        "Não foi possível consolidar o escopo institucional de relatórios."
       );
+
+      return buildReportsEmptyState(scopedState.title, scopedState.description);
     }
 
-    semesters = sortSemesters((semesterRowsResult.data ?? []) as SemesterRow[]);
+    semesters = sortSemesters(scope.scopedGraph.semesterRows);
     const selectedSemester = selectSemester(semesters, requestedSemesterId);
 
     if (!selectedSemester) {
-      return buildReportsEmptyState(
+      const noSemesterState = buildCoordinatorReportEmptyState(
+        scope,
         "Nenhum semestre disponível para relatorios",
         "Ainda não ha semestres cadastrados com dados suficientes para os relatorios finais."
       );
+
+      return buildReportsEmptyState(noSemesterState.title, noSemesterState.description);
     }
 
-    const classRowsResult = await supabase
-      .from("turmas")
-      .select("*")
-      .eq("semestre_id", selectedSemester.id)
-      .order("nome", { ascending: true });
-
-    if (classRowsResult.error) {
-      return buildReportsEmptyState(
-        "Não foi possível carregar as turmas do semestre",
-        "O semestre foi identificado, mas as turmas não puderam ser consultadas."
-      );
-    }
-
-    classRows = (classRowsResult.data ?? []) as ClassRow[];
-
-    if (classRows.length) {
-      const classIds = classRows.map((classGroup) => classGroup.id);
-      const enrollmentRowsResult = await supabase
-        .from("matriculas_turma")
-        .select("*")
-        .in("turma_id", classIds);
-
-      if (enrollmentRowsResult.error) {
-        return buildReportsEmptyState(
-          "Não foi possível carregar as matrículas do semestre",
-          "As turmas foram encontradas, mas as matrículas não puderam ser consultadas."
-        );
-      }
-
-      enrollmentRows = (enrollmentRowsResult.data ?? []) as EnrollmentRow[];
-    }
+    classRows = [...scope.scopedGraph.classRows]
+      .filter((classGroup) => classGroup.semestre_id === selectedSemester.id)
+      .sort((left, right) => left.nome.localeCompare(right.nome, "pt-BR"));
+    const visibleClassIds = new Set(classRows.map((classGroup) => classGroup.id));
+    enrollmentRows = scope.scopedGraph.enrollmentRows.filter((enrollment) =>
+      visibleClassIds.has(enrollment.turma_id)
+    );
 
     const bundle = await loadAcademicBundle(enrollmentRows, classRows, [selectedSemester]);
 
     if (!bundle.enrollments.length) {
-      return buildReportsEmptyState(
+      const noStudentState = buildCoordinatorReportEmptyState(
+        scope,
         "Nenhum aluno ativo disponível para este semestre",
         "Os vínculos do semestre foram encontrados, mas não há alunos ativos disponíveis para compor os relatórios correntes."
       );
+
+      return buildReportsEmptyState(noStudentState.title, noStudentState.description);
     }
 
-    const visibleClassIds = new Set(
+    const classIdsWithVisibleStudents = new Set(
       bundle.enrollments.map((enrollment) => enrollment.turma_id)
     );
-    classRows = classRows.filter((classGroup) => visibleClassIds.has(classGroup.id));
+    classRows = classRows.filter((classGroup) =>
+      classIdsWithVisibleStudents.has(classGroup.id)
+    );
     return {
       reports: buildReportsHubData({
         scope,
@@ -1617,26 +1661,48 @@ export async function getAuthenticatedStudentFinalReport(
   }
 
   const supabase = await createSupabaseServerClient();
-  const enrollmentQuery =
-    scope.role === "coordenador"
-      ? supabase.from("matriculas_turma").select("*").eq("aluno_id", studentId)
-      : (scope.accessibleEnrollmentIds?.size ?? 0) > 0
+  let enrollmentRows: EnrollmentRow[] = [];
+  let allAccessibleEnrollments: EnrollmentRow[] = [];
+  let classRows: ClassRow[] = [];
+
+  if (scope.role === "coordenador") {
+    if (!scope.scopedGraph) {
+      return buildStudentReportEmptyState(
+        "Relatório indisponível",
+        "Não foi possível consolidar o escopo institucional deste aluno."
+      );
+    }
+
+    enrollmentRows = scope.scopedGraph.enrollmentRows.filter(
+      (enrollment) => enrollment.aluno_id === studentId
+    );
+    allAccessibleEnrollments = [...enrollmentRows];
+    const visibleClassIds = new Set(enrollmentRows.map((enrollment) => enrollment.turma_id));
+    classRows = scope.scopedGraph.classRows.filter((classGroup) =>
+      visibleClassIds.has(classGroup.id)
+    );
+  } else {
+    const enrollmentQuery =
+      (scope.accessibleEnrollmentIds?.size ?? 0) > 0
         ? supabase
             .from("matriculas_turma")
             .select("*")
             .eq("aluno_id", studentId)
             .in("id", [...(scope.accessibleEnrollmentIds ?? new Set<string>())])
         : Promise.resolve({ data: [], error: null as null });
-  const enrollmentRowsResult = await enrollmentQuery;
+    const enrollmentRowsResult = await enrollmentQuery;
 
-  if (enrollmentRowsResult.error) {
-    return buildStudentReportEmptyState(
-      "Não foi possível carregar os vínculos do aluno",
-      "Houve um problema ao consultar as matrículas do aluno para o relatorio final."
-    );
+    if (enrollmentRowsResult.error) {
+      return buildStudentReportEmptyState(
+        "Não foi possível carregar os vínculos do aluno",
+        "Houve um problema ao consultar as matrículas do aluno para o relatorio final."
+      );
+    }
+
+    enrollmentRows = (enrollmentRowsResult.data ?? []) as EnrollmentRow[];
+    allAccessibleEnrollments = [...enrollmentRows];
+    classRows = await loadClassesForEnrollments(enrollmentRows);
   }
-
-  let enrollmentRows = (enrollmentRowsResult.data ?? []) as EnrollmentRow[];
 
   if (!enrollmentRows.length) {
     return buildStudentReportEmptyState(
@@ -1645,8 +1711,6 @@ export async function getAuthenticatedStudentFinalReport(
     );
   }
 
-  const allAccessibleEnrollments = [...enrollmentRows];
-  const classRows = await loadClassesForEnrollments(enrollmentRows);
   const classById = new Map(classRows.map((classGroup) => [classGroup.id, classGroup]));
   const preferredSemesterId =
     requestedEnrollmentId
@@ -1662,9 +1726,16 @@ export async function getAuthenticatedStudentFinalReport(
           return classById.get(requestedEnrollment.turma_id)?.semestre_id ?? null;
         })()
       : null;
-  const semesters = sortSemesters(
-    filterSemestersToCurrentUnit(await loadSemestersForClasses(classRows), currentUser)
-  );
+  const semesters =
+    scope.role === "coordenador" && scope.scopedGraph
+      ? sortSemesters(
+          scope.scopedGraph.semesterRows.filter((semester) =>
+            classRows.some((classGroup) => classGroup.semestre_id === semester.id)
+          )
+        )
+      : sortSemesters(
+          filterSemestersToCurrentUnit(await loadSemestersForClasses(classRows), currentUser)
+        );
   const selectedSemester = selectSemester(
     semesters,
     requestedSemesterId ?? preferredSemesterId
@@ -1938,20 +2009,45 @@ export async function getAuthenticatedClassFinalReport(
   }
 
   const supabase = await createSupabaseServerClient();
-  const { data: classRowData, error: classError } = await supabase
-    .from("turmas")
-    .select("*")
-    .eq("id", classId)
-    .maybeSingle();
+  let classGroup: ClassRow | null = null;
+  let enrollmentRows: EnrollmentRow[] = [];
+  let semesterRows: SemesterRow[] = [];
 
-  if (classError || !classRowData) {
+  if (scope.role === "coordenador") {
+    if (!scope.scopedGraph) {
+      return buildClassReportEmptyState(
+        "Relatório indisponível",
+        "Não foi possível consolidar o escopo institucional desta turma."
+      );
+    }
+
+    classGroup =
+      scope.scopedGraph.classRows.find((classEntry) => classEntry.id === classId) ?? null;
+    enrollmentRows = scope.scopedGraph.enrollmentRows.filter(
+      (enrollment) => enrollment.turma_id === classId
+    );
+    semesterRows = classGroup
+      ? scope.scopedGraph.semesterRows.filter((semester) => semester.id === classGroup?.semestre_id)
+      : [];
+  } else {
+    const { data: classRowData, error: classError } = await supabase
+      .from("turmas")
+      .select("*")
+      .eq("id", classId)
+      .maybeSingle();
+
+    if (!classError && classRowData) {
+      classGroup = classRowData as ClassRow;
+      semesterRows = await loadSemestersForClasses([classGroup]);
+    }
+  }
+
+  if (!classGroup) {
     return buildClassReportEmptyState(
       "Turma não encontrada",
       "A turma solicitada não foi encontrada ou não esta acessivel neste contexto."
     );
   }
-
-  const classGroup = classRowData as ClassRow;
   const requestedSemesterId = options?.semesterId?.trim() || null;
 
   if (requestedSemesterId && classGroup.semestre_id !== requestedSemesterId) {
@@ -1961,26 +2057,26 @@ export async function getAuthenticatedClassFinalReport(
     );
   }
 
-  const enrollmentQuery =
-    scope.role === "coordenador"
-      ? supabase.from("matriculas_turma").select("*").eq("turma_id", classId)
-      : (scope.accessibleEnrollmentIds?.size ?? 0) > 0
+  if (scope.role !== "coordenador") {
+    const enrollmentQuery =
+      (scope.accessibleEnrollmentIds?.size ?? 0) > 0
         ? supabase
             .from("matriculas_turma")
             .select("*")
             .eq("turma_id", classId)
             .in("id", [...(scope.accessibleEnrollmentIds ?? new Set<string>())])
         : Promise.resolve({ data: [], error: null as null });
-  const enrollmentRowsResult = await enrollmentQuery;
+    const enrollmentRowsResult = await enrollmentQuery;
 
-  if (enrollmentRowsResult.error) {
-    return buildClassReportEmptyState(
-      "Não foi possível carregar as matrículas da turma",
-      "Houve um problema ao consultar as matrículas usadas no relatorio final da turma."
-    );
+    if (enrollmentRowsResult.error) {
+      return buildClassReportEmptyState(
+        "Não foi possível carregar as matrículas da turma",
+        "Houve um problema ao consultar as matrículas usadas no relatorio final da turma."
+      );
+    }
+
+    enrollmentRows = (enrollmentRowsResult.data ?? []) as EnrollmentRow[];
   }
-
-  const enrollmentRows = (enrollmentRowsResult.data ?? []) as EnrollmentRow[];
 
   if (!enrollmentRows.length) {
     return buildClassReportEmptyState(
@@ -1991,8 +2087,10 @@ export async function getAuthenticatedClassFinalReport(
     );
   }
 
-  const semesterRows = await loadSemestersForClasses([classGroup]);
-  const visibleSemesterRows = filterSemestersToCurrentUnit(semesterRows, currentUser);
+  const visibleSemesterRows =
+    scope.role === "coordenador"
+      ? semesterRows
+      : filterSemestersToCurrentUnit(semesterRows, currentUser);
 
   if (!visibleSemesterRows.length) {
     return buildClassReportEmptyState(

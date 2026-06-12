@@ -4,6 +4,7 @@ import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
 import { ProgressBars } from "@/components/dashboard/progress-bars";
 import { ReportPrintButton } from "@/components/reports/report-print-button";
+import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/session";
 import { formatPercentage, formatStudentStatusBadge } from "@/lib/utils/format";
 import { getAuthenticatedReportsPageData } from "@/services/reports";
@@ -28,14 +29,20 @@ export default async function ReportsPage(props: ReportsPageProps) {
     currentUser,
     requestedSemesterId
   );
+  const activeCourseManagerContext = getActiveMasterCourseContext(currentUser);
+  const isCourseManagerView = Boolean(activeCourseManagerContext);
   const isProfessorView = reports?.viewerRole === "professor";
 
   const pageTitle =
-    currentUser.role === "coordenador"
+    isCourseManagerView
+      ? "Relatórios consolidados do curso"
+      : currentUser.role === "coordenador"
       ? "Relatórios finais acadêmicos"
       : "Relatórios finais sob supervisão";
   const pageDescription =
-    currentUser.role === "coordenador"
+    isCourseManagerView
+      ? `Visão consolidada de ${activeCourseManagerContext?.cursoNome ?? currentUser.cursoNome ?? "curso"}, abrangendo ofertas, unidades, turmas, áreas, alunos e lançamentos avaliativos da IES atual.`
+      : currentUser.role === "coordenador"
       ? "Visão gerencial do fechamento do semestre, com consolidações por bloco, área, turma e aluno."
       : "Visão final das turmas e dos alunos que estão no escopo acadêmico deste supervisor.";
 
@@ -386,8 +393,9 @@ export default async function ReportsPage(props: ReportsPageProps) {
           }
         >
           <p className="empty-message">
-            Assim que houver semestres, turmas, áreas e lançamentos suficientes,
-            esta visão passará a consolidar os dados reais do sistema.
+            {isCourseManagerView
+              ? "Assim que houver semestres, turmas, alunos, áreas e lançamentos avaliativos nas ofertas deste curso, esta visão passará a consolidar os dados reais do sistema."
+              : "Assim que houver semestres, turmas, áreas e lançamentos suficientes, esta visão passará a consolidar os dados reais do sistema."}
           </p>
         </SectionCard>
       )}

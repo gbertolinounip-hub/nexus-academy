@@ -1776,11 +1776,14 @@ async function loadStudentUsersByScope(input: {
   unitIdFilter?: string | null;
   unitIdsFilter?: string[] | null;
   resolvedScope?: Awaited<ReturnType<typeof resolveScopedDataAccess>> | null;
+  useAdminRead?: boolean;
 }): Promise<StudentDocumentStudentScope> {
   const supabase = await createSupabaseServerClient();
   const adminClient = createSupabaseAdminClient();
   const readClient =
-    input.viewerRole === "coordenador_master" ? adminClient : supabase;
+    input.viewerRole === "coordenador_master" || input.useAdminRead
+      ? adminClient
+      : supabase;
 
   if (input.viewerRole === "professor") {
     return {
@@ -1969,7 +1972,6 @@ export async function getStudentDocumentDirectoryPageData(input: {
   status?: string | null;
   unitId?: string | null;
 }) {
-  const useAdminRead = input.viewerRole === "coordenador_master";
   const coordinatorSupabase =
     input.viewerRole === "coordenador"
       ? await createSupabaseServerClient()
@@ -1993,6 +1995,10 @@ export async function getStudentDocumentDirectoryPageData(input: {
           institutions: [] as StudentDocumentDirectoryInstitutionOption[],
           units: [] as StudentDocumentDirectoryUnitOption[]
         };
+  const useAdminRead =
+    input.viewerRole === "coordenador_master" ||
+    (input.viewerRole === "coordenador" &&
+      coordinatorScope?.scopeKind === "course_manager");
   const normalizedInstitutionalFilters = normalizeStudentDocumentInstitutionalFilters({
     institutions: institutionalFilterOptions.institutions,
     units: institutionalFilterOptions.units,
@@ -2014,7 +2020,8 @@ export async function getStudentDocumentDirectoryPageData(input: {
             coordinatorScope.unitIds.length > 0
           ? coordinatorScope.unitIds
           : null,
-    resolvedScope: coordinatorScope
+    resolvedScope: coordinatorScope,
+    useAdminRead
   });
   const context = await loadStudentDocumentScopeByStudentIds(studentIds, {
     useAdminRead,
@@ -2102,9 +2109,25 @@ export async function getStudentDocumentDetailPageData(input: {
   viewerRole: InstitutionalViewerRole;
   studentId: string;
 }) {
+  const coordinatorSupabase =
+    input.viewerRole === "coordenador"
+      ? await createSupabaseServerClient()
+      : null;
+  const coordinatorScope =
+    input.viewerRole === "coordenador" && coordinatorSupabase
+      ? await resolveScopedDataAccess(input.currentUser, {
+          supabase: coordinatorSupabase
+        })
+      : null;
+  const useAdminRead =
+    input.viewerRole === "coordenador_master" ||
+    (input.viewerRole === "coordenador" &&
+      coordinatorScope?.scopeKind === "course_manager");
   const { studentIds, scope } = await loadStudentUsersByScope({
     currentUser: input.currentUser,
-    viewerRole: input.viewerRole
+    viewerRole: input.viewerRole,
+    resolvedScope: coordinatorScope,
+    useAdminRead
   });
 
   if (!studentIds.includes(input.studentId)) {
@@ -2112,7 +2135,7 @@ export async function getStudentDocumentDetailPageData(input: {
   }
 
   const context = await loadStudentDocumentScopeByStudentIds([input.studentId], {
-    useAdminRead: input.viewerRole === "coordenador_master",
+    useAdminRead,
     scope
   });
   const maps = buildStudentDocumentSummaryMaps(context);
@@ -2158,19 +2181,21 @@ export async function getAccessibleStudentDocumentForDownload(
   documentId: string
 ) {
   const supabase = await createSupabaseServerClient();
-  const { data: documentRowData, error: documentError } = await supabase
-    .from("documentos_aluno")
-    .select("*")
-    .eq("id", documentId)
-    .maybeSingle();
-
-  if (documentError || !documentRowData) {
-    return null;
-  }
-
-  const documentRow = documentRowData as DocumentRow;
+  let documentRow: DocumentRow | null = null;
 
   if (currentUser.role === "aluno") {
+    const { data: documentRowData, error: documentError } = await supabase
+      .from("documentos_aluno")
+      .select("*")
+      .eq("id", documentId)
+      .maybeSingle();
+
+    if (documentError || !documentRowData) {
+      return null;
+    }
+
+    documentRow = documentRowData as DocumentRow;
+
     if (documentRow.aluno_id !== currentUser.id) {
       return null;
     }
@@ -2186,14 +2211,43 @@ export async function getAccessibleStudentDocumentForDownload(
       return null;
     }
 
+    const coordinatorScope =
+      viewerRole === "coordenador"
+        ? await resolveScopedDataAccess(currentUser, {
+            supabase
+          })
+        : null;
+    const useAdminRead =
+      viewerRole === "coordenador_master" ||
+      (viewerRole === "coordenador" &&
+        coordinatorScope?.scopeKind === "course_manager");
+    const readClient = useAdminRead ? createSupabaseAdminClient() : supabase;
+    const { data: documentRowData, error: documentError } = await readClient
+      .from("documentos_aluno")
+      .select("*")
+      .eq("id", documentId)
+      .maybeSingle();
+
+    if (documentError || !documentRowData) {
+      return null;
+    }
+
+    documentRow = documentRowData as DocumentRow;
+
     const { studentIds } = await loadStudentUsersByScope({
       currentUser,
-      viewerRole
+      viewerRole,
+      resolvedScope: coordinatorScope,
+      useAdminRead
     });
 
     if (!studentIds.includes(documentRow.aluno_id)) {
       return null;
     }
+  }
+
+  if (!documentRow) {
+    return null;
   }
 
   const downloadUrl = await buildStudentDocumentDownloadUrl({
