@@ -2,12 +2,13 @@ import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 import type { SessionUser } from "@/types/domain";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 type OfferRow = Database["public"]["Tables"]["ofertas_curso_unidade"]["Row"];
 type SemesterRow = Database["public"]["Tables"]["semestres"]["Row"];
 type ClassRow = Database["public"]["Tables"]["turmas"]["Row"];
 type EnrollmentRow = Database["public"]["Tables"]["matriculas_turma"]["Row"];
-type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
+type SupabaseReadClient = SupabaseClient<Database>;
 
 export interface SessionDataScope {
   isGlobalMaster: boolean;
@@ -93,7 +94,7 @@ export function resolveDataScopeForSession(currentUser: SessionUser): SessionDat
 }
 
 async function loadOfferRowsForScope(
-  supabase: SupabaseServerClient,
+  supabase: SupabaseReadClient,
   scope: SessionDataScope
 ) {
   if (scope.ofertaCursoUnidadeId) {
@@ -137,10 +138,65 @@ async function loadOfferRowsForScope(
   return [] as OfferRow[];
 }
 
+async function resolveSecretaryFallbackScope(
+  currentUser: SessionUser,
+  baseScope: SessionDataScope,
+  supabase: SupabaseReadClient
+) {
+  if (
+    currentUser.role !== "secretaria" ||
+    baseScope.ofertaCursoUnidadeId ||
+    baseScope.cursoId ||
+    !baseScope.unidadeId
+  ) {
+    return {
+      scope: baseScope,
+      hasAmbiguousActiveOffers: false
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("ofertas_curso_unidade")
+    .select("id, instituicao_id, unidade_id, curso_id, ativo")
+    .eq("unidade_id", baseScope.unidadeId)
+    .eq("ativo", true);
+
+  if (error) {
+    throw new Error(
+      "Não foi possível identificar a oferta operacional ativa da secretaria autenticada."
+    );
+  }
+
+  const activeOffers = (data ?? []) as Pick<
+    OfferRow,
+    "id" | "instituicao_id" | "unidade_id" | "curso_id" | "ativo"
+  >[];
+
+  if (activeOffers.length !== 1) {
+    return {
+      scope: baseScope,
+      hasAmbiguousActiveOffers: activeOffers.length > 1
+    };
+  }
+
+  const singleOffer = activeOffers[0];
+
+  return {
+    scope: {
+      ...baseScope,
+      instituicaoId: singleOffer.instituicao_id ?? baseScope.instituicaoId,
+      cursoId: singleOffer.curso_id ?? baseScope.cursoId,
+      ofertaCursoUnidadeId: singleOffer.id,
+      unidadeId: singleOffer.unidade_id ?? baseScope.unidadeId
+    },
+    hasAmbiguousActiveOffers: false
+  };
+}
+
 export async function resolveScopedDataAccess(
   currentUser: SessionUser,
   input?: {
-    supabase?: SupabaseServerClient;
+    supabase?: SupabaseReadClient;
   }
 ): Promise<ResolvedSessionDataScope> {
   const baseScope = resolveDataScopeForSession(currentUser);
@@ -157,15 +213,33 @@ export async function resolveScopedDataAccess(
   }
 
   const supabase = input?.supabase ?? (await createSupabaseServerClient());
-  const scopedOffers = await loadOfferRowsForScope(supabase, baseScope);
+  const secretaryFallbackResult = await resolveSecretaryFallbackScope(
+    currentUser,
+    baseScope,
+    supabase
+  );
+  const effectiveBaseScope = secretaryFallbackResult.scope;
+
+  if (currentUser.role === "secretaria" && secretaryFallbackResult.hasAmbiguousActiveOffers) {
+    return {
+      ...effectiveBaseScope,
+      scopeKind: "none",
+      restrictToCourse: false,
+      usesLegacyUnitFallback: false,
+      offerIds: [],
+      unitIds: []
+    };
+  }
+
+  const scopedOffers = await loadOfferRowsForScope(supabase, effectiveBaseScope);
   const offerIds = scopedOffers.map((offer) => offer.id);
   const unitIds = uniqueStringValues(
     scopedOffers.map((offer) => offer.unidade_id)
   );
 
-  if (baseScope.isCourseManager) {
+  if (effectiveBaseScope.isCourseManager) {
     return {
-      ...baseScope,
+      ...effectiveBaseScope,
       scopeKind: "course_manager",
       restrictToCourse: true,
       usesLegacyUnitFallback: false,
@@ -174,23 +248,23 @@ export async function resolveScopedDataAccess(
     };
   }
 
-  if (baseScope.ofertaCursoUnidadeId) {
+  if (effectiveBaseScope.ofertaCursoUnidadeId) {
     return {
-      ...baseScope,
+      ...effectiveBaseScope,
       scopeKind: "offer_context",
-      restrictToCourse: Boolean(baseScope.cursoId),
+      restrictToCourse: Boolean(effectiveBaseScope.cursoId),
       usesLegacyUnitFallback: false,
       offerIds,
       unitIds:
         unitIds.length > 0
           ? unitIds
-          : uniqueStringValues([baseScope.unidadeId])
+          : uniqueStringValues([effectiveBaseScope.unidadeId])
     };
   }
 
-  if (baseScope.cursoId) {
+  if (effectiveBaseScope.cursoId) {
     return {
-      ...baseScope,
+      ...effectiveBaseScope,
       scopeKind: "course_context",
       restrictToCourse: true,
       usesLegacyUnitFallback: false,
@@ -199,19 +273,19 @@ export async function resolveScopedDataAccess(
     };
   }
 
-  if (baseScope.unidadeId) {
+  if (effectiveBaseScope.unidadeId) {
     return {
-      ...baseScope,
+      ...effectiveBaseScope,
       scopeKind: "unit_fallback",
       restrictToCourse: false,
       usesLegacyUnitFallback: true,
       offerIds: [],
-      unitIds: [baseScope.unidadeId]
+      unitIds: [effectiveBaseScope.unidadeId]
     };
   }
 
   return {
-    ...baseScope,
+    ...effectiveBaseScope,
     scopeKind: "none",
     restrictToCourse: false,
     usesLegacyUnitFallback: false,
@@ -223,7 +297,7 @@ export async function resolveScopedDataAccess(
 export async function loadScopedOperationalGraph(
   currentUser: SessionUser,
   input?: {
-    supabase?: SupabaseServerClient;
+    supabase?: SupabaseReadClient;
   }
 ): Promise<ScopedOperationalGraph> {
   const supabase = input?.supabase ?? (await createSupabaseServerClient());

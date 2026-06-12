@@ -1880,7 +1880,7 @@ async function loadScopedClinicalOperatorContext(
       ? createSupabaseAdminClient()
       : serverSupabase;
   const scopedGraph = await loadScopedOperationalGraph(currentUser, {
-    supabase: serverSupabase
+    supabase
   });
 
   if (
@@ -2286,7 +2286,7 @@ async function loadAccessibleClinicalCaseRows(input: {
     input.currentUser.role === "secretaria"
   ) {
     const scopedGraph = await loadScopedOperationalGraph(input.currentUser, {
-      supabase: serverSupabase
+      supabase: queryClient
     });
 
     if (

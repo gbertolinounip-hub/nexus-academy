@@ -2045,6 +2045,25 @@ async function cleanupCreatedProfessorData(input: {
   }
 }
 
+async function cleanupCreatedSecretaryData(input: {
+  authUserId?: string | null;
+  userId?: string | null;
+}) {
+  const supabase = await createSupabaseServerClient();
+  const adminClient = createSupabaseAdminClient();
+
+  if (input.userId) {
+    await (supabase.from("usuarios_papeis_contexto") as any)
+      .delete()
+      .eq("usuario_id", input.userId);
+    await (supabase.from("usuarios") as any).delete().eq("id", input.userId);
+  }
+
+  if (input.authUserId) {
+    await adminClient.auth.admin.deleteUser(input.authUserId);
+  }
+}
+
 function buildStudentSuccessMessage(assignmentCount: number, professorLinkCount: number) {
   if (assignmentCount === 0) {
     return "Aluno cadastrado com sucesso. Nenhum vinculo operacional foi criado neste momento.";
@@ -3992,6 +4011,7 @@ export async function createSecretaryRegistrationAction(
   const currentUser = await requireRole(["coordenador"]);
   assertOperationalMutationAllowed(currentUser);
   const coordinatorUnitId = getRequiredCoordinatorUnitId(currentUser);
+  const operationalScope = await resolveOperationalScopeForCurrentCoordinator(currentUser);
   const submittedFormValues = buildSecretaryFormValues(formData);
   const parsedData = secretaryRegistrationSchema.safeParse(submittedFormValues);
 
@@ -4017,6 +4037,7 @@ export async function createSecretaryRegistrationAction(
   const supabase = await createSupabaseServerClient();
   const adminClient = createSupabaseAdminClient();
   let authUserId: string | null = null;
+  let domainUserId: string | null = null;
 
   try {
     const { data: createdAuthUser, error: authError } =
@@ -4037,6 +4058,7 @@ export async function createSecretaryRegistrationAction(
     }
 
     authUserId = createdAuthUser.user.id;
+    domainUserId = createdAuthUser.user.id;
 
     const userInsertPayload: UserInsert = {
       id: createdAuthUser.user.id,
@@ -4054,10 +4076,58 @@ export async function createSecretaryRegistrationAction(
     if (userInsertError) {
       throw new Error(userInsertError.message);
     }
-  } catch (error) {
-    if (authUserId) {
-      await adminClient.auth.admin.deleteUser(authUserId);
+
+    if (operationalScope.instituicaoId && operationalScope.courseId) {
+      const contextInsertPayload: UserContextInsert = {
+        usuario_id: createdAuthUser.user.id,
+        perfil_id: secretaryProfile.id,
+        instituicao_id: operationalScope.instituicaoId,
+        curso_id: operationalScope.courseId,
+        oferta_curso_unidade_id: operationalScope.offerId,
+        principal: true,
+        ativo: true,
+        metadata: {
+          origem: "coordinator-secretary-registration",
+          escopo: operationalScope.offerId ? "oferta_unidade" : "curso_unidade"
+        }
+      };
+
+      const { data: insertedContextData, error: insertedContextError } = await adminClient
+        .from("usuarios_papeis_contexto")
+        .insert(contextInsertPayload as never)
+        .select("id")
+        .single();
+
+      const insertedContext = (insertedContextData ?? null) as Pick<
+        UserContextRow,
+        "id"
+      > | null;
+
+      if (insertedContextError || !insertedContext) {
+        throw new Error(
+          insertedContextError?.message ??
+            "Não foi possível criar o contexto institucional da secretária."
+        );
+      }
+
+      const { error: defaultContextError } = await adminClient
+        .from("usuarios")
+        .update({
+          contexto_padrao_id: insertedContext.id
+        } as never)
+        .eq("id", createdAuthUser.user.id);
+
+      if (defaultContextError) {
+        throw new Error(
+          "Não foi possível definir o contexto padrão da secretária recém-cadastrada."
+        );
+      }
     }
+  } catch (error) {
+    await cleanupCreatedSecretaryData({
+      authUserId,
+      userId: domainUserId
+    });
 
     return buildSecretaryErrorState(
       error instanceof Error
