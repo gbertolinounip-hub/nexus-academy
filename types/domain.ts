@@ -50,6 +50,7 @@ export interface SessionUser {
 export type StudentDocumentType = "carteira_vacinacao" | "tce";
 export type StudentDocumentStatus = "enviado" | "aprovado" | "reprovado";
 export type StudentDocumentReviewerRole = "professor" | "coordenador";
+export type EvaluationModelMode = "descritiva" | "rubrica";
 export type StudentDocumentNotificationType =
   | "documento_reprovado_professor"
   | "documento_reprovado_coordenador";
@@ -212,6 +213,16 @@ export interface RubricCriterionDefinition {
   weightPercentage: number;
   order: number;
   maxScore: number;
+}
+
+export interface RubricCriterionOptionDefinition {
+  id: string;
+  criterionModelId: string;
+  label: string;
+  description: string | null;
+  scoreValue: number;
+  order: number;
+  active: boolean;
 }
 
 export interface StudentRecord {

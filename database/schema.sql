@@ -83,6 +83,153 @@ create index if not exists idx_usuarios_perfil_id on public.usuarios (perfil_id)
 create index if not exists idx_usuarios_ativo on public.usuarios (ativo);
 create index if not exists idx_usuarios_unidade_id on public.usuarios (unidade_id);
 
+create table if not exists public.instituicoes (
+  id uuid primary key default gen_random_uuid(),
+  nome text not null,
+  sigla text,
+  slug text not null,
+  cnpj text,
+  ativo boolean not null default true,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists idx_instituicoes_slug_uk
+  on public.instituicoes (slug);
+
+create index if not exists idx_instituicoes_ativo
+  on public.instituicoes (ativo);
+
+create table if not exists public.cursos (
+  id uuid primary key default gen_random_uuid(),
+  instituicao_id uuid not null references public.instituicoes (id) on delete restrict,
+  codigo text not null,
+  nome text not null,
+  slug text not null,
+  ativo boolean not null default true,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists idx_cursos_instituicao_codigo_uk
+  on public.cursos (instituicao_id, codigo);
+
+create unique index if not exists idx_cursos_instituicao_slug_uk
+  on public.cursos (instituicao_id, slug);
+
+create index if not exists idx_cursos_instituicao_ativo
+  on public.cursos (instituicao_id, ativo);
+
+create table if not exists public.modelos_avaliacao_curso (
+  id uuid primary key default gen_random_uuid(),
+  curso_id uuid not null references public.cursos (id) on delete restrict,
+  codigo text not null,
+  nome text not null,
+  descricao text,
+  versao integer not null default 1,
+  modalidade text not null default 'descritiva',
+  ativo boolean not null default true,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint modelos_avaliacao_curso_versao_check
+    check (versao > 0),
+  constraint modelos_avaliacao_curso_modalidade_check
+    check (modalidade in ('descritiva', 'rubrica'))
+);
+
+create unique index if not exists idx_modelos_avaliacao_curso_codigo_versao_uk
+  on public.modelos_avaliacao_curso (curso_id, codigo, versao);
+
+create index if not exists idx_modelos_avaliacao_curso_curso_ativo
+  on public.modelos_avaliacao_curso (curso_id, ativo);
+
+create index if not exists idx_modelos_avaliacao_curso_modalidade_ativo
+  on public.modelos_avaliacao_curso (curso_id, modalidade, ativo);
+
+create table if not exists public.grupos_modelo_avaliacao (
+  id uuid primary key default gen_random_uuid(),
+  modelo_avaliacao_curso_id uuid not null references public.modelos_avaliacao_curso (id) on delete cascade,
+  codigo text not null,
+  nome text not null,
+  ordem smallint not null,
+  peso_percentual numeric(5,2) not null,
+  ativo boolean not null default true,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint grupos_modelo_avaliacao_peso_check
+    check (peso_percentual > 0 and peso_percentual <= 100),
+  constraint grupos_modelo_avaliacao_ordem_check
+    check (ordem > 0)
+);
+
+create unique index if not exists idx_grupos_modelo_avaliacao_ordem_uk
+  on public.grupos_modelo_avaliacao (modelo_avaliacao_curso_id, ordem);
+
+create unique index if not exists idx_grupos_modelo_avaliacao_codigo_uk
+  on public.grupos_modelo_avaliacao (modelo_avaliacao_curso_id, codigo);
+
+create index if not exists idx_grupos_modelo_avaliacao_modelo_ativo
+  on public.grupos_modelo_avaliacao (modelo_avaliacao_curso_id, ativo);
+
+create table if not exists public.criterios_modelo_avaliacao (
+  id uuid primary key default gen_random_uuid(),
+  grupo_modelo_avaliacao_id uuid not null references public.grupos_modelo_avaliacao (id) on delete cascade,
+  codigo text not null,
+  nome text not null,
+  descricao text,
+  ordem smallint not null,
+  peso_percentual numeric(5,2) not null,
+  escala_maxima numeric(4,2) not null default 10.00,
+  ativo boolean not null default true,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint criterios_modelo_avaliacao_peso_check
+    check (peso_percentual > 0 and peso_percentual <= 100),
+  constraint criterios_modelo_avaliacao_escala_check
+    check (escala_maxima > 0),
+  constraint criterios_modelo_avaliacao_ordem_check
+    check (ordem > 0)
+);
+
+create unique index if not exists idx_criterios_modelo_avaliacao_ordem_uk
+  on public.criterios_modelo_avaliacao (grupo_modelo_avaliacao_id, ordem);
+
+create unique index if not exists idx_criterios_modelo_avaliacao_codigo_uk
+  on public.criterios_modelo_avaliacao (grupo_modelo_avaliacao_id, codigo);
+
+create index if not exists idx_criterios_modelo_avaliacao_grupo_ativo
+  on public.criterios_modelo_avaliacao (grupo_modelo_avaliacao_id, ativo);
+
+create table if not exists public.opcoes_criterio_modelo_avaliacao (
+  id uuid primary key default gen_random_uuid(),
+  criterio_modelo_avaliacao_id uuid not null references public.criterios_modelo_avaliacao (id) on delete cascade,
+  rotulo text not null,
+  descricao text,
+  valor_nota numeric(5,2) not null,
+  ordem integer not null default 1,
+  ativo boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint opcoes_criterio_modelo_avaliacao_valor_check
+    check (valor_nota >= 0 and valor_nota <= 10),
+  constraint opcoes_criterio_modelo_avaliacao_ordem_check
+    check (ordem > 0)
+);
+
+create index if not exists idx_opcoes_criterio_modelo_avaliacao_criterio_id
+  on public.opcoes_criterio_modelo_avaliacao (criterio_modelo_avaliacao_id);
+
+create index if not exists idx_opcoes_criterio_modelo_avaliacao_criterio_ativo_ordem
+  on public.opcoes_criterio_modelo_avaliacao (criterio_modelo_avaliacao_id, ativo, ordem);
+
+create unique index if not exists idx_opcoes_criterio_modelo_avaliacao_ordem_uk
+  on public.opcoes_criterio_modelo_avaliacao (criterio_modelo_avaliacao_id, ordem);
+
 create table if not exists public.alunos (
   usuario_id uuid primary key references public.usuarios (id) on delete cascade,
   unidade_id uuid references public.unidades (id) on delete restrict,
@@ -426,12 +573,15 @@ create table if not exists public.avaliacoes (
   matricula_turma_id uuid not null references public.matriculas_turma (id) on delete restrict,
   professor_id uuid not null references public.professores (usuario_id) on delete restrict,
   semestre_id uuid not null references public.semestres (id) on delete restrict,
+  oferta_curso_unidade_id uuid references public.ofertas_curso_unidade (id) on delete restrict,
+  modelo_avaliacao_curso_id uuid references public.modelos_avaliacao_curso (id) on delete restrict,
   tipo_lancamento text not null default 'parcial',
   referencia text not null,
   observacoes text,
   avaliacao_origem_id uuid references public.avaliacoes (id) on delete restrict,
   avaliacao_raiz_id uuid references public.avaliacoes (id) on delete restrict,
   status text not null default 'publicado',
+  modalidade_snapshot text,
   avaliado_em timestamptz not null default now(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -439,6 +589,11 @@ create table if not exists public.avaliacoes (
     check (tipo_lancamento in ('parcial', 'revisao', 'fechamento')),
   constraint avaliacoes_status_check
     check (status in ('rascunho', 'publicado', 'cancelado')),
+  constraint avaliacoes_modalidade_snapshot_check
+    check (
+      modalidade_snapshot is null
+      or modalidade_snapshot in ('descritiva', 'rubrica')
+    ),
   constraint avaliacoes_revisao_tipo_check
     check (avaliacao_origem_id is null or tipo_lancamento = 'revisao'),
   constraint avaliacoes_revisao_raiz_check
@@ -454,10 +609,20 @@ create index if not exists idx_avaliacoes_professor_id
   on public.avaliacoes (professor_id, avaliado_em desc);
 create index if not exists idx_avaliacoes_semestre_id
   on public.avaliacoes (semestre_id);
+create index if not exists idx_avaliacoes_oferta_curso_unidade_id
+  on public.avaliacoes (oferta_curso_unidade_id);
+create index if not exists idx_avaliacoes_modelo_avaliacao_curso_id
+  on public.avaliacoes (modelo_avaliacao_curso_id);
 create index if not exists idx_avaliacoes_origem_id
   on public.avaliacoes (avaliacao_origem_id);
 create index if not exists idx_avaliacoes_raiz_id
   on public.avaliacoes (avaliacao_raiz_id, avaliado_em desc, created_at desc);
+
+alter table public.avaliacoes
+  add column if not exists oferta_curso_unidade_id uuid references public.ofertas_curso_unidade (id) on delete restrict;
+
+alter table public.avaliacoes
+  add column if not exists modelo_avaliacao_curso_id uuid references public.modelos_avaliacao_curso (id) on delete restrict;
 
 alter table public.avaliacoes
   add column if not exists avaliacao_origem_id uuid references public.avaliacoes (id) on delete restrict;
@@ -465,8 +630,24 @@ alter table public.avaliacoes
 alter table public.avaliacoes
   add column if not exists avaliacao_raiz_id uuid references public.avaliacoes (id) on delete restrict;
 
+alter table public.avaliacoes
+  add column if not exists modalidade_snapshot text;
+
 do $$
 begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'avaliacoes_modalidade_snapshot_check'
+  ) then
+    alter table public.avaliacoes
+      add constraint avaliacoes_modalidade_snapshot_check
+      check (
+        modalidade_snapshot is null
+        or modalidade_snapshot in ('descritiva', 'rubrica')
+      );
+  end if;
+
   if not exists (
     select 1
     from pg_constraint
@@ -496,22 +677,68 @@ create table if not exists public.itens_avaliados (
   id uuid primary key default gen_random_uuid(),
   avaliacao_id uuid not null references public.avaliacoes (id) on delete cascade,
   criterio_id uuid not null references public.criterios_avaliacao (id) on delete restrict,
+  criterio_modelo_avaliacao_id uuid references public.criterios_modelo_avaliacao (id) on delete set null,
+  opcao_criterio_modelo_avaliacao_id uuid references public.opcoes_criterio_modelo_avaliacao (id) on delete set null,
   nota_bruta numeric(5,2) not null,
   peso_aplicado_percentual numeric(5,2) not null,
   nota_ponderada_percentual numeric(6,2)
     generated always as (round((nota_bruta / 10.0) * peso_aplicado_percentual, 2)) stored,
   feedback text,
+  opcao_rotulo_snapshot text,
+  opcao_descricao_snapshot text,
+  opcao_valor_snapshot numeric(5,2),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint itens_avaliados_nota_bruta_check
     check (nota_bruta >= 0 and nota_bruta <= 10),
   constraint itens_avaliados_peso_check
     check (peso_aplicado_percentual > 0 and peso_aplicado_percentual <= 100),
+  constraint itens_avaliados_opcao_valor_snapshot_check
+    check (
+      opcao_valor_snapshot is null
+      or (opcao_valor_snapshot >= 0 and opcao_valor_snapshot <= 10)
+    ),
   constraint itens_avaliados_uk unique (avaliacao_id, criterio_id)
 );
 
 create index if not exists idx_itens_avaliados_criterio_id on public.itens_avaliados (criterio_id);
 create index if not exists idx_itens_avaliados_avaliacao_id on public.itens_avaliados (avaliacao_id);
+create index if not exists idx_itens_avaliados_criterio_modelo_avaliacao_id
+  on public.itens_avaliados (criterio_modelo_avaliacao_id);
+create index if not exists idx_itens_avaliados_opcao_criterio_modelo_avaliacao_id
+  on public.itens_avaliados (opcao_criterio_modelo_avaliacao_id);
+
+alter table public.itens_avaliados
+  add column if not exists criterio_modelo_avaliacao_id uuid references public.criterios_modelo_avaliacao (id) on delete set null;
+
+alter table public.itens_avaliados
+  add column if not exists opcao_criterio_modelo_avaliacao_id uuid references public.opcoes_criterio_modelo_avaliacao (id) on delete set null;
+
+alter table public.itens_avaliados
+  add column if not exists opcao_rotulo_snapshot text;
+
+alter table public.itens_avaliados
+  add column if not exists opcao_descricao_snapshot text;
+
+alter table public.itens_avaliados
+  add column if not exists opcao_valor_snapshot numeric(5,2);
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'itens_avaliados_opcao_valor_snapshot_check'
+  ) then
+    alter table public.itens_avaliados
+      add constraint itens_avaliados_opcao_valor_snapshot_check
+      check (
+        opcao_valor_snapshot is null
+        or (opcao_valor_snapshot >= 0 and opcao_valor_snapshot <= 10)
+      );
+  end if;
+end;
+$$;
 
 create table if not exists public.ausencias (
   id uuid primary key default gen_random_uuid(),
@@ -3220,6 +3447,36 @@ $$;
 drop trigger if exists trg_unidades_touch_updated_at on public.unidades;
 create trigger trg_unidades_touch_updated_at
 before update on public.unidades
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists trg_instituicoes_touch_updated_at on public.instituicoes;
+create trigger trg_instituicoes_touch_updated_at
+before update on public.instituicoes
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists trg_cursos_touch_updated_at on public.cursos;
+create trigger trg_cursos_touch_updated_at
+before update on public.cursos
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists trg_modelos_avaliacao_curso_touch_updated_at on public.modelos_avaliacao_curso;
+create trigger trg_modelos_avaliacao_curso_touch_updated_at
+before update on public.modelos_avaliacao_curso
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists trg_grupos_modelo_avaliacao_touch_updated_at on public.grupos_modelo_avaliacao;
+create trigger trg_grupos_modelo_avaliacao_touch_updated_at
+before update on public.grupos_modelo_avaliacao
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists trg_criterios_modelo_avaliacao_touch_updated_at on public.criterios_modelo_avaliacao;
+create trigger trg_criterios_modelo_avaliacao_touch_updated_at
+before update on public.criterios_modelo_avaliacao
+for each row execute function public.touch_updated_at();
+
+drop trigger if exists trg_opcoes_criterio_modelo_avaliacao_touch_updated_at on public.opcoes_criterio_modelo_avaliacao;
+create trigger trg_opcoes_criterio_modelo_avaliacao_touch_updated_at
+before update on public.opcoes_criterio_modelo_avaliacao
 for each row execute function public.touch_updated_at();
 
 drop trigger if exists trg_usuarios_touch_updated_at on public.usuarios;

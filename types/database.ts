@@ -317,6 +317,7 @@ export interface Database {
           nome: string;
           descricao: string | null;
           versao: number;
+          modalidade: "descritiva" | "rubrica";
           ativo: boolean;
           metadata: Record<string, unknown>;
           created_at: string;
@@ -329,6 +330,7 @@ export interface Database {
           nome: string;
           descricao?: string | null;
           versao?: number;
+          modalidade?: "descritiva" | "rubrica";
           ativo?: boolean;
           metadata?: Record<string, unknown>;
           created_at?: string;
@@ -341,6 +343,7 @@ export interface Database {
           nome?: string;
           descricao?: string | null;
           versao?: number;
+          modalidade?: "descritiva" | "rubrica";
           ativo?: boolean;
           metadata?: Record<string, unknown>;
           created_at?: string;
@@ -427,6 +430,42 @@ export interface Database {
           escala_maxima?: number;
           ativo?: boolean;
           metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      opcoes_criterio_modelo_avaliacao: {
+        Row: {
+          id: string;
+          criterio_modelo_avaliacao_id: string;
+          rotulo: string;
+          descricao: string | null;
+          valor_nota: number;
+          ordem: number;
+          ativo: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          criterio_modelo_avaliacao_id: string;
+          rotulo: string;
+          descricao?: string | null;
+          valor_nota: number;
+          ordem?: number;
+          ativo?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          criterio_modelo_avaliacao_id?: string;
+          rotulo?: string;
+          descricao?: string | null;
+          valor_nota?: number;
+          ordem?: number;
+          ativo?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -1031,6 +1070,7 @@ export interface Database {
           avaliacao_origem_id: string | null;
           avaliacao_raiz_id: string | null;
           status: "rascunho" | "publicado" | "cancelado";
+          modalidade_snapshot: "descritiva" | "rubrica" | null;
           avaliado_em: string;
           created_at: string;
           updated_at: string;
@@ -1048,6 +1088,7 @@ export interface Database {
           avaliacao_origem_id?: string | null;
           avaliacao_raiz_id?: string | null;
           status?: "rascunho" | "publicado" | "cancelado";
+          modalidade_snapshot?: "descritiva" | "rubrica" | null;
           avaliado_em?: string;
           created_at?: string;
           updated_at?: string;
@@ -1065,6 +1106,7 @@ export interface Database {
           avaliacao_origem_id?: string | null;
           avaliacao_raiz_id?: string | null;
           status?: "rascunho" | "publicado" | "cancelado";
+          modalidade_snapshot?: "descritiva" | "rubrica" | null;
           avaliado_em?: string;
           created_at?: string;
           updated_at?: string;
@@ -1076,10 +1118,15 @@ export interface Database {
           id: string;
           avaliacao_id: string;
           criterio_id: string;
+          criterio_modelo_avaliacao_id: string | null;
+          opcao_criterio_modelo_avaliacao_id: string | null;
           nota_bruta: number;
           peso_aplicado_percentual: number;
           nota_ponderada_percentual: number;
           feedback: string | null;
+          opcao_rotulo_snapshot: string | null;
+          opcao_descricao_snapshot: string | null;
+          opcao_valor_snapshot: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -1087,10 +1134,15 @@ export interface Database {
           id?: string;
           avaliacao_id: string;
           criterio_id: string;
+          criterio_modelo_avaliacao_id?: string | null;
+          opcao_criterio_modelo_avaliacao_id?: string | null;
           nota_bruta: number;
           peso_aplicado_percentual: number;
           nota_ponderada_percentual?: number;
           feedback?: string | null;
+          opcao_rotulo_snapshot?: string | null;
+          opcao_descricao_snapshot?: string | null;
+          opcao_valor_snapshot?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1098,10 +1150,15 @@ export interface Database {
           id?: string;
           avaliacao_id?: string;
           criterio_id?: string;
+          criterio_modelo_avaliacao_id?: string | null;
+          opcao_criterio_modelo_avaliacao_id?: string | null;
           nota_bruta?: number;
           peso_aplicado_percentual?: number;
           nota_ponderada_percentual?: number;
           feedback?: string | null;
+          opcao_rotulo_snapshot?: string | null;
+          opcao_descricao_snapshot?: string | null;
+          opcao_valor_snapshot?: number | null;
           created_at?: string;
           updated_at?: string;
         };
