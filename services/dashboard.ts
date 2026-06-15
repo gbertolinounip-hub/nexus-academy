@@ -1,5 +1,9 @@
 ﻿import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
+  loadScopedOperationalGraph,
+  resolveScopedDataAccess
+} from "@/lib/auth/data-scope";
+import {
   buildStudentDashboardData,
   calculateGroupAverage,
   countMissingCriteria
@@ -1645,32 +1649,35 @@ export async function getAuthenticatedCoordinatorDashboard(
   currentUser: SessionUser
 ): Promise<CoordinatorDashboardLoadResult> {
   const supabase = await createSupabaseServerClient();
-  const currentUnitId = currentUser.unitId;
+  const [scope, scopedGraph, coordinatorRowResult] = await Promise.all([
+    resolveScopedDataAccess(currentUser, { supabase }),
+    loadScopedOperationalGraph(currentUser, { supabase }),
+    supabase.from("coordenadores").select("*").eq("usuario_id", currentUser.id).maybeSingle()
+  ]);
+  const currentUnitId = scope.unitIds[0] ?? currentUser.unitId ?? null;
 
-  if (!currentUnitId) {
+  if (
+    scope.scopeKind === "none" ||
+    (!currentUnitId && scope.offerIds.length === 0) ||
+    (scope.restrictToCourse && scopedGraph.semesterRows.length === 0 && scope.offerIds.length === 0)
+  ) {
     return buildCoordinatorEmptyState(
-      "Unidade operacional não identificada",
-      "O coordenador autenticado precisa estar vinculado a uma unidade para visualizar o painel."
+      "Contexto acadêmico não identificado",
+      "O coordenador autenticado precisa estar vinculado a uma oferta, curso ou unidade válida para visualizar o painel."
     );
   }
 
-  const { data: coordinatorRowData, error: coordinatorError } = await supabase
-    .from("coordenadores")
-    .select("*")
-    .eq("usuario_id", currentUser.id)
-    .maybeSingle();
-
-  if (coordinatorError) {
+  if (coordinatorRowResult.error) {
     return buildCoordinatorEmptyState(
       "Não foi possível carregar o cadastro do coordenador",
       formatSupabaseErrorMessage(
         "Houve um problema ao consultar public.coordenadores para esta conta.",
-        coordinatorError
+        coordinatorRowResult.error
       )
     );
   }
 
-  const coordinatorRow = (coordinatorRowData ?? null) as CoordinatorRow | null;
+  const coordinatorRow = (coordinatorRowResult.data ?? null) as CoordinatorRow | null;
 
   if (!coordinatorRow) {
     return buildCoordinatorEmptyState(
@@ -1679,22 +1686,7 @@ export async function getAuthenticatedCoordinatorDashboard(
     );
   }
 
-  const { data: semesterRowsData, error: semesterError } = await supabase
-    .from("semestres")
-    .select("*")
-    .eq("unidade_id", currentUnitId);
-
-  if (semesterError) {
-    return buildCoordinatorEmptyState(
-      "Não foi possível carregar os semestres",
-      formatSupabaseErrorMessage(
-        "Houve um problema ao consultar os semestres necessários para consolidar o painel.",
-        semesterError
-      )
-    );
-  }
-
-  const semesterRows = (semesterRowsData ?? []) as SemesterRow[];
+  const semesterRows = scopedGraph.semesterRows;
   const activeSemester = selectPrimarySemester(semesterRows);
 
   if (!activeSemester) {
@@ -1704,49 +1696,91 @@ export async function getAuthenticatedCoordinatorDashboard(
     );
   }
 
-  const [classRowsResult, blockRowsResult, areaRowsResult, auditRowsResult] =
+  const classRows = scopedGraph.classRows.filter(
+    (classGroup) => classGroup.semestre_id === activeSemester.id
+  );
+
+  if (!classRows.length) {
+    return buildCoordinatorEmptyState(
+      "Nenhuma turma encontrada para o semestre",
+      "O semestre principal foi identificado, mas ainda não há turmas vinculadas para consolidar o painel."
+    );
+  }
+
+  const classIds = classRows.map((classGroup) => classGroup.id);
+  const classIdSet = new Set(classIds);
+  const activeEnrollmentRows = scopedGraph.enrollmentRows.filter(
+    (enrollment) =>
+      classIdSet.has(enrollment.turma_id) && enrollment.status === "ativa"
+  );
+
+  if (!activeEnrollmentRows.length) {
+    return buildCoordinatorEmptyState(
+      "Nenhum aluno ativo no semestre atual",
+      "Os vínculos do semestre existem, mas não há alunos com acesso ativo disponíveis na operação corrente."
+    );
+  }
+
+  const areaIds = [
+    ...new Set(
+      classRows.map((classGroup) => classGroup.area_estagio_id).filter(Boolean)
+    )
+  ] as string[];
+  const [blockRowsResult, areaRowsResult, auditRowsResult, professorLinksResult] =
     await Promise.all([
-    supabase.from("turmas").select("*").eq("semestre_id", activeSemester.id),
-    supabase
-      .from("blocos_estagio")
-      .select("*")
-      .order("ordem", { ascending: true }),
-    supabase
-      .from("areas_estagio")
-      .select("*")
-      .eq("ativa", true)
-      .order("ordem", { ascending: true }),
-    supabase
-      .from("historico_alteracoes")
-      .select("*")
-      .eq("unidade_id", currentUnitId)
-      .in("tabela", [
-        "usuarios",
-        "alunos",
-        "professores",
-        "turmas",
-        "matriculas_turma",
-        "professor_areas_estagio",
-        "avaliacoes",
-        "itens_avaliados",
-        "ausencias",
-        "vinculos_professor_aluno"
-      ])
-      .order("created_at", { ascending: false })
-      .limit(8)
+      supabase
+        .from("blocos_estagio")
+        .select("*")
+        .order("ordem", { ascending: true }),
+      areaIds.length
+        ? supabase
+            .from("areas_estagio")
+            .select("*")
+            .in("id", areaIds)
+            .eq("ativa", true)
+        : Promise.resolve({ data: [], error: null } as const),
+      currentUnitId
+        ? supabase
+            .from("historico_alteracoes")
+            .select("*")
+            .eq("unidade_id", currentUnitId)
+            .in("tabela", [
+              "usuarios",
+              "alunos",
+              "professores",
+              "turmas",
+              "matriculas_turma",
+              "professor_areas_estagio",
+              "avaliacoes",
+              "itens_avaliados",
+              "ausencias",
+              "vinculos_professor_aluno"
+            ])
+            .order("created_at", { ascending: false })
+            .limit(48)
+        : Promise.resolve({ data: [], error: null } as const),
+      activeEnrollmentRows.length
+        ? supabase
+            .from("vinculos_professor_aluno")
+            .select("*")
+            .in(
+              "matricula_turma_id",
+              activeEnrollmentRows.map((enrollment) => enrollment.id)
+            )
+            .eq("ativo", true)
+        : Promise.resolve({ data: [], error: null } as const)
     ]);
 
-  if (classRowsResult.error || blockRowsResult.error || areaRowsResult.error) {
+  if (blockRowsResult.error || areaRowsResult.error || professorLinksResult.error) {
     return buildCoordinatorEmptyState(
       "Não foi possível carregar a visão consolidada",
       formatSupabaseErrorMessage(
-        "Houve um problema ao consultar turmas, áreas ou blocos da coordenação.",
-        classRowsResult.error ?? blockRowsResult.error ?? areaRowsResult.error
+        "Houve um problema ao consultar turmas, áreas, blocos ou vínculos da coordenação.",
+        blockRowsResult.error ?? areaRowsResult.error ?? professorLinksResult.error
       )
     );
   }
 
-  const classRows = (classRowsResult.data ?? []) as ClassRow[];
   const blockRows = (blockRowsResult.data ?? []) as BlockRow[];
   const areaRows = (areaRowsResult.data ?? []) as AreaRow[];
   if (auditRowsResult.error) {
@@ -1758,66 +1792,21 @@ export async function getAuthenticatedCoordinatorDashboard(
     );
   }
 
-  const auditRows = auditRowsResult.error
-    ? []
-    : ((auditRowsResult.data ?? []) as AuditHistoryRow[]);
-  const auditUserIds = [
-    ...new Set(auditRows.map((entry) => entry.usuario_id).filter(Boolean))
-  ] as string[];
-
-  if (!classRows.length) {
-    return buildCoordinatorEmptyState(
-      "Nenhuma turma encontrada para o semestre",
-      "O semestre principal foi identificado, mas ainda não há turmas vinculadas para consolidar o painel."
-    );
-  }
-
-  const classIds = classRows.map((classGroup) => classGroup.id);
-  const { data: enrollmentRowsData, error: enrollmentError } = await supabase
-    .from("matriculas_turma")
-    .select("*")
-    .in("turma_id", classIds);
-
-  if (enrollmentError) {
-    return buildCoordinatorEmptyState(
-      "Não foi possível carregar as matrículas",
-      "As turmas do semestre foram encontradas, mas as matrículas não puderam ser consultadas."
-    );
-  }
-
-  const enrollmentRows = (enrollmentRowsData ?? []) as EnrollmentRow[];
-  const activeEnrollmentRows = enrollmentRows.filter(
-    (enrollment) => enrollment.status === "ativa"
-  );
   const studentIds = [...new Set(activeEnrollmentRows.map((row) => row.aluno_id))];
+  const [studentRowsResult, studentUsersResult] = await Promise.all([
+    studentIds.length
+      ? supabase.from("alunos").select("*").in("usuario_id", studentIds)
+      : Promise.resolve({ data: [], error: null } as const),
+    studentIds.length
+      ? supabase
+          .from("usuarios")
+          .select("*")
+          .in("id", studentIds)
+          .eq("ativo", true)
+      : Promise.resolve({ data: [], error: null } as const)
+  ]);
 
-  const [studentRowsResult, studentUsersResult, professorLinksResult] =
-    await Promise.all([
-      studentIds.length
-        ? supabase.from("alunos").select("*").in("usuario_id", studentIds)
-        : Promise.resolve({ data: [], error: null }),
-      studentIds.length
-        ? supabase
-            .from("usuarios")
-            .select("*")
-            .in("id", studentIds)
-            .eq("unidade_id", currentUnitId)
-            .eq("ativo", true)
-        : Promise.resolve({ data: [], error: null }),
-      activeEnrollmentRows.length
-        ? supabase
-            .from("vinculos_professor_aluno")
-            .select("*")
-            .in("matricula_turma_id", activeEnrollmentRows.map((enrollment) => enrollment.id))
-            .eq("ativo", true)
-        : Promise.resolve({ data: [], error: null })
-    ]);
-
-  if (
-    studentRowsResult.error ||
-    studentUsersResult.error ||
-    professorLinksResult.error
-  ) {
+  if (studentRowsResult.error || studentUsersResult.error) {
     return buildCoordinatorEmptyState(
       "Não foi possível consolidar alunos e vínculos",
       "Houve um problema ao consultar os alunos matriculados ou os vínculos docentes deste semestre."
@@ -1847,42 +1836,27 @@ export async function getAuthenticatedCoordinatorDashboard(
     (link) => visibleEnrollmentIdSet.has(link.matricula_turma_id)
   );
   const professorIds = [...new Set(professorLinks.map((link) => link.professor_id))];
-
-  const [
-    professorUsersResult,
-    evaluationRowsResult,
-    absenceRowsResult,
-    auditUsersResult
-  ] = await Promise.all([
-    professorIds.length
-      ? supabase
-          .from("usuarios")
-          .select("*")
-          .in("id", professorIds)
-          .eq("unidade_id", currentUnitId)
-      : Promise.resolve({ data: [], error: null }),
-    enrollmentIds.length
-      ? supabase
-          .from("avaliacoes")
-          .select("*")
-          .in("matricula_turma_id", enrollmentIds)
-          .eq("status", "publicado")
-          .order("avaliado_em", { ascending: true })
-      : Promise.resolve({ data: [], error: null }),
-    enrollmentIds.length
-      ? supabase
-          .from("ausencias")
-          .select("*")
-          .in("matricula_turma_id", enrollmentIds)
-          .order("data_ausencia", { ascending: true })
-      : Promise.resolve({ data: [], error: null }),
-    auditUserIds.length
-      ? supabase
-          .from("usuarios")
-          .select("*")
-          .in("id", auditUserIds)
-      : Promise.resolve({ data: [], error: null })
-  ]);
+  const [professorUsersResult, evaluationRowsResult, absenceRowsResult] =
+    await Promise.all([
+      professorIds.length
+        ? supabase.from("usuarios").select("*").in("id", professorIds)
+        : Promise.resolve({ data: [], error: null } as const),
+      enrollmentIds.length
+        ? supabase
+            .from("avaliacoes")
+            .select("*")
+            .in("matricula_turma_id", enrollmentIds)
+            .eq("status", "publicado")
+            .order("avaliado_em", { ascending: true })
+        : Promise.resolve({ data: [], error: null } as const),
+      enrollmentIds.length
+        ? supabase
+            .from("ausencias")
+            .select("*")
+            .in("matricula_turma_id", enrollmentIds)
+            .order("data_ausencia", { ascending: true })
+        : Promise.resolve({ data: [], error: null } as const)
+    ]);
 
   if (professorUsersResult.error || evaluationRowsResult.error || absenceRowsResult.error) {
     return buildCoordinatorEmptyState(
@@ -1899,27 +1873,14 @@ export async function getAuthenticatedCoordinatorDashboard(
   const professorUsers = (professorUsersResult.data ?? []) as UserRow[];
   const evaluationRows = (evaluationRowsResult.data ?? []) as EvaluationRow[];
   const absenceRows = (absenceRowsResult.data ?? []) as AbsenceRow[];
-  if (auditUsersResult.error) {
-    console.error(
-      formatSupabaseErrorMessage(
-        "A consulta dos atores do histórico recente da coordenação falhou.",
-        auditUsersResult.error
-      )
-    );
-  }
-
-  const auditUsers = auditUsersResult.error
-    ? []
-    : ((auditUsersResult.data ?? []) as UserRow[]);
   const evaluationIds = [...new Set(evaluationRows.map((row) => row.id))];
-
   const [evaluationItemsResult, criterionRowsResult] = await Promise.all([
     evaluationIds.length
       ? supabase
           .from("itens_avaliados")
           .select("*")
           .in("avaliacao_id", evaluationIds)
-      : Promise.resolve({ data: [], error: null }),
+      : Promise.resolve({ data: [], error: null } as const),
     supabase.from("criterios_avaliacao").select("*").eq("ativo", true)
   ]);
 
@@ -1932,10 +1893,77 @@ export async function getAuthenticatedCoordinatorDashboard(
 
   const evaluationItemRows = (evaluationItemsResult.data ?? []) as EvaluationItemRow[];
   const criterionRows = (criterionRowsResult.data ?? []) as CriterionRow[];
+  const auditRows = auditRowsResult.error
+    ? []
+    : ((auditRowsResult.data ?? []) as AuditHistoryRow[]);
+  const visibleStudentIds = new Set(
+    visibleEnrollmentRows.map((enrollment) => enrollment.aluno_id)
+  );
+  const visibleProfessorIds = new Set(professorIds);
+  const visibleEvaluationIds = new Set(evaluationIds);
+  const visibleEvaluationItemIds = new Set(evaluationItemRows.map((row) => row.id));
+  const filteredAuditRows = auditRows
+    .filter((entry) => {
+      if (entry.usuario_id) {
+        if (
+          visibleStudentIds.has(entry.usuario_id) ||
+          visibleProfessorIds.has(entry.usuario_id) ||
+          entry.usuario_id === currentUser.id
+        ) {
+          return true;
+        }
+      }
+
+      if (!entry.registro_id) {
+        return false;
+      }
+
+      switch (entry.tabela) {
+        case "usuarios":
+          return (
+            visibleStudentIds.has(entry.registro_id) ||
+            visibleProfessorIds.has(entry.registro_id) ||
+            entry.registro_id === currentUser.id
+          );
+        case "alunos":
+          return visibleStudentIds.has(entry.registro_id);
+        case "professores":
+          return visibleProfessorIds.has(entry.registro_id);
+        case "turmas":
+          return classIdSet.has(entry.registro_id);
+        case "matriculas_turma":
+          return visibleEnrollmentIdSet.has(entry.registro_id);
+        case "avaliacoes":
+          return visibleEvaluationIds.has(entry.registro_id);
+        case "itens_avaliados":
+          return visibleEvaluationItemIds.has(entry.registro_id);
+        default:
+          return false;
+      }
+    })
+    .slice(0, 8);
+  const auditUserIds = [
+    ...new Set(filteredAuditRows.map((entry) => entry.usuario_id).filter(Boolean))
+  ] as string[];
+  const auditUsersResult = auditUserIds.length
+    ? await supabase.from("usuarios").select("*").in("id", auditUserIds)
+    : { data: [], error: null };
+
+  if (auditUsersResult.error) {
+    console.error(
+      formatSupabaseErrorMessage(
+        "A consulta dos atores do histórico recente da coordenação falhou.",
+        auditUsersResult.error
+      )
+    );
+  }
+
+  const auditUsers = auditUsersResult.error
+    ? []
+    : ((auditUsersResult.data ?? []) as UserRow[]);
   const studentRowMap = new Map(studentRows.map((row) => [row.usuario_id, row]));
   const studentUserMap = new Map(studentUsers.map((row) => [row.id, row]));
   const classMap = new Map(classRows.map((row) => [row.id, row]));
-  const areaMap = new Map(areaRows.map((área) => [área.id, área]));
   const blockMap = new Map(blockRows.map((block) => [block.id, block]));
   const professorUserMap = new Map(professorUsers.map((row) => [row.id, row]));
 
@@ -2012,7 +2040,7 @@ export async function getAuthenticatedCoordinatorDashboard(
   const areaMetrics = areaRows
     .map((area) => {
       const block = blockMap.get(area.bloco_id);
-      const areaEnrollments = activeEnrollmentRows.filter((enrollment) => {
+      const areaEnrollments = visibleEnrollmentRows.filter((enrollment) => {
         const classGroup = classMap.get(enrollment.turma_id);
 
         return classGroup?.area_estagio_id === area.id;
@@ -2068,7 +2096,7 @@ export async function getAuthenticatedCoordinatorDashboard(
         endsAt: activeSemester.data_fim
       },
       semesterStatus: activeSemester.status,
-      totalStudents: new Set(activeEnrollmentRows.map((row) => row.aluno_id)).size,
+      totalStudents: new Set(visibleEnrollmentRows.map((row) => row.aluno_id)).size,
       totalProfessors: professorIds.length,
       averageFinalPercentage: Math.round(averageFinalPercentage * 100) / 100,
       totalUnjustifiedAbsenceHours:
@@ -2082,7 +2110,7 @@ export async function getAuthenticatedCoordinatorDashboard(
         professorCount: area.professorCount
       })),
       criticalStudents: linkedStudents.filter((student) => student.status !== "bem"),
-      recentAuditEntries: buildAuditEntriesFromRows(auditRows, auditUsers)
+      recentAuditEntries: buildAuditEntriesFromRows(filteredAuditRows, auditUsers)
     },
     emptyState: null
   };

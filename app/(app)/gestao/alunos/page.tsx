@@ -729,8 +729,10 @@ export default async function AcademicManagementPage(props: {
             ) : (
               <p className="empty-message">
                 {isCourseManager && pageData.selectedUnitId
-                  ? "Nenhuma secretária foi encontrada para a unidade selecionada."
-                  : "Ainda não há secretárias cadastradas nesta unidade."}
+                  ? "Nenhuma secretaria foi encontrada para a unidade selecionada neste curso."
+                  : isCourseManager
+                    ? "Ainda não há secretarias vinculadas a este curso nas unidades visíveis."
+                    : "Ainda não há secretárias cadastradas nesta unidade."}
               </p>
             )}
           </SectionCard>

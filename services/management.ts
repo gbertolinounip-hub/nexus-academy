@@ -50,7 +50,7 @@ async function resolveSafeLegacyProfessorUnitIds(input: {
     return [] as UnitRow["id"][];
   }
 
-  if (input.scope.scopeKind !== "course_manager") {
+  if (input.scope.usesLegacyUnitFallback) {
     return requestedUnitIds;
   }
 
@@ -60,8 +60,9 @@ async function resolveSafeLegacyProfessorUnitIds(input: {
 
   const { data: scopedOfferData, error: scopedOfferError } = await input.supabase
     .from("ofertas_curso_unidade")
-    .select("unidade_id, curso_id")
+    .select("id, unidade_id, curso_id, ativo")
     .eq("instituicao_id", input.scope.instituicaoId)
+    .eq("ativo", true)
     .in("unidade_id", requestedUnitIds);
 
   if (scopedOfferError) {
@@ -70,19 +71,37 @@ async function resolveSafeLegacyProfessorUnitIds(input: {
     );
   }
 
-  const courseIdsByUnit = new Map<UnitRow["id"], Set<string>>();
+  const activeOffersByUnit = new Map<
+    UnitRow["id"],
+    Array<Pick<OfferRow, "id" | "unidade_id" | "curso_id" | "ativo">>
+  >();
 
   for (const offerRow of (scopedOfferData ?? []) as Array<
-    Pick<OfferRow, "unidade_id" | "curso_id">
+    Pick<OfferRow, "id" | "unidade_id" | "curso_id" | "ativo">
   >) {
-    const unitCourseIds = courseIdsByUnit.get(offerRow.unidade_id) ?? new Set<string>();
-    unitCourseIds.add(offerRow.curso_id);
-    courseIdsByUnit.set(offerRow.unidade_id, unitCourseIds);
+    const currentOffers = activeOffersByUnit.get(offerRow.unidade_id) ?? [];
+    currentOffers.push(offerRow);
+    activeOffersByUnit.set(offerRow.unidade_id, currentOffers);
   }
 
   return requestedUnitIds.filter((unitId) => {
-    const visibleCourseIds = courseIdsByUnit.get(unitId) ?? new Set<string>();
-    return visibleCourseIds.size === 1 && visibleCourseIds.has(input.scope.cursoId!);
+    const activeOffers = activeOffersByUnit.get(unitId) ?? [];
+
+    if (activeOffers.length !== 1) {
+      return false;
+    }
+
+    const [singleOffer] = activeOffers;
+
+    if (singleOffer.curso_id !== input.scope.cursoId) {
+      return false;
+    }
+
+    if (input.scope.scopeKind === "course_manager") {
+      return true;
+    }
+
+    return input.scope.offerIds.includes(singleOffer.id);
   });
 }
 
@@ -244,6 +263,53 @@ async function loadScopedProfessorRoster(input: {
   } satisfies ScopedProfessorRoster;
 }
 
+async function resolveSafeLegacySecretaryUnitIds(input: {
+  supabase: SupabaseServerClient;
+  scope: ResolvedSessionDataScope;
+  selectedUnitId?: UnitRow["id"] | null;
+}) {
+  const requestedUnitIds = input.selectedUnitId
+    ? [input.selectedUnitId]
+    : input.scope.unitIds;
+
+  if (!requestedUnitIds.length || !input.scope.restrictToCourse) {
+    return [] as UnitRow["id"][];
+  }
+
+  if (!input.scope.instituicaoId || !input.scope.cursoId) {
+    return [] as UnitRow["id"][];
+  }
+
+  const { data: activeOfferData, error: activeOfferError } = await input.supabase
+    .from("ofertas_curso_unidade")
+    .select("id, unidade_id, curso_id")
+    .eq("instituicao_id", input.scope.instituicaoId)
+    .eq("ativo", true)
+    .in("unidade_id", requestedUnitIds);
+
+  if (activeOfferError) {
+    throw new Error(
+      "Houve um problema ao validar as unidades seguras para fallback legado das secretarias."
+    );
+  }
+
+  const activeOffersByUnit = new Map<UnitRow["id"], Array<Pick<OfferRow, "id" | "unidade_id" | "curso_id">>>();
+
+  for (const offerRow of (activeOfferData ?? []) as Array<
+    Pick<OfferRow, "id" | "unidade_id" | "curso_id">
+  >) {
+    const currentOffers = activeOffersByUnit.get(offerRow.unidade_id) ?? [];
+    currentOffers.push(offerRow);
+    activeOffersByUnit.set(offerRow.unidade_id, currentOffers);
+  }
+
+  return requestedUnitIds.filter((unitId) => {
+    const activeOffers = activeOffersByUnit.get(unitId) ?? [];
+
+    return activeOffers.length === 1 && activeOffers[0]?.curso_id === input.scope.cursoId;
+  });
+}
+
 export interface ManagementSemesterOption {
   id: string;
   label: string;
@@ -329,6 +395,165 @@ export interface ManagementSecretaryListItem {
   unitId: string | null;
   unitName: string | null;
   isActive: boolean;
+}
+
+async function loadScopedSecretaryList(input: {
+  supabase: SupabaseServerClient;
+  scope: ResolvedSessionDataScope;
+  secretaryProfileId: ProfileRow["id"] | undefined;
+  selectedUnitId?: UnitRow["id"] | null;
+  offersById: Map<string, OfferRow>;
+  unitsById: Map<string, UnitRow>;
+}) {
+  if (!input.secretaryProfileId || !input.scope.restrictToCourse) {
+    return [] as ManagementSecretaryListItem[];
+  }
+
+  const safeLegacyUnitIds = await resolveSafeLegacySecretaryUnitIds({
+    supabase: input.supabase,
+    scope: input.scope,
+    selectedUnitId: input.selectedUnitId
+  });
+
+  const [contextRowsResult, fallbackUsersResult] = await Promise.all([
+    input.scope.instituicaoId && input.scope.cursoId
+      ? input.supabase
+          .from("usuarios_papeis_contexto")
+          .select("*")
+          .eq("perfil_id", input.secretaryProfileId)
+          .eq("instituicao_id", input.scope.instituicaoId)
+          .eq("curso_id", input.scope.cursoId)
+          .eq("ativo", true)
+      : Promise.resolve({ data: [], error: null }),
+    safeLegacyUnitIds.length
+      ? input.supabase
+          .from("usuarios")
+          .select("*")
+          .eq("perfil_id", input.secretaryProfileId)
+          .in("unidade_id", safeLegacyUnitIds)
+      : Promise.resolve({ data: [], error: null })
+  ]);
+
+  if (contextRowsResult.error || fallbackUsersResult.error) {
+    throw new Error(
+      "Houve um problema ao consultar os vínculos institucionais das secretarias."
+    );
+  }
+
+  const rawContextRows = (contextRowsResult.data ?? []) as UserContextRow[];
+  const contextUserIds = uniqueStringValues(rawContextRows.map((contextRow) => contextRow.usuario_id));
+  const explicitUsersResult = contextUserIds.length
+    ? await input.supabase.from("usuarios").select("*").in("id", contextUserIds)
+    : { data: [], error: null };
+
+  if (explicitUsersResult.error) {
+    throw new Error(
+      "Houve um problema ao consultar as secretarias ligadas aos contextos institucionais do curso."
+    );
+  }
+
+  const explicitUsers = (explicitUsersResult.data ?? []) as UserRow[];
+  const usersById = new Map(explicitUsers.map((user) => [user.id, user]));
+  const contextRows = rawContextRows.filter((contextRow) => {
+    if (contextRow.oferta_curso_unidade_id) {
+      if (!input.scope.offerIds.includes(contextRow.oferta_curso_unidade_id)) {
+        return false;
+      }
+
+      if (input.selectedUnitId) {
+        const offerRow = input.offersById.get(contextRow.oferta_curso_unidade_id) ?? null;
+        return offerRow?.unidade_id === input.selectedUnitId;
+      }
+
+      return true;
+    }
+
+    const userRow = usersById.get(contextRow.usuario_id) ?? null;
+    const userUnitId = userRow?.unidade_id ?? null;
+
+    if (!userUnitId || !safeLegacyUnitIds.includes(userUnitId)) {
+      return false;
+    }
+
+    return !input.selectedUnitId || userUnitId === input.selectedUnitId;
+  });
+  const contextRowsByUserId = new Map<string, UserContextRow[]>();
+
+  for (const contextRow of contextRows) {
+    const currentContexts = contextRowsByUserId.get(contextRow.usuario_id) ?? [];
+    currentContexts.push(contextRow);
+    contextRowsByUserId.set(contextRow.usuario_id, currentContexts);
+  }
+
+  const matchingContextUserIds = uniqueStringValues(contextRows.map((contextRow) => contextRow.usuario_id));
+  const fallbackUsers = (fallbackUsersResult.data ?? []) as UserRow[];
+  const mergedSecretaryEntries = new Map<string, ManagementSecretaryListItem>();
+
+  for (const userId of matchingContextUserIds) {
+    const userRow = usersById.get(userId) ?? null;
+
+    if (!userRow) {
+      continue;
+    }
+
+    const userContexts = contextRowsByUserId.get(userId) ?? [];
+    const explicitOfferIds = uniqueStringValues(
+      userContexts.map((contextRow) => contextRow.oferta_curso_unidade_id)
+    );
+    const explicitUnitIds = uniqueStringValues(
+      explicitOfferIds.map(
+        (offerId) => input.offersById.get(offerId)?.unidade_id ?? null
+      )
+    );
+    const fallbackUnitId =
+      userRow.unidade_id && safeLegacyUnitIds.includes(userRow.unidade_id)
+        ? userRow.unidade_id
+        : null;
+    const unitIds = uniqueStringValues([
+      ...explicitUnitIds,
+      fallbackUnitId
+    ]);
+    const resolvedUnitId =
+      input.selectedUnitId ??
+      (unitIds.length === 1 ? unitIds[0] : fallbackUnitId ?? unitIds[0] ?? null);
+    const resolvedUnitName =
+      unitIds.length > 1
+        ? unitIds
+            .map((unitId) => input.unitsById.get(unitId)?.nome)
+            .filter(Boolean)
+            .join(", ")
+        : resolvedUnitId
+          ? input.unitsById.get(resolvedUnitId)?.nome ?? null
+          : null;
+
+    mergedSecretaryEntries.set(userRow.id, {
+      id: userRow.id,
+      name: userRow.nome_completo,
+      email: userRow.email,
+      unitId: resolvedUnitId,
+      unitName: resolvedUnitName,
+      isActive: userRow.ativo
+    });
+  }
+
+  for (const userRow of fallbackUsers) {
+    if (mergedSecretaryEntries.has(userRow.id)) {
+      continue;
+    }
+
+    mergedSecretaryEntries.set(userRow.id, {
+      id: userRow.id,
+      name: userRow.nome_completo,
+      email: userRow.email,
+      unitId: userRow.unidade_id ?? null,
+      unitName: userRow.unidade_id ? input.unitsById.get(userRow.unidade_id)?.nome ?? null : null,
+      isActive: userRow.ativo
+    });
+  }
+
+  return [...mergedSecretaryEntries.values()].sort((left, right) =>
+    left.name.localeCompare(right.name, "pt-BR")
+  );
 }
 
 export interface ManagementPageData {
@@ -435,6 +660,42 @@ function sortSemesters(semesters: SemesterRow[]) {
 
 function getRequiredManagementUnitId(currentUser: SessionUser) {
   return currentUser.unitId ?? null;
+}
+
+function resolveEnrollmentOfferId(input: {
+  enrollment: EnrollmentRow;
+  classMap: Map<string, ClassRow>;
+  semesterMap: Map<string, SemesterRow>;
+}) {
+  const classGroup = input.classMap.get(input.enrollment.turma_id) ?? null;
+  const semester = classGroup
+    ? input.semesterMap.get(classGroup.semestre_id) ?? null
+    : null;
+
+  return (
+    input.enrollment.oferta_curso_unidade_id ??
+    classGroup?.oferta_curso_unidade_id ??
+    semester?.oferta_curso_unidade_id ??
+    null
+  );
+}
+
+function resolveStudentScopedOfferIds(input: {
+  student: StudentRow;
+  enrollments: EnrollmentRow[];
+  classMap: Map<string, ClassRow>;
+  semesterMap: Map<string, SemesterRow>;
+}) {
+  return uniqueStringValues([
+    input.student.oferta_curso_unidade_id,
+    ...input.enrollments.map((enrollment) =>
+      resolveEnrollmentOfferId({
+        enrollment,
+        classMap: input.classMap,
+        semesterMap: input.semesterMap
+      })
+    )
+  ]);
 }
 
 export async function getCoordinatorManagementPageData(
@@ -557,32 +818,21 @@ export async function getCoordinatorManagementPageData(
     const studentRowsByEnrollmentPromise = enrollmentStudentIds.length
       ? supabase.from("alunos").select("*").in("usuario_id", enrollmentStudentIds)
       : Promise.resolve({ data: [], error: null });
-    const secretariesResult =
-      secretaryProfileId && scope.unitIds.length
-        ? supabase
-            .from("usuarios")
-            .select("*")
-            .eq("perfil_id", secretaryProfileId)
-            .in("unidade_id", selectedUnitId ? [selectedUnitId] : scope.unitIds)
-        : Promise.resolve({ data: [], error: null });
 
     const [
       studentRowsByCourseResult,
       studentRowsByOfferResult,
-      studentRowsByEnrollmentResult,
-      secretariesUsersResult
+      studentRowsByEnrollmentResult
     ] = await Promise.all([
       studentRowsByCoursePromise,
       studentRowsByOfferPromise,
-      studentRowsByEnrollmentPromise,
-      secretariesResult
+      studentRowsByEnrollmentPromise
     ]);
 
     if (
       studentRowsByCourseResult.error ||
       studentRowsByOfferResult.error ||
-      studentRowsByEnrollmentResult.error ||
-      secretariesUsersResult.error
+      studentRowsByEnrollmentResult.error
     ) {
       return buildEmptyState(
         "Não foi possível carregar a gestao academica",
@@ -616,16 +866,24 @@ export async function getCoordinatorManagementPageData(
     }
 
     studentUsers = (studentUsersResult.data ?? []) as UserRow[];
-    secretaries = ((secretariesUsersResult.data ?? []) as UserRow[])
-      .map((user) => ({
-        id: user.id,
-        name: user.nome_completo,
-        email: user.email,
-        unitId: user.unidade_id ?? null,
-        unitName: user.unidade_id ? unitsById.get(user.unidade_id)?.nome ?? null : null,
-        isActive: user.ativo
-      }))
-      .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+
+    try {
+      secretaries = await loadScopedSecretaryList({
+        supabase,
+        scope,
+        secretaryProfileId,
+        selectedUnitId,
+        offersById,
+        unitsById
+      });
+    } catch (error) {
+      return buildEmptyState(
+        "Não foi possível carregar a gestao academica",
+        error instanceof Error
+          ? error.message
+          : "Houve um problema ao consultar as secretarias visíveis no contexto atual."
+      );
+    }
   } else {
     const resolvedCurrentUnitId = getRequiredManagementUnitId(currentUser);
 
@@ -848,8 +1106,18 @@ export async function getCoordinatorManagementPageData(
         !selectedUnitId ||
         primaryUnitId === selectedUnitId ||
         visibleAssignments.length > 0;
+      const visibleOfferIds = resolveStudentScopedOfferIds({
+        student,
+        enrollments: enrollmentRows.filter((enrollment) => enrollment.aluno_id === user.id),
+        classMap,
+        semesterMap
+      });
+      const matchesVisibleOfferScope =
+        scope.offerIds.length === 0 ||
+        visibleOfferIds.some((offerId) => scope.offerIds.includes(offerId)) ||
+        (visibleOfferIds.length === 0 && scope.usesLegacyUnitFallback);
 
-      if (!matchesSelectedUnit) {
+      if (!matchesSelectedUnit || !matchesVisibleOfferScope) {
         return null;
       }
 
@@ -1003,25 +1271,6 @@ export async function getStudentManagementDetailData(
     };
   }
 
-  const canAccessStudent =
-    scope.restrictToCourse
-      ? studentRow.curso_id === scope.cursoId &&
-        (scope.scopeKind === "course_manager" ||
-          scope.unitIds.length === 0 ||
-          scope.unitIds.includes(studentRow.unidade_id ?? ""))
-      : studentUser.unidade_id === getRequiredManagementUnitId(currentUser);
-
-  if (!canAccessStudent) {
-    return {
-      studentData: null,
-      emptyState: {
-        title: "Aluno não encontrado",
-        description:
-          "O cadastro solicitado não pertence ao contexto institucional ativo."
-      }
-    };
-  }
-
   const semesterRows = sortSemesters(scopedGraph.semesterRows);
   const blockRows = (blockRowsResult.data ?? []) as BlockRow[];
   const profileRows = (profileRowsResult.data ?? []) as ProfileRow[];
@@ -1049,6 +1298,50 @@ export async function getStudentManagementDetailData(
   const enrollmentRows = scopedGraph.enrollmentRows.filter(
     (enrollment) => enrollment.aluno_id === studentId && visibleClassIds.has(enrollment.turma_id)
   );
+  const classMapForAccess = new Map(
+    visibleClassRows.map((classGroup) => [classGroup.id, classGroup])
+  );
+  const semesterMapForAccess = new Map(
+    semesterRows.map((semester) => [semester.id, semester])
+  );
+  const canAccessStudent =
+    scope.restrictToCourse
+      ? (() => {
+          if (studentRow.curso_id !== scope.cursoId) {
+            return false;
+          }
+
+          const studentOfferIds = resolveStudentScopedOfferIds({
+            student: studentRow,
+            enrollments: enrollmentRows,
+            classMap: classMapForAccess,
+            semesterMap: semesterMapForAccess
+          });
+
+          if (scope.offerIds.length > 0) {
+            return (
+              studentOfferIds.some((offerId) => scope.offerIds.includes(offerId)) ||
+              (studentOfferIds.length === 0 &&
+                scope.usesLegacyUnitFallback &&
+                scope.unitIds.includes(studentRow.unidade_id ?? ""))
+            );
+          }
+
+          return scope.unitIds.length === 0 || scope.unitIds.includes(studentRow.unidade_id ?? "");
+        })()
+      : studentUser.unidade_id === getRequiredManagementUnitId(currentUser);
+
+  if (!canAccessStudent) {
+    return {
+      studentData: null,
+      emptyState: {
+        title: "Aluno não encontrado",
+        description:
+          "O cadastro solicitado não pertence ao contexto institucional ativo."
+      }
+    };
+  }
+
   const professorLinksResult = enrollmentRows.length
     ? await supabase
         .from("vinculos_professor_aluno")
