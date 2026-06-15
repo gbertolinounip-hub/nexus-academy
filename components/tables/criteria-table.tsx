@@ -23,7 +23,7 @@ function renderCriterionNarrative(
       {criterion.latestRubricOptionLabel ? (
         <div className="criteria-feedback-section">
           <span className="criteria-justification-label">
-            Opcao selecionada pelo supervisor:
+            Consideracao do supervisor:
           </span>
           <span className="criteria-justification-text">
             {criterion.latestRubricOptionLabel}
