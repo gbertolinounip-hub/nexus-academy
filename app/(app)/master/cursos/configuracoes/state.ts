@@ -54,6 +54,7 @@ export interface CourseConfigurationModelFormValues {
   model_id: string;
   nome: string;
   descricao: string;
+  modalidade: "descritiva" | "rubrica" | "";
   ativo: string;
 }
 

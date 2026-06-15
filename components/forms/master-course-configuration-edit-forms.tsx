@@ -38,6 +38,7 @@ import {
 } from "@/app/(app)/master/cursos/configuracoes/state";
 import type {
   CourseConfigurationCriterionEntry,
+  CourseConfigurationCriterionOptionEntry,
   CourseConfigurationDocumentTypeOption,
   CourseConfigurationGroupEntry,
   CourseConfigurationModelEntry,
@@ -101,8 +102,44 @@ function buildModelDraft(model: CourseConfigurationModelEntry): CourseConfigurat
     model_id: model.id,
     nome: model.name,
     descricao: model.description ?? "",
+    modalidade: model.modality,
     ativo: model.isActive ? "true" : "false"
   };
+}
+
+function getModelModalityLabel(modality: CourseConfigurationModelEntry["modality"]) {
+  return modality === "rubrica" ? "Avaliacao por rubrica" : "Avaliacao descritiva";
+}
+
+function renderRubricOptionsSummary(options: CourseConfigurationCriterionOptionEntry[]) {
+  if (!options.length) {
+    return (
+      <div className="form-notice form-notice-error">
+        Nenhuma opcao de rubrica cadastrada para este criterio ainda.
+      </div>
+    );
+  }
+
+  return (
+    <div className="stack">
+      {options.map((option) => (
+        <div key={option.id} className="management-block-card">
+          <div className="management-block-header">
+            <div>
+              <strong>{option.label}</strong>
+              <p className="field-help">
+                Ordem {option.order} · Nota automatica {option.scoreValue.toFixed(2)}
+              </p>
+            </div>
+            <span className={`status-pill ${option.isActive ? "status-ativo" : "status-inativo"}`}>
+              {option.isActive ? "Ativa" : "Inativa"}
+            </span>
+          </div>
+          {option.description ? <p className="field-help">{option.description}</p> : null}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function buildGroupDraft(group: CourseConfigurationGroupEntry): CourseConfigurationGroupFormValues {
@@ -236,6 +273,7 @@ export function MasterCourseConfigurationModelForm({
       <div className="management-tag-list">
         <span className="badge badge-muted">Codigo fixo: {model.code}</span>
         <span className="badge badge-muted">Versao fixa: {model.version}</span>
+        <span className="badge badge-muted">{getModelModalityLabel(model.modality)}</span>
       </div>
 
       <div className="form-grid">
@@ -252,6 +290,26 @@ export function MasterCourseConfigurationModelForm({
             }}
           />
           {fieldErrors.nome ? <span className="field-error">{fieldErrors.nome}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "modalidade")}>
+          <span>Modalidade</span>
+          <select
+            className={getInputClassName(fieldErrors, "modalidade")}
+            name="modalidade"
+            value={draft.modalidade}
+            onChange={(event) => {
+              const value = event.currentTarget.value as "descritiva" | "rubrica";
+
+              setDraft((currentDraft) => ({ ...currentDraft, modalidade: value }));
+            }}
+          >
+            <option value="descritiva">Avaliacao descritiva</option>
+            <option value="rubrica">Avaliacao por rubrica</option>
+          </select>
+          {fieldErrors.modalidade ? (
+            <span className="field-error">{fieldErrors.modalidade}</span>
+          ) : null}
         </label>
 
         <label className={getFieldClassName(fieldErrors, "ativo")}>
@@ -835,6 +893,9 @@ export function MasterCourseConfigurationCriterionForm({
         <div className="management-tag-list">
           <span className="badge badge-muted">Codigo fixo: {criterion.code}</span>
           <span className="badge badge-muted">Grupo fixo: {criterion.groupName}</span>
+          <span className="badge badge-muted">
+            {getModelModalityLabel(criterion.modelModality)}
+          </span>
         </div>
 
         <div className="form-grid">
@@ -964,6 +1025,20 @@ export function MasterCourseConfigurationCriterionForm({
           </button>
         </div>
       </form>
+      {criterion.modelModality === "rubrica" ? (
+        <div className="form-stack master-course-configuration-edit-form">
+          <div className="management-block-header">
+            <div>
+              <h6>Opcoes da rubrica</h6>
+              <p className="field-help">
+                As opcoes existentes ja sao carregadas no runtime. O cadastro completo dessas
+                opcoes entra na proxima subetapa.
+              </p>
+            </div>
+          </div>
+          {renderRubricOptionsSummary(criterion.rubricOptions)}
+        </div>
+      ) : null}
       <form
         action={deleteFormAction}
         className="actions-row"

@@ -8,6 +8,7 @@ export interface EvaluationActionFormValues {
   intent: "rascunho" | "publicado" | "";
   criterionScores: Record<string, string>;
   criterionFeedbacks: Record<string, string>;
+  criterionOptionSelections: Record<string, string>;
 }
 
 export interface EvaluationActionState {
@@ -31,6 +32,7 @@ export const initialEvaluationActionState: EvaluationActionState = {
     observacoes: "",
     intent: "",
     criterionScores: {},
-    criterionFeedbacks: {}
+    criterionFeedbacks: {},
+    criterionOptionSelections: {}
   }
 };

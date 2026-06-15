@@ -2930,6 +2930,8 @@ create or replace function public.criar_avaliacao_com_itens(
   p_observacoes text,
   p_status text,
   p_itens jsonb,
+  p_modelo_avaliacao_curso_id uuid default null,
+  p_modalidade_snapshot text default null,
   p_avaliado_em timestamptz default now()
 )
 returns uuid
@@ -2942,6 +2944,11 @@ declare
   v_semestre_id uuid;
   v_item jsonb;
   v_criterio_id uuid;
+  v_criterio_modelo_avaliacao_id uuid;
+  v_opcao_criterio_modelo_avaliacao_id uuid;
+  v_opcao_rotulo_snapshot text;
+  v_opcao_descricao_snapshot text;
+  v_opcao_valor_snapshot numeric(5,2);
   v_nota_bruta numeric(5,2);
   v_feedback text;
   v_peso_percentual numeric(5,2);
@@ -2964,6 +2971,11 @@ begin
 
   if trim(coalesce(p_referencia, '')) = '' then
     raise exception 'A referência do lançamento é obrigatória.';
+  end if;
+
+  if p_modalidade_snapshot is not null
+    and p_modalidade_snapshot not in ('descritiva', 'rubrica') then
+    raise exception 'Modalidade de avaliacao invalida.';
   end if;
 
   if p_itens is null
@@ -2991,7 +3003,9 @@ begin
     referencia,
     observacoes,
     status,
-    avaliado_em
+    avaliado_em,
+    modelo_avaliacao_curso_id,
+    modalidade_snapshot
   )
   values (
     p_matricula_turma_id,
@@ -3001,7 +3015,9 @@ begin
     trim(p_referencia),
     nullif(trim(coalesce(p_observacoes, '')), ''),
     p_status,
-    coalesce(p_avaliado_em, now())
+    coalesce(p_avaliado_em, now()),
+    p_modelo_avaliacao_curso_id,
+    p_modalidade_snapshot
   )
   returning id into v_avaliacao_id;
 
@@ -3010,8 +3026,20 @@ begin
     from jsonb_array_elements(p_itens)
   loop
     v_criterio_id := nullif(v_item ->> 'criterio_id', '')::uuid;
+    v_criterio_modelo_avaliacao_id :=
+      nullif(v_item ->> 'criterio_modelo_avaliacao_id', '')::uuid;
+    v_opcao_criterio_modelo_avaliacao_id :=
+      nullif(v_item ->> 'opcao_criterio_modelo_avaliacao_id', '')::uuid;
+    v_opcao_rotulo_snapshot := nullif(trim(coalesce(v_item ->> 'opcao_rotulo_snapshot', '')), '');
+    v_opcao_descricao_snapshot :=
+      nullif(trim(coalesce(v_item ->> 'opcao_descricao_snapshot', '')), '');
+    v_opcao_valor_snapshot := nullif(v_item ->> 'opcao_valor_snapshot', '')::numeric;
     v_nota_bruta := nullif(v_item ->> 'nota_bruta', '')::numeric;
     v_feedback := nullif(trim(coalesce(v_item ->> 'feedback', '')), '');
+
+    if v_nota_bruta is null and v_opcao_valor_snapshot is not null then
+      v_nota_bruta := v_opcao_valor_snapshot;
+    end if;
 
     if v_criterio_id is null or v_nota_bruta is null then
       raise exception 'Item avaliado inválido.';
@@ -3031,6 +3059,11 @@ begin
     insert into public.itens_avaliados (
       avaliacao_id,
       criterio_id,
+      criterio_modelo_avaliacao_id,
+      opcao_criterio_modelo_avaliacao_id,
+      opcao_rotulo_snapshot,
+      opcao_descricao_snapshot,
+      opcao_valor_snapshot,
       nota_bruta,
       peso_aplicado_percentual,
       feedback
@@ -3038,6 +3071,11 @@ begin
     values (
       v_avaliacao_id,
       v_criterio_id,
+      v_criterio_modelo_avaliacao_id,
+      v_opcao_criterio_modelo_avaliacao_id,
+      v_opcao_rotulo_snapshot,
+      v_opcao_descricao_snapshot,
+      v_opcao_valor_snapshot,
       v_nota_bruta,
       v_peso_percentual,
       v_feedback
@@ -3062,6 +3100,8 @@ revoke all on function public.criar_avaliacao_com_itens(
   text,
   text,
   jsonb,
+  uuid,
+  text,
   timestamptz
 ) from public;
 
@@ -3072,6 +3112,8 @@ grant execute on function public.criar_avaliacao_com_itens(
   text,
   text,
   jsonb,
+  uuid,
+  text,
   timestamptz
 ) to authenticated;
 
@@ -3081,6 +3123,8 @@ create or replace function public.criar_revisao_avaliacao_com_itens(
   p_observacoes text,
   p_status text,
   p_itens jsonb,
+  p_modelo_avaliacao_curso_id uuid default null,
+  p_modalidade_snapshot text default null,
   p_avaliado_em timestamptz default now()
 )
 returns uuid
@@ -3093,6 +3137,11 @@ declare
   v_avaliacao_id uuid;
   v_item jsonb;
   v_criterio_id uuid;
+  v_criterio_modelo_avaliacao_id uuid;
+  v_opcao_criterio_modelo_avaliacao_id uuid;
+  v_opcao_rotulo_snapshot text;
+  v_opcao_descricao_snapshot text;
+  v_opcao_valor_snapshot numeric(5,2);
   v_nota_bruta numeric(5,2);
   v_feedback text;
   v_peso_percentual numeric(5,2);
@@ -3131,6 +3180,11 @@ begin
 
   if trim(coalesce(p_referencia, '')) = '' then
     raise exception 'A referencia da revisao e obrigatoria.';
+  end if;
+
+  if p_modalidade_snapshot is not null
+    and p_modalidade_snapshot not in ('descritiva', 'rubrica') then
+    raise exception 'Modalidade de avaliacao invalida.';
   end if;
 
   if p_itens is null
@@ -3177,7 +3231,9 @@ begin
     avaliacao_origem_id,
     avaliacao_raiz_id,
     status,
-    avaliado_em
+    avaliado_em,
+    modelo_avaliacao_curso_id,
+    modalidade_snapshot
   )
   values (
     v_origem.matricula_turma_id,
@@ -3189,7 +3245,9 @@ begin
     v_origem.id,
     coalesce(v_origem.avaliacao_raiz_id, v_origem.id),
     p_status,
-    coalesce(p_avaliado_em, now())
+    coalesce(p_avaliado_em, now()),
+    coalesce(p_modelo_avaliacao_curso_id, v_origem.modelo_avaliacao_curso_id),
+    coalesce(p_modalidade_snapshot, v_origem.modalidade_snapshot)
   )
   returning id into v_avaliacao_id;
 
@@ -3198,8 +3256,20 @@ begin
     from jsonb_array_elements(p_itens)
   loop
     v_criterio_id := nullif(v_item ->> 'criterio_id', '')::uuid;
+    v_criterio_modelo_avaliacao_id :=
+      nullif(v_item ->> 'criterio_modelo_avaliacao_id', '')::uuid;
+    v_opcao_criterio_modelo_avaliacao_id :=
+      nullif(v_item ->> 'opcao_criterio_modelo_avaliacao_id', '')::uuid;
+    v_opcao_rotulo_snapshot := nullif(trim(coalesce(v_item ->> 'opcao_rotulo_snapshot', '')), '');
+    v_opcao_descricao_snapshot :=
+      nullif(trim(coalesce(v_item ->> 'opcao_descricao_snapshot', '')), '');
+    v_opcao_valor_snapshot := nullif(v_item ->> 'opcao_valor_snapshot', '')::numeric;
     v_nota_bruta := nullif(v_item ->> 'nota_bruta', '')::numeric;
     v_feedback := nullif(trim(coalesce(v_item ->> 'feedback', '')), '');
+
+    if v_nota_bruta is null and v_opcao_valor_snapshot is not null then
+      v_nota_bruta := v_opcao_valor_snapshot;
+    end if;
 
     if v_criterio_id is null or v_nota_bruta is null then
       raise exception 'Item revisado invalido.';
@@ -3219,6 +3289,11 @@ begin
     insert into public.itens_avaliados (
       avaliacao_id,
       criterio_id,
+      criterio_modelo_avaliacao_id,
+      opcao_criterio_modelo_avaliacao_id,
+      opcao_rotulo_snapshot,
+      opcao_descricao_snapshot,
+      opcao_valor_snapshot,
       nota_bruta,
       peso_aplicado_percentual,
       feedback
@@ -3226,6 +3301,11 @@ begin
     values (
       v_avaliacao_id,
       v_criterio_id,
+      v_criterio_modelo_avaliacao_id,
+      v_opcao_criterio_modelo_avaliacao_id,
+      v_opcao_rotulo_snapshot,
+      v_opcao_descricao_snapshot,
+      v_opcao_valor_snapshot,
       v_nota_bruta,
       v_peso_percentual,
       v_feedback
@@ -3249,6 +3329,8 @@ revoke all on function public.criar_revisao_avaliacao_com_itens(
   text,
   text,
   jsonb,
+  uuid,
+  text,
   timestamptz
 ) from public;
 
@@ -3258,6 +3340,8 @@ grant execute on function public.criar_revisao_avaliacao_com_itens(
   text,
   text,
   jsonb,
+  uuid,
+  text,
   timestamptz
 ) to authenticated;
 
@@ -3268,6 +3352,8 @@ create or replace function public.atualizar_avaliacao_com_itens(
   p_observacoes text,
   p_status text,
   p_itens jsonb,
+  p_modelo_avaliacao_curso_id uuid default null,
+  p_modalidade_snapshot text default null,
   p_avaliado_em timestamptz default now()
 )
 returns uuid
@@ -3279,6 +3365,11 @@ declare
   v_avaliacao public.avaliacoes%rowtype;
   v_item jsonb;
   v_criterio_id uuid;
+  v_criterio_modelo_avaliacao_id uuid;
+  v_opcao_criterio_modelo_avaliacao_id uuid;
+  v_opcao_rotulo_snapshot text;
+  v_opcao_descricao_snapshot text;
+  v_opcao_valor_snapshot numeric(5,2);
   v_nota_bruta numeric(5,2);
   v_feedback text;
   v_peso_percentual numeric(5,2);
@@ -3325,6 +3416,11 @@ begin
     raise exception 'A referencia do lancamento e obrigatoria.';
   end if;
 
+  if p_modalidade_snapshot is not null
+    and p_modalidade_snapshot not in ('descritiva', 'rubrica') then
+    raise exception 'Modalidade de avaliacao invalida.';
+  end if;
+
   if p_itens is null
     or jsonb_typeof(p_itens) <> 'array'
     or jsonb_array_length(p_itens) = 0 then
@@ -3337,7 +3433,15 @@ begin
     referencia = trim(p_referencia),
     observacoes = nullif(trim(coalesce(p_observacoes, '')), ''),
     status = p_status,
-    avaliado_em = coalesce(p_avaliado_em, avaliado_em)
+    avaliado_em = coalesce(p_avaliado_em, avaliado_em),
+    modelo_avaliacao_curso_id = coalesce(
+      p_modelo_avaliacao_curso_id,
+      modelo_avaliacao_curso_id
+    ),
+    modalidade_snapshot = coalesce(
+      p_modalidade_snapshot,
+      modalidade_snapshot
+    )
   where id = p_avaliacao_id;
 
   delete from public.itens_avaliados
@@ -3348,8 +3452,20 @@ begin
     from jsonb_array_elements(p_itens)
   loop
     v_criterio_id := nullif(v_item ->> 'criterio_id', '')::uuid;
+    v_criterio_modelo_avaliacao_id :=
+      nullif(v_item ->> 'criterio_modelo_avaliacao_id', '')::uuid;
+    v_opcao_criterio_modelo_avaliacao_id :=
+      nullif(v_item ->> 'opcao_criterio_modelo_avaliacao_id', '')::uuid;
+    v_opcao_rotulo_snapshot := nullif(trim(coalesce(v_item ->> 'opcao_rotulo_snapshot', '')), '');
+    v_opcao_descricao_snapshot :=
+      nullif(trim(coalesce(v_item ->> 'opcao_descricao_snapshot', '')), '');
+    v_opcao_valor_snapshot := nullif(v_item ->> 'opcao_valor_snapshot', '')::numeric;
     v_nota_bruta := nullif(v_item ->> 'nota_bruta', '')::numeric;
     v_feedback := nullif(trim(coalesce(v_item ->> 'feedback', '')), '');
+
+    if v_nota_bruta is null and v_opcao_valor_snapshot is not null then
+      v_nota_bruta := v_opcao_valor_snapshot;
+    end if;
 
     if v_criterio_id is null or v_nota_bruta is null then
       raise exception 'Item avaliado invalido.';
@@ -3369,6 +3485,11 @@ begin
     insert into public.itens_avaliados (
       avaliacao_id,
       criterio_id,
+      criterio_modelo_avaliacao_id,
+      opcao_criterio_modelo_avaliacao_id,
+      opcao_rotulo_snapshot,
+      opcao_descricao_snapshot,
+      opcao_valor_snapshot,
       nota_bruta,
       peso_aplicado_percentual,
       feedback
@@ -3376,6 +3497,11 @@ begin
     values (
       p_avaliacao_id,
       v_criterio_id,
+      v_criterio_modelo_avaliacao_id,
+      v_opcao_criterio_modelo_avaliacao_id,
+      v_opcao_rotulo_snapshot,
+      v_opcao_descricao_snapshot,
+      v_opcao_valor_snapshot,
       v_nota_bruta,
       v_peso_percentual,
       v_feedback
@@ -3400,6 +3526,8 @@ revoke all on function public.atualizar_avaliacao_com_itens(
   text,
   text,
   jsonb,
+  uuid,
+  text,
   timestamptz
 ) from public;
 
@@ -3410,6 +3538,8 @@ grant execute on function public.atualizar_avaliacao_com_itens(
   text,
   text,
   jsonb,
+  uuid,
+  text,
   timestamptz
 ) to authenticated;
 

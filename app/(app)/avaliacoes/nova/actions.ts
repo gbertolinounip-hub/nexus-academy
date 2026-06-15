@@ -8,13 +8,18 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   resolveExceptionalReleaseGate
 } from "@/services/exceptional-releases";
+import {
+  loadEvaluationRuntimeContextsForEnrollments,
+  type EvaluationRubricCriterion,
+  type EvaluationRuntimeContext
+} from "@/services/evaluations";
 import type {
   EvaluationActionFormValues,
   EvaluationActionState
 } from "@/app/(app)/avaliacoes/nova/state";
 import type { Database } from "@/types/database";
+import type { EvaluationModelMode } from "@/types/domain";
 
-type RubricCriterionRow = Database["public"]["Tables"]["criterios_avaliacao"]["Row"];
 type ProfessorLinkValidationRow = Pick<
   Database["public"]["Tables"]["vinculos_professor_aluno"]["Row"],
   "id" | "data_fim"
@@ -42,6 +47,14 @@ type EvaluationValidationRow = Pick<
   | "avaliado_em"
   | "created_at"
 >;
+
+interface RuntimeCriterionSubmissionDefinition {
+  fieldCriterionId: string;
+  legacyCriterionId: string;
+  modelCriterionId: string | null;
+  maxScore: number;
+  options: EvaluationRubricCriterion["options"];
+}
 
 interface ReviewBaselineState {
   scoreByCriterionId: Map<string, number>;
@@ -144,6 +157,14 @@ function buildSubmittedFormValues(formData: FormData): EvaluationActionFormValue
       )
       .map(([fieldName, value]) => [fieldName.replace("feedback__", ""), value.trim()])
   );
+  const criterionOptionSelections = Object.fromEntries(
+    [...formData.entries()]
+      .filter(
+        (entry): entry is [string, string] =>
+          entry[0].startsWith("option__") && typeof entry[1] === "string"
+      )
+      .map(([fieldName, value]) => [fieldName.replace("option__", ""), value.trim()])
+  );
 
   const rawTipoLançamento = readStringField(formData, "tipo_lancamento");
   const rawIntent = readStringField(formData, "intent");
@@ -164,7 +185,8 @@ function buildSubmittedFormValues(formData: FormData): EvaluationActionFormValue
     observacoes: readStringField(formData, "observacoes"),
     intent: rawIntent === "rascunho" || rawIntent === "publicado" ? rawIntent : "",
     criterionScores,
-    criterionFeedbacks
+    criterionFeedbacks,
+    criterionOptionSelections
   };
 }
 
@@ -414,6 +436,27 @@ async function loadEvaluationOperationalScope(
   };
 }
 
+async function loadEvaluationRuntimeContextForEnrollment(
+  enrollmentId: string
+): Promise<EvaluationRuntimeContext> {
+  const runtimeContextByEnrollmentId =
+    await loadEvaluationRuntimeContextsForEnrollments([enrollmentId]);
+
+  return (
+    runtimeContextByEnrollmentId.get(enrollmentId) ?? {
+      enrollmentId,
+      courseId: null,
+      offerId: null,
+      modelId: null,
+      modelCode: null,
+      modelName: null,
+      modality: "descritiva",
+      source: "legacy_global",
+      rubricGroups: []
+    }
+  );
+}
+
 async function validateProfessorLink(
   professorId: string,
   enrollmentId: string
@@ -461,27 +504,48 @@ async function validateProfessorLink(
 
 function buildItemsPayload(
   criterionScores: Record<string, string>,
+  criterionOptionSelections: Record<string, string>,
   criterionFeedbacks: Record<string, string>,
-  criterionRows: Array<Pick<RubricCriterionRow, "id" | "escala_maxima">>,
+  criterionRows: RuntimeCriterionSubmissionDefinition[],
+  modality: EvaluationModelMode,
   reviewBaseline?: ReviewBaselineState | null
 ) {
   const itemsPayload: Array<{
     criterio_id: string;
+    criterio_modelo_avaliacao_id?: string | null;
+    opcao_criterio_modelo_avaliacao_id?: string | null;
+    opcao_rotulo_snapshot?: string | null;
+    opcao_descricao_snapshot?: string | null;
+    opcao_valor_snapshot?: number | null;
     nota_bruta: number;
     feedback?: string | null;
   }> = [];
   const fieldErrors: Record<string, string> = {};
 
   for (const criterion of criterionRows) {
-    const fieldName = `criterion__${criterion.id}`;
-    const rawValue = criterionScores[criterion.id]?.trim() ?? "";
-    const feedbackFieldName = `feedback__${criterion.id}`;
-    const feedbackValue = criterionFeedbacks[criterion.id]?.trim() ?? "";
+    const fieldName = `criterion__${criterion.fieldCriterionId}`;
+    const optionFieldName = `option__${criterion.fieldCriterionId}`;
+    const rawValue = criterionScores[criterion.fieldCriterionId]?.trim() ?? "";
+    const selectedOptionId =
+      criterionOptionSelections[criterion.fieldCriterionId]?.trim() ?? "";
+    const feedbackFieldName = `feedback__${criterion.fieldCriterionId}`;
+    const feedbackValue = criterionFeedbacks[criterion.fieldCriterionId]?.trim() ?? "";
     const hasScoreInput = rawValue !== "";
+    const hasOptionSelection = selectedOptionId !== "";
     const hasFeedbackInput = feedbackValue !== "";
+    const selectedOption = hasOptionSelection
+      ? criterion.options.find((option) => option.id === selectedOptionId) ?? null
+      : null;
+
+    if (hasOptionSelection && !selectedOption) {
+      fieldErrors[optionFieldName] = "Selecione uma opcao valida para este criterio.";
+      continue;
+    }
+
+    const rubricScoreValue = selectedOption ? selectedOption.scoreValue : null;
 
     if (!reviewBaseline) {
-      if (!hasScoreInput) {
+      if (!hasScoreInput && !hasOptionSelection) {
         if (hasFeedbackInput) {
           fieldErrors[feedbackFieldName] =
             "Informe a nota antes de registrar a justificativa deste item.";
@@ -489,37 +553,56 @@ function buildItemsPayload(
         continue;
       }
 
-      const parsedScore = Number(rawValue);
+      let resolvedScore: number | null = null;
 
-      if (Number.isNaN(parsedScore)) {
-        fieldErrors[fieldName] = "Informe uma nota numerica valida.";
+      if (rubricScoreValue !== null) {
+        resolvedScore = Math.round(rubricScoreValue * 100) / 100;
+      } else if (hasScoreInput) {
+        const parsedScore = Number(rawValue);
+
+        if (Number.isNaN(parsedScore)) {
+          fieldErrors[fieldName] = "Informe uma nota numerica valida.";
+          continue;
+        }
+
+        resolvedScore = Math.round(parsedScore * 100) / 100;
+      }
+
+      if (resolvedScore === null) {
         continue;
       }
 
-      if (parsedScore < 0 || parsedScore > Number(criterion.escala_maxima)) {
-        fieldErrors[fieldName] = `A nota deve estar entre 0 e ${criterion.escala_maxima}.`;
+      if (resolvedScore < 0 || resolvedScore > Number(criterion.maxScore)) {
+        fieldErrors[fieldName] = `A nota deve estar entre 0 e ${criterion.maxScore}.`;
         continue;
       }
 
       itemsPayload.push({
-        criterio_id: criterion.id,
-        nota_bruta: Math.round(parsedScore * 100) / 100,
+        criterio_id: criterion.legacyCriterionId,
+        criterio_modelo_avaliacao_id: criterion.modelCriterionId,
+        opcao_criterio_modelo_avaliacao_id: selectedOption?.id ?? null,
+        opcao_rotulo_snapshot: selectedOption?.label ?? null,
+        opcao_descricao_snapshot: selectedOption?.description ?? null,
+        opcao_valor_snapshot: selectedOption ? resolvedScore : null,
+        nota_bruta: resolvedScore,
         feedback: hasFeedbackInput ? feedbackValue : null
       });
       continue;
     }
 
-    if (!hasScoreInput && !hasFeedbackInput) {
+    if (!hasScoreInput && !hasFeedbackInput && !hasOptionSelection) {
       continue;
     }
 
-    const baselineScore = reviewBaseline.scoreByCriterionId.get(criterion.id);
+    const baselineScore = reviewBaseline.scoreByCriterionId.get(criterion.fieldCriterionId);
     const baselineFeedback =
-      reviewBaseline.feedbackByCriterionId.get(criterion.id) ?? null;
+      reviewBaseline.feedbackByCriterionId.get(criterion.fieldCriterionId) ?? null;
 
     let resolvedScore = baselineScore ?? null;
 
-    if (hasScoreInput) {
+    if (rubricScoreValue !== null) {
+      resolvedScore = Math.round(rubricScoreValue * 100) / 100;
+    } else if (hasScoreInput) {
       const parsedScore = Number(rawValue);
 
       if (Number.isNaN(parsedScore)) {
@@ -527,8 +610,8 @@ function buildItemsPayload(
         continue;
       }
 
-      if (parsedScore < 0 || parsedScore > Number(criterion.escala_maxima)) {
-        fieldErrors[fieldName] = `A nota deve estar entre 0 e ${criterion.escala_maxima}.`;
+      if (parsedScore < 0 || parsedScore > Number(criterion.maxScore)) {
+        fieldErrors[fieldName] = `A nota deve estar entre 0 e ${criterion.maxScore}.`;
         continue;
       }
 
@@ -542,7 +625,9 @@ function buildItemsPayload(
     }
 
     const scoreChanged =
-      baselineScore === undefined ? hasScoreInput : resolvedScore !== baselineScore;
+      baselineScore === undefined
+        ? hasScoreInput || hasOptionSelection
+        : resolvedScore !== baselineScore;
     const feedbackChanged = hasFeedbackInput
       ? feedbackValue !== (baselineFeedback ?? "")
       : false;
@@ -552,14 +637,22 @@ function buildItemsPayload(
     }
 
     itemsPayload.push({
-      criterio_id: criterion.id,
+      criterio_id: criterion.legacyCriterionId,
+      criterio_modelo_avaliacao_id: criterion.modelCriterionId,
+      opcao_criterio_modelo_avaliacao_id: selectedOption?.id ?? null,
+      opcao_rotulo_snapshot: selectedOption?.label ?? null,
+      opcao_descricao_snapshot: selectedOption?.description ?? null,
+      opcao_valor_snapshot: selectedOption ? resolvedScore : null,
       nota_bruta: resolvedScore,
       feedback: hasFeedbackInput ? feedbackValue : baselineFeedback
     });
   }
 
   if (!itemsPayload.length) {
-    fieldErrors.criteria = "Preencha ao menos um criterio avaliado.";
+    fieldErrors.criteria =
+      modality === "rubrica"
+        ? "Selecione ao menos um criterio avaliado da rubrica."
+        : "Preencha ao menos um criterio avaliado.";
   }
 
   return { itemsPayload, fieldErrors };
@@ -645,7 +738,9 @@ async function loadReviewBaselineState(
   const { data: chainItemsData, error: chainItemsError } = chainEvaluationIds.length
     ? await supabase
         .from("itens_avaliados")
-        .select("avaliacao_id, criterio_id, nota_bruta, feedback")
+        .select(
+          "avaliacao_id, criterio_id, criterio_modelo_avaliacao_id, nota_bruta, feedback"
+        )
         .in("avaliacao_id", chainEvaluationIds)
     : { data: [], error: null };
 
@@ -662,7 +757,11 @@ async function loadReviewBaselineState(
     Array<
       Pick<
         Database["public"]["Tables"]["itens_avaliados"]["Row"],
-        "avaliacao_id" | "criterio_id" | "nota_bruta" | "feedback"
+        | "avaliacao_id"
+        | "criterio_id"
+        | "criterio_modelo_avaliacao_id"
+        | "nota_bruta"
+        | "feedback"
       >
     >
   >();
@@ -670,7 +769,11 @@ async function loadReviewBaselineState(
   for (const item of (chainItemsData ?? []) as Array<
     Pick<
       Database["public"]["Tables"]["itens_avaliados"]["Row"],
-      "avaliacao_id" | "criterio_id" | "nota_bruta" | "feedback"
+      | "avaliacao_id"
+      | "criterio_id"
+      | "criterio_modelo_avaliacao_id"
+      | "nota_bruta"
+      | "feedback"
     >
   >) {
     const currentItems = itemsByEvaluationId.get(item.avaliacao_id) ?? [];
@@ -690,12 +793,14 @@ async function loadReviewBaselineState(
     }
 
     for (const item of itemsByEvaluationId.get(evaluation.id) ?? []) {
-      scoreByCriterionId.set(item.criterio_id, Number(item.nota_bruta));
+      const criterionKey = item.criterio_modelo_avaliacao_id ?? item.criterio_id;
+
+      scoreByCriterionId.set(criterionKey, Number(item.nota_bruta));
 
       if (item.feedback && item.feedback.trim() !== "") {
-        feedbackByCriterionId.set(item.criterio_id, item.feedback);
+        feedbackByCriterionId.set(criterionKey, item.feedback);
       } else {
-        feedbackByCriterionId.delete(item.criterio_id);
+        feedbackByCriterionId.delete(criterionKey);
       }
     }
 
@@ -865,6 +970,22 @@ export async function submitEvaluationAction(
     }
   }
 
+  let evaluationRuntimeContext: EvaluationRuntimeContext;
+
+  try {
+    evaluationRuntimeContext = await loadEvaluationRuntimeContextForEnrollment(
+      targetEnrollmentId
+    );
+  } catch (error) {
+    return buildErrorState(
+      error instanceof Error
+        ? error.message
+        : "Nao foi possivel identificar o modelo de avaliacao do curso para este lancamento.",
+      {},
+      submittedFormValues
+    );
+  }
+
   const previousItemIds =
     exceptionalReleaseGate.viaExceptionalRelease && avaliacao_id
       ? (
@@ -876,25 +997,24 @@ export async function submitEvaluationAction(
           ).data as Array<Pick<Database["public"]["Tables"]["itens_avaliados"]["Row"], "id">> | null ?? []
         ).map((item) => item.id)
       : [];
+  const criterionRows: RuntimeCriterionSubmissionDefinition[] =
+    evaluationRuntimeContext.rubricGroups.flatMap((group) =>
+      group.criteria.map((criterion) => ({
+        fieldCriterionId: criterion.id,
+        legacyCriterionId: criterion.legacyCriterionId,
+        modelCriterionId: criterion.modelCriterionId,
+        maxScore: criterion.maxScore,
+        options: criterion.options
+      }))
+    );
 
-  const { data: criterionRowsData, error: criterionError } = await supabase
-    .from("criterios_avaliacao")
-    .select("id, escala_maxima")
-    .eq("ativo", true)
-    .order("ordem", { ascending: true });
-
-  if (criterionError) {
+  if (!criterionRows.length) {
     return buildErrorState(
-      "Não foi possível carregar os critérios de avaliação para validar o formulário.",
+      "Nao foi possivel carregar os criterios de avaliacao para validar o formulario.",
       {},
       submittedFormValues
     );
   }
-
-  const criterionRows = (criterionRowsData ?? []) as Pick<
-    RubricCriterionRow,
-    "id" | "escala_maxima"
-  >[];
   const isIncrementalReview =
     Boolean(avaliacao_origem_id) ||
     (isEditing && Boolean(existingEvaluation?.avaliacao_origem_id));
@@ -930,8 +1050,10 @@ export async function submitEvaluationAction(
 
   const { itemsPayload, fieldErrors } = buildItemsPayload(
     submittedFormValues.criterionScores,
+    submittedFormValues.criterionOptionSelections,
     submittedFormValues.criterionFeedbacks,
     criterionRows,
+    evaluationRuntimeContext.modality,
     reviewBaseline
   );
 
@@ -981,6 +1103,8 @@ export async function submitEvaluationAction(
         p_referencia: generatedReference,
         p_observacoes: observacoes || null,
         p_status: intent,
+        p_modelo_avaliacao_curso_id: evaluationRuntimeContext.modelId,
+        p_modalidade_snapshot: evaluationRuntimeContext.modality,
         p_itens: itemsPayload,
         p_avaliado_em: evaluatedAtTimestamp
       }
@@ -1058,6 +1182,8 @@ export async function submitEvaluationAction(
         p_referencia: generatedReference,
         p_observacoes: observacoes || null,
         p_status: intent,
+        p_modelo_avaliacao_curso_id: evaluationRuntimeContext.modelId,
+        p_modalidade_snapshot: evaluationRuntimeContext.modality,
         p_itens: itemsPayload,
         p_avaliado_em: evaluatedAtTimestamp
       }
@@ -1132,6 +1258,8 @@ export async function submitEvaluationAction(
       p_referencia: generatedReference,
       p_observacoes: observacoes || null,
       p_status: intent,
+      p_modelo_avaliacao_curso_id: evaluationRuntimeContext.modelId,
+      p_modalidade_snapshot: evaluationRuntimeContext.modality,
       p_itens: itemsPayload,
       p_avaliado_em: evaluatedAtTimestamp
     }

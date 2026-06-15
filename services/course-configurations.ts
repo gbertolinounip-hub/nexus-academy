@@ -7,6 +7,8 @@ type CourseRow = Database["public"]["Tables"]["cursos"]["Row"];
 type ModelRow = Database["public"]["Tables"]["modelos_avaliacao_curso"]["Row"];
 type GroupRow = Database["public"]["Tables"]["grupos_modelo_avaliacao"]["Row"];
 type CriterionRow = Database["public"]["Tables"]["criterios_modelo_avaliacao"]["Row"];
+type CriterionOptionRow =
+  Database["public"]["Tables"]["opcoes_criterio_modelo_avaliacao"]["Row"];
 type DocumentTypeRow = Database["public"]["Tables"]["tipos_documento"]["Row"];
 type RequiredDocumentRow =
   Database["public"]["Tables"]["documentos_obrigatorios_curso"]["Row"];
@@ -44,8 +46,18 @@ export interface CourseConfigurationModelEntry {
   name: string;
   description: string | null;
   version: number;
+  modality: ModelRow["modalidade"];
   isActive: boolean;
   groupWeightDiagnostic: CourseConfigurationWeightDiagnostic;
+}
+
+export interface CourseConfigurationCriterionOptionEntry {
+  id: string;
+  label: string;
+  description: string | null;
+  scoreValue: number;
+  order: number;
+  isActive: boolean;
 }
 
 export interface CourseConfigurationGroupEntry {
@@ -64,6 +76,8 @@ export interface CourseConfigurationCriterionEntry {
   id: string;
   groupId: string;
   groupName: string;
+  modelId: string;
+  modelModality: ModelRow["modalidade"];
   code: string;
   name: string;
   description: string | null;
@@ -71,6 +85,7 @@ export interface CourseConfigurationCriterionEntry {
   weightPercent: number;
   maxScale: number;
   isActive: boolean;
+  rubricOptions: CourseConfigurationCriterionOptionEntry[];
 }
 
 export interface CourseConfigurationRequiredDocumentEntry {
@@ -194,6 +209,14 @@ function sortCriteria(left: CriterionRow, right: CriterionRow) {
   }
 
   return compareByLocale(left.nome, right.nome);
+}
+
+function sortCriterionOptions(left: CriterionOptionRow, right: CriterionOptionRow) {
+  if (left.ordem !== right.ordem) {
+    return left.ordem - right.ordem;
+  }
+
+  return compareByLocale(left.rotulo, right.rotulo);
 }
 
 function sortRequiredDocuments(left: RequiredDocumentRow, right: RequiredDocumentRow) {
@@ -411,6 +434,7 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
     modelsResult,
     groupsResult,
     criteriaResult,
+    criterionOptionsResult,
     requiredDocumentsResult,
     documentTypesResult
   ] = await Promise.all([
@@ -430,6 +454,11 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
       .from("criterios_modelo_avaliacao")
       .select("*")
       .order("grupo_modelo_avaliacao_id", { ascending: true })
+      .order("ordem", { ascending: true }),
+    supabase
+      .from("opcoes_criterio_modelo_avaliacao")
+      .select("*")
+      .order("criterio_modelo_avaliacao_id", { ascending: true })
       .order("ordem", { ascending: true }),
     supabase
       .from("documentos_obrigatorios_curso")
@@ -484,6 +513,15 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
     );
   }
 
+  if (criterionOptionsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Nao foi possivel carregar as opcoes de rubrica por criterio.",
+        criterionOptionsResult.error
+      )
+    );
+  }
+
   if (requiredDocumentsResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
@@ -507,6 +545,8 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
   const modelRows = (modelsResult.data ?? []) as ModelRow[];
   const groupRows = (groupsResult.data ?? []) as GroupRow[];
   const criterionRows = (criteriaResult.data ?? []) as CriterionRow[];
+  const criterionOptionRows =
+    (criterionOptionsResult.data ?? []) as CriterionOptionRow[];
   const requiredDocumentRows =
     (requiredDocumentsResult.data ?? []) as RequiredDocumentRow[];
   const documentTypeRows = (documentTypesResult.data ?? []) as DocumentTypeRow[];
@@ -519,6 +559,7 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
   const modelsByCourseId = new Map<string, ModelRow[]>();
   const groupsByModelId = new Map<string, GroupRow[]>();
   const criteriaByGroupId = new Map<string, CriterionRow[]>();
+  const optionsByCriterionId = new Map<string, CriterionOptionRow[]>();
   const requiredDocumentsByCourseId = new Map<string, RequiredDocumentRow[]>();
 
   for (const modelRow of modelRows) {
@@ -531,6 +572,14 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
 
   for (const criterionRow of criterionRows) {
     pushToMap(criteriaByGroupId, criterionRow.grupo_modelo_avaliacao_id, criterionRow);
+  }
+
+  for (const criterionOptionRow of criterionOptionRows) {
+    pushToMap(
+      optionsByCriterionId,
+      criterionOptionRow.criterio_modelo_avaliacao_id,
+      criterionOptionRow
+    );
   }
 
   for (const requiredDocumentRow of requiredDocumentRows) {
@@ -585,6 +634,7 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
             name: modelRow.nome,
             description: modelRow.descricao,
             version: modelRow.versao,
+            modality: modelRow.modalidade,
             isActive: modelRow.ativo,
             groupWeightDiagnostic: buildWeightDiagnostic(
               modelGroups.filter((groupRow) => groupRow.ativo).map((groupRow) => groupRow.peso_percentual),
@@ -616,13 +666,31 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
           groupName:
             groupsById.get(criterionRow.grupo_modelo_avaliacao_id)?.nome ??
             "Grupo nao identificado",
+          modelId:
+            groupsById.get(criterionRow.grupo_modelo_avaliacao_id)?.modelo_avaliacao_curso_id ??
+            "",
+          modelModality:
+            modelsById.get(
+              groupsById.get(criterionRow.grupo_modelo_avaliacao_id)?.modelo_avaliacao_curso_id ??
+                ""
+            )?.modalidade ?? "descritiva",
           code: criterionRow.codigo,
           name: criterionRow.nome,
           description: criterionRow.descricao,
           order: criterionRow.ordem,
           weightPercent: criterionRow.peso_percentual,
           maxScale: criterionRow.escala_maxima,
-          isActive: criterionRow.ativo
+          isActive: criterionRow.ativo,
+          rubricOptions: [...(optionsByCriterionId.get(criterionRow.id) ?? [])]
+            .sort(sortCriterionOptions)
+            .map((optionRow) => ({
+              id: optionRow.id,
+              label: optionRow.rotulo,
+              description: optionRow.descricao,
+              scoreValue: optionRow.valor_nota,
+              order: optionRow.ordem,
+              isActive: optionRow.ativo
+            }))
         })),
         requiredDocuments: sourceDocuments.map((requiredDocumentRow) => ({
           id: requiredDocumentRow.id,

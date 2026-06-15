@@ -8,8 +8,15 @@ export interface Database {
           p_referencia: string;
           p_observacoes: string | null;
           p_status: "rascunho" | "publicado";
+          p_modelo_avaliacao_curso_id?: string | null;
+          p_modalidade_snapshot?: "descritiva" | "rubrica" | null;
           p_itens: Array<{
             criterio_id: string;
+            criterio_modelo_avaliacao_id?: string | null;
+            opcao_criterio_modelo_avaliacao_id?: string | null;
+            opcao_rotulo_snapshot?: string | null;
+            opcao_descricao_snapshot?: string | null;
+            opcao_valor_snapshot?: number | null;
             nota_bruta: number;
             feedback?: string | null;
           }>;
@@ -23,8 +30,15 @@ export interface Database {
           p_referencia: string;
           p_observacoes: string | null;
           p_status: "rascunho" | "publicado";
+          p_modelo_avaliacao_curso_id?: string | null;
+          p_modalidade_snapshot?: "descritiva" | "rubrica" | null;
           p_itens: Array<{
             criterio_id: string;
+            criterio_modelo_avaliacao_id?: string | null;
+            opcao_criterio_modelo_avaliacao_id?: string | null;
+            opcao_rotulo_snapshot?: string | null;
+            opcao_descricao_snapshot?: string | null;
+            opcao_valor_snapshot?: number | null;
             nota_bruta: number;
             feedback?: string | null;
           }>;
@@ -39,8 +53,15 @@ export interface Database {
           p_referencia: string;
           p_observacoes: string | null;
           p_status: "rascunho" | "publicado";
+          p_modelo_avaliacao_curso_id?: string | null;
+          p_modalidade_snapshot?: "descritiva" | "rubrica" | null;
           p_itens: Array<{
             criterio_id: string;
+            criterio_modelo_avaliacao_id?: string | null;
+            opcao_criterio_modelo_avaliacao_id?: string | null;
+            opcao_rotulo_snapshot?: string | null;
+            opcao_descricao_snapshot?: string | null;
+            opcao_valor_snapshot?: number | null;
             nota_bruta: number;
             feedback?: string | null;
           }>;

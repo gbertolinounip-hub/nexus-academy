@@ -25,12 +25,16 @@ type CourseRow = Database["public"]["Tables"]["cursos"]["Row"];
 type ModelRow = Database["public"]["Tables"]["modelos_avaliacao_curso"]["Row"];
 type GroupRow = Database["public"]["Tables"]["grupos_modelo_avaliacao"]["Row"];
 type CriterionRow = Database["public"]["Tables"]["criterios_modelo_avaliacao"]["Row"];
+type CriterionOptionRow =
+  Database["public"]["Tables"]["opcoes_criterio_modelo_avaliacao"]["Row"];
 type DocumentTypeRow = Database["public"]["Tables"]["tipos_documento"]["Row"];
 type RequiredDocumentRow =
   Database["public"]["Tables"]["documentos_obrigatorios_curso"]["Row"];
 type ModelInsert = Database["public"]["Tables"]["modelos_avaliacao_curso"]["Insert"];
 type GroupInsert = Database["public"]["Tables"]["grupos_modelo_avaliacao"]["Insert"];
 type CriterionInsert = Database["public"]["Tables"]["criterios_modelo_avaliacao"]["Insert"];
+type CriterionOptionInsert =
+  Database["public"]["Tables"]["opcoes_criterio_modelo_avaliacao"]["Insert"];
 type RequiredDocumentInsert =
   Database["public"]["Tables"]["documentos_obrigatorios_curso"]["Insert"];
 type FisioterapiaSourceScope = "same_institution" | "global_default";
@@ -163,6 +167,9 @@ const modelConfigurationSchema = z.object({
     .string()
     .trim()
     .max(2000, "A descricao deve ter no maximo 2000 caracteres."),
+  modalidade: z.enum(["descritiva", "rubrica"], {
+    message: "Selecione uma modalidade valida."
+  }),
   ativo: z.enum(["true", "false"], {
     message: "Selecione um status valido."
   })
@@ -348,6 +355,10 @@ function buildModelFormValues(formData: FormData): CourseConfigurationModelFormV
     model_id: readStringField(formData, "model_id"),
     nome: readStringField(formData, "nome"),
     descricao: readStringField(formData, "descricao"),
+    modalidade: readStringField(formData, "modalidade") as
+      | "descritiva"
+      | "rubrica"
+      | "",
     ativo: readStringField(formData, "ativo")
   };
 }
@@ -887,6 +898,7 @@ export async function initializeCourseConfigurationAction(
     codigo: modelCode,
     nome: `Modelo de avaliacao - ${targetCourse.nome}`,
     descricao: `Modelo inicial de avaliacao academica do curso ${targetCourse.nome}.`,
+    modalidade: "descritiva",
     versao: 1,
     ativo: true,
     metadata: {
@@ -1584,6 +1596,7 @@ export async function updateCourseConfigurationModelAction(
     .update({
       nome: parsedData.data.nome,
       descricao: toNullableText(parsedData.data.descricao),
+      modalidade: parsedData.data.modalidade,
       ativo: toBooleanValue(parsedData.data.ativo)
     } satisfies Partial<ModelRow> as never)
     .eq("id", existingModel.id);
@@ -1945,8 +1958,29 @@ export async function copyFisioterapiaConfigurationAction(
   }
 
   const sourceCriteria = (sourceCriteriaResult.data ?? []) as CriterionRow[];
+  const sourceCriterionIds = sourceCriteria.map((criterionRow) => criterionRow.id);
+  const sourceCriterionOptionsResult = sourceCriterionIds.length
+    ? await adminClient
+        .from("opcoes_criterio_modelo_avaliacao")
+        .select("*")
+        .in("criterio_modelo_avaliacao_id", sourceCriterionIds)
+        .order("ordem", { ascending: true })
+    : { data: [], error: null };
+
+  if (sourceCriterionOptionsResult.error) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel carregar as opcoes de rubrica do modelo base da Fisioterapia.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const sourceCriterionOptions =
+    (sourceCriterionOptionsResult.data ?? []) as CriterionOptionRow[];
   const sourceGroupsByModelId = new Map<string, GroupRow[]>();
   const sourceCriteriaByGroupId = new Map<string, CriterionRow[]>();
+  const sourceOptionsByCriterionId = new Map<string, CriterionOptionRow[]>();
 
   for (const sourceGroup of sourceGroups) {
     const currentGroups = sourceGroupsByModelId.get(sourceGroup.modelo_avaliacao_curso_id);
@@ -1965,6 +1999,20 @@ export async function copyFisioterapiaConfigurationAction(
       currentCriteria.push(sourceCriterion);
     } else {
       sourceCriteriaByGroupId.set(sourceCriterion.grupo_modelo_avaliacao_id, [sourceCriterion]);
+    }
+  }
+
+  for (const sourceCriterionOption of sourceCriterionOptions) {
+    const currentOptions = sourceOptionsByCriterionId.get(
+      sourceCriterionOption.criterio_modelo_avaliacao_id
+    );
+
+    if (currentOptions) {
+      currentOptions.push(sourceCriterionOption);
+    } else {
+      sourceOptionsByCriterionId.set(sourceCriterionOption.criterio_modelo_avaliacao_id, [
+        sourceCriterionOption
+      ]);
     }
   }
 
@@ -2008,6 +2056,7 @@ export async function copyFisioterapiaConfigurationAction(
               destinationCourse.nome
             ),
             versao: sourceModel.versao,
+            modalidade: sourceModel.modalidade,
             ativo: sourceModel.ativo,
             metadata: mergeCopiedMetadata(sourceModel.metadata, {
               source_course_id: sourceCourse.id,
@@ -2045,6 +2094,7 @@ export async function copyFisioterapiaConfigurationAction(
             destinationCourse.nome
           ),
           versao: sourceModel.versao,
+          modalidade: sourceModel.modalidade,
           ativo: sourceModel.ativo,
           metadata: mergeCopiedMetadata(sourceModel.metadata, {
             source_course_id: sourceCourse.id,
@@ -2141,6 +2191,29 @@ export async function copyFisioterapiaConfigurationAction(
           }
 
           createdCriterionIds.push(insertedCriterionData.id);
+
+          for (const sourceCriterionOption of sourceOptionsByCriterionId.get(sourceCriterion.id) ?? []) {
+            const criterionOptionInsertPayload: CriterionOptionInsert = {
+              criterio_modelo_avaliacao_id: insertedCriterionData.id,
+              rotulo: sourceCriterionOption.rotulo,
+              descricao: sourceCriterionOption.descricao,
+              valor_nota: sourceCriterionOption.valor_nota,
+              ordem: sourceCriterionOption.ordem,
+              ativo: sourceCriterionOption.ativo
+            };
+
+            const insertedCriterionOptionResult = await adminClient
+              .from("opcoes_criterio_modelo_avaliacao")
+              .insert(criterionOptionInsertPayload as never)
+              .select("id")
+              .single();
+
+            if (insertedCriterionOptionResult.error || !insertedCriterionOptionResult.data) {
+              throw new Error(
+                "Nao foi possivel copiar as opcoes de rubrica do modelo base para o curso destino."
+              );
+            }
+          }
         }
       }
     }

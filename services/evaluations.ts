@@ -6,7 +6,11 @@ import {
   resolveExceptionalReleaseVisualNoticeFromRows
 } from "@/services/exceptional-releases";
 import type { Database } from "@/types/database";
-import type { ExceptionalReleaseVisualNotice, SessionUser } from "@/types/domain";
+import type {
+  EvaluationModelMode,
+  ExceptionalReleaseVisualNotice,
+  SessionUser
+} from "@/types/domain";
 
 type UserRow = Database["public"]["Tables"]["usuarios"]["Row"];
 type StudentRow = Database["public"]["Tables"]["alunos"]["Row"];
@@ -17,8 +21,19 @@ type SemesterRow = Database["public"]["Tables"]["semestres"]["Row"];
 type ProfessorLinkRow = Database["public"]["Tables"]["vinculos_professor_aluno"]["Row"];
 type RubricGroupRow = Database["public"]["Tables"]["grupos_avaliacao"]["Row"];
 type RubricCriterionRow = Database["public"]["Tables"]["criterios_avaliacao"]["Row"];
+type CourseEvaluationModelRow =
+  Database["public"]["Tables"]["modelos_avaliacao_curso"]["Row"];
+type CourseEvaluationGroupRow =
+  Database["public"]["Tables"]["grupos_modelo_avaliacao"]["Row"];
+type CourseEvaluationCriterionRow =
+  Database["public"]["Tables"]["criterios_modelo_avaliacao"]["Row"];
+type CourseEvaluationCriterionOptionRow =
+  Database["public"]["Tables"]["opcoes_criterio_modelo_avaliacao"]["Row"];
+type OfferRow = Database["public"]["Tables"]["ofertas_curso_unidade"]["Row"];
 type EvaluationRow = Database["public"]["Tables"]["avaliacoes"]["Row"];
 type EvaluationItemRow = Database["public"]["Tables"]["itens_avaliados"]["Row"];
+
+export type EvaluationRuntimeSource = "course_model" | "legacy_global";
 
 export interface EvaluationStudentOption {
   enrollmentId: string;
@@ -35,11 +50,23 @@ export interface EvaluationStudentOption {
 
 export interface EvaluationRubricCriterion {
   id: string;
+  legacyCriterionId: string;
+  modelCriterionId: string | null;
   code: string;
   name: string;
   description: string | null;
   weightPercentage: number;
   maxScore: number;
+  options: EvaluationRubricCriterionOption[];
+}
+
+export interface EvaluationRubricCriterionOption {
+  id: string;
+  label: string;
+  description: string | null;
+  scoreValue: number;
+  order: number;
+  active: boolean;
 }
 
 export interface EvaluationRubricGroup {
@@ -95,6 +122,11 @@ export interface EvaluationFormPageData {
   };
   studentOptions: EvaluationStudentOption[];
   rubricGroups: EvaluationRubricGroup[];
+  evaluationMode: EvaluationModelMode;
+  evaluationSource: EvaluationRuntimeSource;
+  evaluationModelId: string | null;
+  evaluationModelCode: string | null;
+  evaluationModelName: string | null;
   mode: EvaluationFormMode;
   initialValues?: EvaluationFormInitialValues;
   readOnlyMessage?: string | null;
@@ -157,6 +189,19 @@ interface ProfessorEvaluationContext {
   professor: EvaluationFormPageData["professor"];
   studentOptions: EvaluationStudentOption[];
   studentOptionMap: Map<string, EvaluationStudentOption>;
+  runtimeContextByEnrollmentId: Map<string, EvaluationRuntimeContext>;
+  defaultRuntimeContext: EvaluationRuntimeContext;
+}
+
+export interface EvaluationRuntimeContext {
+  enrollmentId: string;
+  courseId: string | null;
+  offerId: string | null;
+  modelId: string | null;
+  modelCode: string | null;
+  modelName: string | null;
+  modality: EvaluationModelMode;
+  source: EvaluationRuntimeSource;
   rubricGroups: EvaluationRubricGroup[];
 }
 
@@ -289,6 +334,446 @@ function buildEvaluationStudentOption(input: {
   } satisfies EvaluationStudentOption;
 }
 
+function compareCourseModelsForRuntime(
+  left: CourseEvaluationModelRow,
+  right: CourseEvaluationModelRow
+) {
+  if (left.versao !== right.versao) {
+    return right.versao - left.versao;
+  }
+
+  const updatedAtDifference = safeSortableTimestamp(right.updated_at).localeCompare(
+    safeSortableTimestamp(left.updated_at)
+  );
+
+  if (updatedAtDifference !== 0) {
+    return updatedAtDifference;
+  }
+
+  return right.id.localeCompare(left.id);
+}
+
+function buildLegacyRubricGroups(
+  rubricGroups: RubricGroupRow[],
+  rubricCriteria: RubricCriterionRow[]
+) {
+  return rubricGroups.map((group) => ({
+    id: group.id,
+    code: group.codigo,
+    name: group.nome,
+    weightPercentage: Number(group.peso_percentual),
+    criteria: rubricCriteria
+      .filter((criterion) => criterion.grupo_id === group.id)
+      .map((criterion) => ({
+        id: criterion.id,
+        legacyCriterionId: criterion.id,
+        modelCriterionId: null,
+        code: criterion.codigo,
+        name: criterion.nome,
+        description: criterion.descricao,
+        weightPercentage: Number(criterion.peso_percentual),
+        maxScore: Number(criterion.escala_maxima),
+        options: []
+      }))
+  })) satisfies EvaluationRubricGroup[];
+}
+
+function buildFallbackRuntimeContext(
+  enrollmentId: string,
+  rubricGroups: EvaluationRubricGroup[] = []
+): EvaluationRuntimeContext {
+  return {
+    enrollmentId,
+    courseId: null,
+    offerId: null,
+    modelId: null,
+    modelCode: null,
+    modelName: null,
+    modality: "descritiva",
+    source: "legacy_global",
+    rubricGroups
+  };
+}
+
+function sortRubricOptionRows(
+  left: CourseEvaluationCriterionOptionRow,
+  right: CourseEvaluationCriterionOptionRow
+) {
+  if (left.ordem !== right.ordem) {
+    return left.ordem - right.ordem;
+  }
+
+  return left.rotulo.localeCompare(right.rotulo, "pt-BR");
+}
+
+export async function loadEvaluationRuntimeContextsForEnrollments(
+  enrollmentIds: string[]
+): Promise<Map<string, EvaluationRuntimeContext>> {
+  const uniqueEnrollmentIds = [...new Set(enrollmentIds.filter(Boolean))];
+  const runtimeContextByEnrollmentId = new Map<string, EvaluationRuntimeContext>();
+
+  if (!uniqueEnrollmentIds.length) {
+    return runtimeContextByEnrollmentId;
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const { data: enrollmentRowsData, error: enrollmentError } = await adminClient
+    .from("matriculas_turma")
+    .select("id, aluno_id, turma_id, oferta_curso_unidade_id")
+    .in("id", uniqueEnrollmentIds);
+
+  if (enrollmentError) {
+    throw new Error(
+      "Nao foi possivel carregar as matriculas para resolver a configuracao de avaliacao do curso."
+    );
+  }
+
+  const enrollmentRows = (enrollmentRowsData ?? []) as Array<
+    Pick<EnrollmentRow, "id" | "aluno_id" | "turma_id" | "oferta_curso_unidade_id">
+  >;
+
+  if (!enrollmentRows.length) {
+    return runtimeContextByEnrollmentId;
+  }
+
+  const studentIds = [...new Set(enrollmentRows.map((row) => row.aluno_id))];
+  const classIds = [...new Set(enrollmentRows.map((row) => row.turma_id))];
+
+  const [studentRowsResult, classRowsResult, rubricGroupsResult, rubricCriteriaResult] =
+    await Promise.all([
+      adminClient
+        .from("alunos")
+        .select("usuario_id, curso_id, oferta_curso_unidade_id")
+        .in("usuario_id", studentIds),
+      adminClient
+        .from("turmas")
+        .select("id, semestre_id, oferta_curso_unidade_id")
+        .in("id", classIds),
+      adminClient
+        .from("grupos_avaliacao")
+        .select("*")
+        .eq("ativo", true)
+        .order("ordem", { ascending: true }),
+      adminClient
+        .from("criterios_avaliacao")
+        .select("*")
+        .eq("ativo", true)
+        .order("ordem", { ascending: true })
+    ]);
+
+  if (
+    studentRowsResult.error ||
+    classRowsResult.error ||
+    rubricGroupsResult.error ||
+    rubricCriteriaResult.error
+  ) {
+    throw new Error(
+      "Nao foi possivel consolidar o contexto academico necessario para identificar a modalidade da avaliacao."
+    );
+  }
+
+  const studentRows = (studentRowsResult.data ?? []) as Array<
+    Pick<StudentRow, "usuario_id" | "curso_id" | "oferta_curso_unidade_id">
+  >;
+  const classRows = (classRowsResult.data ?? []) as Array<
+    Pick<ClassRow, "id" | "semestre_id" | "oferta_curso_unidade_id">
+  >;
+  const semesterIds = [...new Set(classRows.map((row) => row.semestre_id))];
+
+  const { data: semesterRowsData, error: semesterError } = semesterIds.length
+    ? await adminClient
+        .from("semestres")
+        .select("id, oferta_curso_unidade_id")
+        .in("id", semesterIds)
+    : { data: [], error: null };
+
+  if (semesterError) {
+    throw new Error(
+      "Nao foi possivel carregar os semestres das matriculas para identificar a configuracao de avaliacao."
+    );
+  }
+
+  const semesterRows = (semesterRowsData ?? []) as Array<
+    Pick<SemesterRow, "id" | "oferta_curso_unidade_id">
+  >;
+  const studentById = new Map(studentRows.map((row) => [row.usuario_id, row]));
+  const classById = new Map(classRows.map((row) => [row.id, row]));
+  const semesterById = new Map(semesterRows.map((row) => [row.id, row]));
+  const runtimeRubricGroups = (rubricGroupsResult.data ?? []) as RubricGroupRow[];
+  const runtimeRubricCriteria = (rubricCriteriaResult.data ?? []) as RubricCriterionRow[];
+  const legacyRubricGroups = buildLegacyRubricGroups(runtimeRubricGroups, runtimeRubricCriteria);
+  const legacyRuntimeContextBase = buildFallbackRuntimeContext("", legacyRubricGroups);
+
+  const offerIds = [...new Set(
+    enrollmentRows
+      .map((enrollmentRow) => {
+        const classRow = classById.get(enrollmentRow.turma_id);
+        const semesterRow = classRow
+          ? semesterById.get(classRow.semestre_id)
+          : undefined;
+        const studentRow = studentById.get(enrollmentRow.aluno_id);
+
+        return (
+          enrollmentRow.oferta_curso_unidade_id ??
+          classRow?.oferta_curso_unidade_id ??
+          semesterRow?.oferta_curso_unidade_id ??
+          studentRow?.oferta_curso_unidade_id ??
+          null
+        );
+      })
+      .filter((offerId): offerId is string => Boolean(offerId))
+  )];
+
+  const { data: offerRowsData, error: offerError } = offerIds.length
+    ? await adminClient
+        .from("ofertas_curso_unidade")
+        .select("id, curso_id")
+        .in("id", offerIds)
+    : { data: [], error: null };
+
+  if (offerError) {
+    throw new Error(
+      "Nao foi possivel carregar as ofertas do curso para identificar o modelo de avaliacao ativo."
+    );
+  }
+
+  const offerRows = (offerRowsData ?? []) as Array<Pick<OfferRow, "id" | "curso_id">>;
+  const offerById = new Map(offerRows.map((row) => [row.id, row]));
+  const courseIds = [...new Set(
+    enrollmentRows
+      .map((enrollmentRow) => {
+        const classRow = classById.get(enrollmentRow.turma_id);
+        const semesterRow = classRow
+          ? semesterById.get(classRow.semestre_id)
+          : undefined;
+        const studentRow = studentById.get(enrollmentRow.aluno_id);
+        const offerId =
+          enrollmentRow.oferta_curso_unidade_id ??
+          classRow?.oferta_curso_unidade_id ??
+          semesterRow?.oferta_curso_unidade_id ??
+          studentRow?.oferta_curso_unidade_id ??
+          null;
+
+        return studentRow?.curso_id ?? (offerId ? offerById.get(offerId)?.curso_id ?? null : null);
+      })
+      .filter((courseId): courseId is string => Boolean(courseId))
+  )];
+
+  const { data: modelRowsData, error: modelError } = courseIds.length
+    ? await adminClient
+        .from("modelos_avaliacao_curso")
+        .select("*")
+        .in("curso_id", courseIds)
+        .eq("ativo", true)
+    : { data: [], error: null };
+
+  if (modelError) {
+    throw new Error(
+      "Nao foi possivel carregar os modelos de avaliacao por curso para o runtime do professor."
+    );
+  }
+
+  const modelRows = ((modelRowsData ?? []) as CourseEvaluationModelRow[]).sort(
+    compareCourseModelsForRuntime
+  );
+  const selectedModelByCourseId = new Map<string, CourseEvaluationModelRow>();
+
+  for (const modelRow of modelRows) {
+    if (!selectedModelByCourseId.has(modelRow.curso_id)) {
+      selectedModelByCourseId.set(modelRow.curso_id, modelRow);
+    }
+  }
+
+  const selectedModelIds = [...selectedModelByCourseId.values()].map((modelRow) => modelRow.id);
+  const { data: modelGroupRowsData, error: modelGroupError } = selectedModelIds.length
+    ? await adminClient
+        .from("grupos_modelo_avaliacao")
+        .select("*")
+        .in("modelo_avaliacao_curso_id", selectedModelIds)
+        .eq("ativo", true)
+        .order("ordem", { ascending: true })
+    : { data: [], error: null };
+
+  if (modelGroupError) {
+    throw new Error(
+      "Nao foi possivel carregar os grupos do modelo de avaliacao configurado para o curso."
+    );
+  }
+
+  const modelGroupRows = (modelGroupRowsData ?? []) as CourseEvaluationGroupRow[];
+  const modelGroupIds = modelGroupRows.map((groupRow) => groupRow.id);
+  const { data: modelCriterionRowsData, error: modelCriterionError } = modelGroupIds.length
+    ? await adminClient
+        .from("criterios_modelo_avaliacao")
+        .select("*")
+        .in("grupo_modelo_avaliacao_id", modelGroupIds)
+        .eq("ativo", true)
+        .order("ordem", { ascending: true })
+    : { data: [], error: null };
+
+  if (modelCriterionError) {
+    throw new Error(
+      "Nao foi possivel carregar os criterios do modelo de avaliacao configurado para o curso."
+    );
+  }
+
+  const modelCriterionRows = (modelCriterionRowsData ?? []) as CourseEvaluationCriterionRow[];
+  const modelCriterionIds = modelCriterionRows.map((criterionRow) => criterionRow.id);
+  const { data: modelCriterionOptionRowsData, error: modelCriterionOptionError } =
+    modelCriterionIds.length
+      ? await adminClient
+          .from("opcoes_criterio_modelo_avaliacao")
+          .select("*")
+          .in("criterio_modelo_avaliacao_id", modelCriterionIds)
+          .eq("ativo", true)
+          .order("ordem", { ascending: true })
+      : { data: [], error: null };
+
+  if (modelCriterionOptionError) {
+    throw new Error(
+      "Nao foi possivel carregar as opcoes de rubrica configuradas para o curso."
+    );
+  }
+
+  const modelCriterionOptionRows =
+    (modelCriterionOptionRowsData ?? []) as CourseEvaluationCriterionOptionRow[];
+  const modelGroupsByModelId = new Map<string, CourseEvaluationGroupRow[]>();
+  const modelCriteriaByGroupId = new Map<string, CourseEvaluationCriterionRow[]>();
+  const modelOptionsByCriterionId = new Map<string, CourseEvaluationCriterionOptionRow[]>();
+
+  for (const modelGroupRow of modelGroupRows) {
+    const currentRows = modelGroupsByModelId.get(modelGroupRow.modelo_avaliacao_curso_id) ?? [];
+    currentRows.push(modelGroupRow);
+    modelGroupsByModelId.set(modelGroupRow.modelo_avaliacao_curso_id, currentRows);
+  }
+
+  for (const modelCriterionRow of modelCriterionRows) {
+    const currentRows = modelCriteriaByGroupId.get(modelCriterionRow.grupo_modelo_avaliacao_id) ?? [];
+    currentRows.push(modelCriterionRow);
+    modelCriteriaByGroupId.set(modelCriterionRow.grupo_modelo_avaliacao_id, currentRows);
+  }
+
+  for (const modelCriterionOptionRow of modelCriterionOptionRows) {
+    const currentRows =
+      modelOptionsByCriterionId.get(modelCriterionOptionRow.criterio_modelo_avaliacao_id) ?? [];
+    currentRows.push(modelCriterionOptionRow);
+    modelOptionsByCriterionId.set(
+      modelCriterionOptionRow.criterio_modelo_avaliacao_id,
+      currentRows
+    );
+  }
+
+  const legacyCriterionByCode = new Map<string, RubricCriterionRow>();
+
+  for (const runtimeCriterion of runtimeRubricCriteria) {
+    if (!legacyCriterionByCode.has(runtimeCriterion.codigo)) {
+      legacyCriterionByCode.set(runtimeCriterion.codigo, runtimeCriterion);
+    }
+  }
+
+  const courseRuntimeContextBaseByCourseId = new Map<
+    string,
+    Omit<EvaluationRuntimeContext, "enrollmentId" | "courseId" | "offerId">
+  >();
+
+  for (const [courseId, selectedModel] of selectedModelByCourseId.entries()) {
+    const modelGroups = modelGroupsByModelId.get(selectedModel.id) ?? [];
+
+    if (!modelGroups.length) {
+      continue;
+    }
+
+    let hasInvalidLegacyMapping = false;
+    const rubricGroups = modelGroups
+      .map((modelGroup) => {
+        const groupCriteria = (modelCriteriaByGroupId.get(modelGroup.id) ?? [])
+          .map((modelCriterion) => {
+            const legacyCriterion = legacyCriterionByCode.get(modelCriterion.codigo);
+
+            if (!legacyCriterion) {
+              hasInvalidLegacyMapping = true;
+              return null;
+            }
+
+            return {
+              id: modelCriterion.id,
+              legacyCriterionId: legacyCriterion.id,
+              modelCriterionId: modelCriterion.id,
+              code: modelCriterion.codigo,
+              name: modelCriterion.nome,
+              description: modelCriterion.descricao,
+              weightPercentage: Number(modelCriterion.peso_percentual),
+              maxScore: Number(modelCriterion.escala_maxima),
+              options: [...(modelOptionsByCriterionId.get(modelCriterion.id) ?? [])]
+                .sort(sortRubricOptionRows)
+                .map((optionRow) => ({
+                  id: optionRow.id,
+                  label: optionRow.rotulo,
+                  description: optionRow.descricao,
+                  scoreValue: Number(optionRow.valor_nota),
+                  order: optionRow.ordem,
+                  active: optionRow.ativo
+                }))
+            } satisfies EvaluationRubricCriterion;
+          })
+          .filter(Boolean) as EvaluationRubricCriterion[];
+
+        if (!groupCriteria.length) {
+          return null;
+        }
+
+        return {
+          id: modelGroup.id,
+          code: modelGroup.codigo,
+          name: modelGroup.nome,
+          weightPercentage: Number(modelGroup.peso_percentual),
+          criteria: groupCriteria
+        } satisfies EvaluationRubricGroup;
+      })
+      .filter(Boolean) as EvaluationRubricGroup[];
+
+    if (hasInvalidLegacyMapping || !rubricGroups.length) {
+      continue;
+    }
+
+    courseRuntimeContextBaseByCourseId.set(courseId, {
+      modelId: selectedModel.id,
+      modelCode: selectedModel.codigo,
+      modelName: selectedModel.nome,
+      modality: selectedModel.modalidade,
+      source: "course_model",
+      rubricGroups
+    });
+  }
+
+  for (const enrollmentRow of enrollmentRows) {
+    const classRow = classById.get(enrollmentRow.turma_id);
+    const semesterRow = classRow ? semesterById.get(classRow.semestre_id) : undefined;
+    const studentRow = studentById.get(enrollmentRow.aluno_id);
+    const offerId =
+      enrollmentRow.oferta_curso_unidade_id ??
+      classRow?.oferta_curso_unidade_id ??
+      semesterRow?.oferta_curso_unidade_id ??
+      studentRow?.oferta_curso_unidade_id ??
+      null;
+    const courseId =
+      studentRow?.curso_id ??
+      (offerId ? offerById.get(offerId)?.curso_id ?? null : null);
+    const courseRuntimeContextBase = courseId
+      ? courseRuntimeContextBaseByCourseId.get(courseId)
+      : null;
+
+    runtimeContextByEnrollmentId.set(enrollmentRow.id, {
+      ...(courseRuntimeContextBase ?? legacyRuntimeContextBase),
+      enrollmentId: enrollmentRow.id,
+      courseId,
+      offerId
+    });
+  }
+
+  return runtimeContextByEnrollmentId;
+}
+
 function safeSortableTimestamp(value?: string | null) {
   return typeof value === "string" ? value : "";
 }
@@ -325,9 +810,16 @@ function mapEvaluationItemsByEvaluationId(items: EvaluationItemRow[]) {
   return itemsByEvaluationId;
 }
 
+function resolveEvaluationItemCriterionKey(item: EvaluationItemRow) {
+  return item.criterio_modelo_avaliacao_id ?? item.criterio_id;
+}
+
 function scoreRecordFromItems(items: EvaluationItemRow[]) {
   return Object.fromEntries(
-    items.map((item) => [item.criterio_id, String(Number(item.nota_bruta))])
+    items.map((item) => [
+      resolveEvaluationItemCriterionKey(item),
+      String(Number(item.nota_bruta))
+    ])
   );
 }
 
@@ -335,7 +827,7 @@ function feedbackRecordFromItems(items: EvaluationItemRow[]) {
   return Object.fromEntries(
     items
       .filter((item) => Boolean(item.feedback))
-      .map((item) => [item.criterio_id, item.feedback ?? ""])
+      .map((item) => [resolveEvaluationItemCriterionKey(item), item.feedback ?? ""])
   );
 }
 
@@ -350,7 +842,10 @@ function mergeScoreMapWithItems(
   const mergedScores = new Map(baseScores);
 
   for (const item of items) {
-    mergedScores.set(item.criterio_id, String(Number(item.nota_bruta)));
+    mergedScores.set(
+      resolveEvaluationItemCriterionKey(item),
+      String(Number(item.nota_bruta))
+    );
   }
 
   return mergedScores;
@@ -364,9 +859,9 @@ function mergeFeedbackMapWithItems(
 
   for (const item of items) {
     if (item.feedback && item.feedback.trim() !== "") {
-      mergedFeedbacks.set(item.criterio_id, item.feedback);
+      mergedFeedbacks.set(resolveEvaluationItemCriterionKey(item), item.feedback);
     } else {
-      mergedFeedbacks.delete(item.criterio_id);
+      mergedFeedbacks.delete(resolveEvaluationItemCriterionKey(item));
     }
   }
 
@@ -383,7 +878,10 @@ function buildCriterionScoresThroughChain(
   for (const evaluation of [...chainRows].sort(compareEvaluationRows)) {
     if (evaluation.status === "publicado") {
       for (const item of itemsByEvaluationId.get(evaluation.id) ?? []) {
-        scoreMap.set(item.criterio_id, String(Number(item.nota_bruta)));
+        scoreMap.set(
+          resolveEvaluationItemCriterionKey(item),
+          String(Number(item.nota_bruta))
+        );
       }
     }
 
@@ -406,9 +904,9 @@ function buildCriterionFeedbacksThroughChain(
     if (evaluation.status === "publicado") {
       for (const item of itemsByEvaluationId.get(evaluation.id) ?? []) {
         if (item.feedback && item.feedback.trim() !== "") {
-          feedbackMap.set(item.criterio_id, item.feedback);
+          feedbackMap.set(resolveEvaluationItemCriterionKey(item), item.feedback);
         } else {
-          feedbackMap.delete(item.criterio_id);
+          feedbackMap.delete(resolveEvaluationItemCriterionKey(item));
         }
       }
     }
@@ -578,7 +1076,7 @@ function buildEvaluationChainBundle(
     effectiveFeedbacks,
     editableScores,
     editableFeedbacks,
-    changedCriterionIds: targetItems.map((item) => item.criterio_id),
+    changedCriterionIds: targetItems.map((item) => resolveEvaluationItemCriterionKey(item)),
     revisionChain: buildRevisionChainEntries(sortedChainRows, targetEvaluation.id)
   };
 }
@@ -968,63 +1466,39 @@ async function loadProfessorEvaluationContext(
     }));
   }
 
-  let rubricGroupsWithCriteria: EvaluationRubricGroup[] = [];
+  let runtimeContextByEnrollmentId = new Map<string, EvaluationRuntimeContext>();
+  let defaultRuntimeContext = buildFallbackRuntimeContext(studentOptions[0]?.enrollmentId ?? "");
 
   if (includeRubric) {
-    const [rubricGroupsResult, rubricCriteriaResult] = await Promise.all([
-      supabase
-        .from("grupos_avaliacao")
-        .select("*")
-        .eq("ativo", true)
-        .order("ordem", { ascending: true }),
-      supabase
-        .from("criterios_avaliacao")
-        .select("*")
-        .eq("ativo", true)
-        .order("ordem", { ascending: true })
-    ]);
-
-    if (rubricGroupsResult.error || rubricCriteriaResult.error) {
+    try {
+      runtimeContextByEnrollmentId = await loadEvaluationRuntimeContextsForEnrollments(
+        studentOptions.map((studentOption) => studentOption.enrollmentId)
+      );
+    } catch (_error) {
       return {
         context: null,
         emptyState: {
           title: "Não foi possível carregar a rubrica de avaliação",
           description:
-            "Os grupos e critérios necessários para o formulário não puderam ser consultados."
+            "Os grupos, critérios e modalidades necessários para o formulário não puderam ser consultados."
         }
       };
     }
 
-    const rubricGroups = (rubricGroupsResult.data ?? []) as RubricGroupRow[];
-    const rubricCriteria = (rubricCriteriaResult.data ?? []) as RubricCriterionRow[];
+    defaultRuntimeContext =
+      runtimeContextByEnrollmentId.get(studentOptions[0]?.enrollmentId ?? "") ??
+      buildFallbackRuntimeContext(studentOptions[0]?.enrollmentId ?? "");
 
-    if (!rubricGroups.length || !rubricCriteria.length) {
+    if (!defaultRuntimeContext.rubricGroups.length) {
       return {
         context: null,
         emptyState: {
           title: "Rubrica de avaliação indisponível",
           description:
-            "Ainda não há grupos e critérios de avaliação ativos configurados no banco."
+            "Ainda não há grupos e critérios ativos disponíveis no modelo do curso nem no fallback legado."
         }
       };
     }
-
-    rubricGroupsWithCriteria = rubricGroups.map((group) => ({
-      id: group.id,
-      code: group.codigo,
-      name: group.nome,
-      weightPercentage: Number(group.peso_percentual),
-      criteria: rubricCriteria
-        .filter((criterion) => criterion.grupo_id === group.id)
-        .map((criterion) => ({
-          id: criterion.id,
-          code: criterion.codigo,
-          name: criterion.nome,
-          description: criterion.descricao,
-          weightPercentage: Number(criterion.peso_percentual),
-          maxScore: Number(criterion.escala_maxima)
-        }))
-    }));
   }
 
   return {
@@ -1041,10 +1515,25 @@ async function loadProfessorEvaluationContext(
           studentOption
         ])
       ),
-      rubricGroups: rubricGroupsWithCriteria
+      runtimeContextByEnrollmentId,
+      defaultRuntimeContext
     },
     emptyState: null
   };
+}
+
+function resolveRuntimeContextForEnrollment(
+  context: ProfessorEvaluationContext,
+  enrollmentId: string | null | undefined
+) {
+  if (enrollmentId) {
+    return (
+      context.runtimeContextByEnrollmentId.get(enrollmentId) ??
+      buildFallbackRuntimeContext(enrollmentId, context.defaultRuntimeContext.rubricGroups)
+    );
+  }
+
+  return context.defaultRuntimeContext;
 }
 
 export async function getEvaluationFormPageData(
@@ -1063,11 +1552,21 @@ export async function getEvaluationFormPageData(
     );
   }
 
+  const runtimeContext = resolveRuntimeContextForEnrollment(
+    context,
+    context.studentOptions[0]?.enrollmentId
+  );
+
   return {
     formData: {
       professor: context.professor,
       studentOptions: context.studentOptions,
-      rubricGroups: context.rubricGroups,
+      rubricGroups: runtimeContext.rubricGroups,
+      evaluationMode: runtimeContext.modality,
+      evaluationSource: runtimeContext.source,
+      evaluationModelId: runtimeContext.modelId,
+      evaluationModelCode: runtimeContext.modelCode,
+      evaluationModelName: runtimeContext.modelName,
       mode: "create",
       readOnlyMessage: null,
       contextMessage: null,
@@ -1203,6 +1702,10 @@ export async function getEvaluationEditorPageData(
 
   const evaluationRow = evaluationRowData as EvaluationRow;
   const studentOption = context.studentOptionMap.get(evaluationRow.matricula_turma_id);
+  const runtimeContext = resolveRuntimeContextForEnrollment(
+    context,
+    evaluationRow.matricula_turma_id
+  );
 
   if (!studentOption) {
     return buildEmptyState(
@@ -1276,7 +1779,12 @@ export async function getEvaluationEditorPageData(
     formData: {
       professor: context.professor,
       studentOptions: context.studentOptions,
-      rubricGroups: context.rubricGroups,
+      rubricGroups: runtimeContext.rubricGroups,
+      evaluationMode: runtimeContext.modality,
+      evaluationSource: runtimeContext.source,
+      evaluationModelId: runtimeContext.modelId,
+      evaluationModelCode: runtimeContext.modelCode,
+      evaluationModelName: runtimeContext.modelName,
       mode: isReadOnly ? "readonly" : "edit",
       readOnlyMessage,
       contextMessage,
@@ -1345,6 +1853,10 @@ export async function getEvaluationReviewPageData(
   }
 
   const evaluationRow = evaluationRowData as EvaluationRow;
+  const runtimeContext = resolveRuntimeContextForEnrollment(
+    context,
+    evaluationRow.matricula_turma_id
+  );
 
   if (evaluationRow.status !== "publicado") {
     return buildReviewEmptyState(
@@ -1402,7 +1914,12 @@ export async function getEvaluationReviewPageData(
     formData: {
       professor: context.professor,
       studentOptions: context.studentOptions,
-      rubricGroups: context.rubricGroups,
+      rubricGroups: runtimeContext.rubricGroups,
+      evaluationMode: runtimeContext.modality,
+      evaluationSource: runtimeContext.source,
+      evaluationModelId: runtimeContext.modelId,
+      evaluationModelCode: runtimeContext.modelCode,
+      evaluationModelName: runtimeContext.modelName,
       mode: "review",
       readOnlyMessage: null,
       contextMessage:
