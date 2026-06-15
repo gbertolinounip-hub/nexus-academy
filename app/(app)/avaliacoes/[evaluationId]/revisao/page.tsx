@@ -58,6 +58,9 @@ export default async function EvaluationReviewPage({
           <EvaluationForm
             studentOptions={formData.studentOptions}
             rubricGroups={formData.rubricGroups}
+            evaluationMode={formData.evaluationMode}
+            evaluationModelName={formData.evaluationModelName}
+            runtimeContextsByEnrollmentId={formData.runtimeContextsByEnrollmentId}
             mode={formData.mode}
             initialValues={formData.initialValues}
             readOnlyMessage={formData.readOnlyMessage}

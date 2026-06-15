@@ -107,11 +107,26 @@ export interface EvaluationFormInitialValues {
   avaliadoEm: string;
   criterionScores: Record<string, string>;
   criterionFeedbacks: Record<string, string>;
+  criterionOptionSelections: Record<string, string>;
   baselineCriterionScores: Record<string, string>;
   baselineCriterionFeedbacks: Record<string, string>;
+  baselineCriterionOptionSelections: Record<string, string>;
   effectiveCriterionScores: Record<string, string>;
   effectiveCriterionFeedbacks: Record<string, string>;
+  effectiveCriterionOptionSelections: Record<string, string>;
   changedCriterionIds: string[];
+}
+
+export interface EvaluationRuntimeFormContext {
+  enrollmentId: string;
+  courseId: string | null;
+  offerId: string | null;
+  modelId: string | null;
+  modelCode: string | null;
+  modelName: string | null;
+  modality: EvaluationModelMode;
+  source: EvaluationRuntimeSource;
+  rubricGroups: EvaluationRubricGroup[];
 }
 
 export interface EvaluationFormPageData {
@@ -127,6 +142,7 @@ export interface EvaluationFormPageData {
   evaluationModelId: string | null;
   evaluationModelCode: string | null;
   evaluationModelName: string | null;
+  runtimeContextsByEnrollmentId: Record<string, EvaluationRuntimeFormContext>;
   mode: EvaluationFormMode;
   initialValues?: EvaluationFormInitialValues;
   readOnlyMessage?: string | null;
@@ -212,10 +228,13 @@ interface EvaluationChainBundle {
   directDraftRevision: EvaluationRow | null;
   baselineScores: Record<string, string>;
   baselineFeedbacks: Record<string, string>;
+  baselineOptionSelections: Record<string, string>;
   effectiveScores: Record<string, string>;
   effectiveFeedbacks: Record<string, string>;
+  effectiveOptionSelections: Record<string, string>;
   editableScores: Record<string, string>;
   editableFeedbacks: Record<string, string>;
+  editableOptionSelections: Record<string, string>;
   changedCriterionIds: string[];
   revisionChain: EvaluationRevisionChainEntry[];
 }
@@ -831,6 +850,17 @@ function feedbackRecordFromItems(items: EvaluationItemRow[]) {
   );
 }
 
+function optionSelectionRecordFromItems(items: EvaluationItemRow[]) {
+  return Object.fromEntries(
+    items
+      .filter((item) => Boolean(item.opcao_criterio_modelo_avaliacao_id))
+      .map((item) => [
+        resolveEvaluationItemCriterionKey(item),
+        item.opcao_criterio_modelo_avaliacao_id ?? ""
+      ])
+  );
+}
+
 function scoreRecordFromMap(scoreMap: Map<string, string>) {
   return Object.fromEntries(scoreMap.entries());
 }
@@ -866,6 +896,26 @@ function mergeFeedbackMapWithItems(
   }
 
   return mergedFeedbacks;
+}
+
+function mergeOptionSelectionMapWithItems(
+  baseOptionSelections: Map<string, string>,
+  items: EvaluationItemRow[]
+) {
+  const mergedOptionSelections = new Map(baseOptionSelections);
+
+  for (const item of items) {
+    if (item.opcao_criterio_modelo_avaliacao_id) {
+      mergedOptionSelections.set(
+        resolveEvaluationItemCriterionKey(item),
+        item.opcao_criterio_modelo_avaliacao_id
+      );
+    } else {
+      mergedOptionSelections.delete(resolveEvaluationItemCriterionKey(item));
+    }
+  }
+
+  return mergedOptionSelections;
 }
 
 function buildCriterionScoresThroughChain(
@@ -917,6 +967,35 @@ function buildCriterionFeedbacksThroughChain(
   }
 
   return feedbackMap;
+}
+
+function buildCriterionOptionSelectionsThroughChain(
+  chainRows: EvaluationRow[],
+  itemsByEvaluationId: Map<string, EvaluationItemRow[]>,
+  stopAtEvaluationId: string
+) {
+  const optionSelectionMap = new Map<string, string>();
+
+  for (const evaluation of [...chainRows].sort(compareEvaluationRows)) {
+    if (evaluation.status === "publicado") {
+      for (const item of itemsByEvaluationId.get(evaluation.id) ?? []) {
+        if (item.opcao_criterio_modelo_avaliacao_id) {
+          optionSelectionMap.set(
+            resolveEvaluationItemCriterionKey(item),
+            item.opcao_criterio_modelo_avaliacao_id
+          );
+        } else {
+          optionSelectionMap.delete(resolveEvaluationItemCriterionKey(item));
+        }
+      }
+    }
+
+    if (evaluation.id === stopAtEvaluationId) {
+      break;
+    }
+  }
+
+  return optionSelectionMap;
 }
 
 function getReviewLevel(
@@ -1026,9 +1105,20 @@ function buildEvaluationChainBundle(
           )
         )
       : {};
+  const baselineOptionSelections =
+    targetEvaluation.avaliacao_origem_id !== null
+      ? scoreRecordFromMap(
+          buildCriterionOptionSelectionsThroughChain(
+            sortedChainRows,
+            itemsByEvaluationId,
+            targetEvaluation.avaliacao_origem_id
+          )
+        )
+      : {};
 
   const editableScores = scoreRecordFromItems(targetItems);
   const editableFeedbacks = feedbackRecordFromItems(targetItems);
+  const editableOptionSelections = optionSelectionRecordFromItems(targetItems);
 
   const effectiveScores =
     targetEvaluation.status === "rascunho"
@@ -1064,6 +1154,23 @@ function buildEvaluationChainBundle(
             targetEvaluation.id
           )
         );
+  const effectiveOptionSelections =
+    targetEvaluation.status === "rascunho"
+      ? scoreRecordFromMap(
+          targetEvaluation.avaliacao_origem_id
+            ? mergeOptionSelectionMapWithItems(
+                new Map(Object.entries(baselineOptionSelections)),
+                targetItems
+              )
+            : new Map(Object.entries(editableOptionSelections))
+        )
+      : scoreRecordFromMap(
+          buildCriterionOptionSelectionsThroughChain(
+            sortedChainRows,
+            itemsByEvaluationId,
+            targetEvaluation.id
+          )
+        );
 
   return {
     chainRows: sortedChainRows,
@@ -1072,10 +1179,13 @@ function buildEvaluationChainBundle(
     directDraftRevision,
     baselineScores,
     baselineFeedbacks,
+    baselineOptionSelections,
     effectiveScores,
     effectiveFeedbacks,
+    effectiveOptionSelections,
     editableScores,
     editableFeedbacks,
+    editableOptionSelections,
     changedCriterionIds: targetItems.map((item) => resolveEvaluationItemCriterionKey(item)),
     revisionChain: buildRevisionChainEntries(sortedChainRows, targetEvaluation.id)
   };
@@ -1536,6 +1646,34 @@ function resolveRuntimeContextForEnrollment(
   return context.defaultRuntimeContext;
 }
 
+function serializeRuntimeContextsByEnrollment(
+  context: ProfessorEvaluationContext
+): Record<string, EvaluationRuntimeFormContext> {
+  return Object.fromEntries(
+    context.studentOptions.map((studentOption) => {
+      const runtimeContext = resolveRuntimeContextForEnrollment(
+        context,
+        studentOption.enrollmentId
+      );
+
+      return [
+        studentOption.enrollmentId,
+        {
+          enrollmentId: runtimeContext.enrollmentId,
+          courseId: runtimeContext.courseId,
+          offerId: runtimeContext.offerId,
+          modelId: runtimeContext.modelId,
+          modelCode: runtimeContext.modelCode,
+          modelName: runtimeContext.modelName,
+          modality: runtimeContext.modality,
+          source: runtimeContext.source,
+          rubricGroups: runtimeContext.rubricGroups
+        } satisfies EvaluationRuntimeFormContext
+      ];
+    })
+  );
+}
+
 export async function getEvaluationFormPageData(
   currentUser: SessionUser
 ): Promise<EvaluationFormLoadResult> {
@@ -1567,6 +1705,7 @@ export async function getEvaluationFormPageData(
       evaluationModelId: runtimeContext.modelId,
       evaluationModelCode: runtimeContext.modelCode,
       evaluationModelName: runtimeContext.modelName,
+      runtimeContextsByEnrollmentId: serializeRuntimeContextsByEnrollment(context),
       mode: "create",
       readOnlyMessage: null,
       contextMessage: null,
@@ -1785,6 +1924,7 @@ export async function getEvaluationEditorPageData(
       evaluationModelId: runtimeContext.modelId,
       evaluationModelCode: runtimeContext.modelCode,
       evaluationModelName: runtimeContext.modelName,
+      runtimeContextsByEnrollmentId: serializeRuntimeContextsByEnrollment(context),
       mode: isReadOnly ? "readonly" : "edit",
       readOnlyMessage,
       contextMessage,
@@ -1809,10 +1949,15 @@ export async function getEvaluationEditorPageData(
         criterionFeedbacks: isReadOnly
           ? bundle.effectiveFeedbacks
           : bundle.editableFeedbacks,
+        criterionOptionSelections: isReadOnly
+          ? bundle.effectiveOptionSelections
+          : bundle.editableOptionSelections,
         baselineCriterionScores: bundle.baselineScores,
         baselineCriterionFeedbacks: bundle.baselineFeedbacks,
+        baselineCriterionOptionSelections: bundle.baselineOptionSelections,
         effectiveCriterionScores: bundle.effectiveScores,
         effectiveCriterionFeedbacks: bundle.effectiveFeedbacks,
+        effectiveCriterionOptionSelections: bundle.effectiveOptionSelections,
         changedCriterionIds: bundle.changedCriterionIds
       }
     },
@@ -1920,6 +2065,7 @@ export async function getEvaluationReviewPageData(
       evaluationModelId: runtimeContext.modelId,
       evaluationModelCode: runtimeContext.modelCode,
       evaluationModelName: runtimeContext.modelName,
+      runtimeContextsByEnrollmentId: serializeRuntimeContextsByEnrollment(context),
       mode: "review",
       readOnlyMessage: null,
       contextMessage:
@@ -1937,10 +2083,13 @@ export async function getEvaluationReviewPageData(
         avaliadoEm: getTodayInSaoPaulo(),
         criterionScores: {},
         criterionFeedbacks: {},
+        criterionOptionSelections: {},
         baselineCriterionScores: bundle.effectiveScores,
         baselineCriterionFeedbacks: bundle.effectiveFeedbacks,
+        baselineCriterionOptionSelections: bundle.effectiveOptionSelections,
         effectiveCriterionScores: bundle.effectiveScores,
         effectiveCriterionFeedbacks: bundle.effectiveFeedbacks,
+        effectiveCriterionOptionSelections: bundle.effectiveOptionSelections,
         changedCriterionIds: []
       }
     },

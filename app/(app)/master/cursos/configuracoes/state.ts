@@ -28,6 +28,15 @@ export interface CourseConfigurationCreateCriterionFormValues {
   ativo: string;
 }
 
+export interface CourseConfigurationCreateCriterionOptionFormValues {
+  criterion_id: string;
+  rotulo: string;
+  descricao: string;
+  valor_nota: string;
+  ordem: string;
+  ativo: string;
+}
+
 export interface CourseConfigurationCreateRequiredDocumentFormValues {
   course_id: string;
   tipo_documento_id: string;
@@ -76,6 +85,15 @@ export interface CourseConfigurationCriterionFormValues {
   ativo: string;
 }
 
+export interface CourseConfigurationCriterionOptionFormValues {
+  criterion_option_id: string;
+  rotulo: string;
+  descricao: string;
+  valor_nota: string;
+  ordem: string;
+  ativo: string;
+}
+
 export interface CourseConfigurationRequiredDocumentFormValues {
   required_document_id: string;
   nome_exibicao: string;
@@ -120,6 +138,11 @@ export const initialCourseConfigurationCreateGroupActionState:
 export const initialCourseConfigurationCreateCriterionActionState:
   CourseConfigurationActionState<CourseConfigurationCreateCriterionFormValues> = {
     ...createInitialCourseConfigurationActionState<CourseConfigurationCreateCriterionFormValues>()
+  };
+
+export const initialCourseConfigurationCreateCriterionOptionActionState:
+  CourseConfigurationActionState<CourseConfigurationCreateCriterionOptionFormValues> = {
+    ...createInitialCourseConfigurationActionState<CourseConfigurationCreateCriterionOptionFormValues>()
   };
 
 export const initialCourseConfigurationCreateRequiredDocumentActionState:
@@ -189,6 +212,21 @@ export function createEmptyCourseConfigurationCreateCriterionFormValues(
     ordem: order,
     peso_percentual: weightPercent,
     escala_maxima: maxScale,
+    ativo: "true"
+  };
+}
+
+export function createEmptyCourseConfigurationCreateCriterionOptionFormValues(
+  criterionId = "",
+  order = "1",
+  scoreValue = "0"
+): CourseConfigurationCreateCriterionOptionFormValues {
+  return {
+    criterion_id: criterionId,
+    rotulo: "",
+    descricao: "",
+    valor_nota: scoreValue,
+    ordem: order,
     ativo: "true"
   };
 }

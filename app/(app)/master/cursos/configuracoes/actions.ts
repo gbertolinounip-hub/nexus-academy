@@ -9,12 +9,14 @@ import type {
   CourseConfigurationActionState,
   CourseConfigurationCopyFormValues,
   CourseConfigurationCreateCriterionFormValues,
+  CourseConfigurationCreateCriterionOptionFormValues,
   CourseConfigurationCreateGroupFormValues,
   CourseConfigurationCreateRequiredDocumentFormValues,
   CourseConfigurationDeleteCriterionFormValues,
   CourseConfigurationDeleteGroupFormValues,
   CourseConfigurationDeleteRequiredDocumentFormValues,
   CourseConfigurationCriterionFormValues,
+  CourseConfigurationCriterionOptionFormValues,
   CourseConfigurationGroupFormValues,
   CourseConfigurationInitializeFormValues,
   CourseConfigurationModelFormValues,
@@ -101,6 +103,30 @@ const createCriterionConfigurationSchema = z.object({
   escala_maxima: z.coerce
     .number({ message: "Informe uma escala maxima valida." })
     .gt(0, "A escala maxima precisa ser maior que zero."),
+  ativo: z.enum(["true", "false"], {
+    message: "Selecione um status valido."
+  })
+});
+
+const createCriterionOptionConfigurationSchema = z.object({
+  criterion_id: z.string().uuid("Criterio invalido."),
+  rotulo: z
+    .string()
+    .trim()
+    .min(1, "Informe o rotulo da opcao.")
+    .max(160, "O rotulo da opcao deve ter no maximo 160 caracteres."),
+  descricao: z
+    .string()
+    .trim()
+    .max(2000, "A descricao deve ter no maximo 2000 caracteres."),
+  valor_nota: z.coerce
+    .number({ message: "Informe uma nota valida." })
+    .min(0, "A nota da rubrica precisa ser maior ou igual a zero.")
+    .max(10, "A nota da rubrica precisa ser menor ou igual a 10."),
+  ordem: z.coerce
+    .number({ message: "Informe uma ordem valida." })
+    .int("A ordem precisa ser um numero inteiro.")
+    .gt(0, "A ordem precisa ser maior que zero."),
   ativo: z.enum(["true", "false"], {
     message: "Selecione um status valido."
   })
@@ -222,6 +248,30 @@ const criterionConfigurationSchema = z.object({
   })
 });
 
+const criterionOptionConfigurationSchema = z.object({
+  criterion_option_id: z.string().uuid("Opcao de rubrica invalida."),
+  rotulo: z
+    .string()
+    .trim()
+    .min(1, "Informe o rotulo da opcao.")
+    .max(160, "O rotulo da opcao deve ter no maximo 160 caracteres."),
+  descricao: z
+    .string()
+    .trim()
+    .max(2000, "A descricao deve ter no maximo 2000 caracteres."),
+  valor_nota: z.coerce
+    .number({ message: "Informe uma nota valida." })
+    .min(0, "A nota da rubrica precisa ser maior ou igual a zero.")
+    .max(10, "A nota da rubrica precisa ser menor ou igual a 10."),
+  ordem: z.coerce
+    .number({ message: "Informe uma ordem valida." })
+    .int("A ordem precisa ser um numero inteiro.")
+    .gt(0, "A ordem precisa ser maior que zero."),
+  ativo: z.enum(["true", "false"], {
+    message: "Selecione um status valido."
+  })
+});
+
 const requiredDocumentConfigurationSchema = z.object({
   required_document_id: z.string().uuid("Documento obrigatorio invalido."),
   nome_exibicao: z
@@ -314,6 +364,19 @@ function buildCreateCriterionFormValues(
   };
 }
 
+function buildCreateCriterionOptionFormValues(
+  formData: FormData
+): CourseConfigurationCreateCriterionOptionFormValues {
+  return {
+    criterion_id: readStringField(formData, "criterion_id"),
+    rotulo: readStringField(formData, "rotulo"),
+    descricao: readStringField(formData, "descricao"),
+    valor_nota: readStringField(formData, "valor_nota"),
+    ordem: readStringField(formData, "ordem"),
+    ativo: readStringField(formData, "ativo")
+  };
+}
+
 function buildCreateRequiredDocumentFormValues(
   formData: FormData
 ): CourseConfigurationCreateRequiredDocumentFormValues {
@@ -381,6 +444,19 @@ function buildCriterionFormValues(formData: FormData): CourseConfigurationCriter
     ordem: readStringField(formData, "ordem"),
     peso_percentual: readStringField(formData, "peso_percentual"),
     escala_maxima: readStringField(formData, "escala_maxima"),
+    ativo: readStringField(formData, "ativo")
+  };
+}
+
+function buildCriterionOptionFormValues(
+  formData: FormData
+): CourseConfigurationCriterionOptionFormValues {
+  return {
+    criterion_option_id: readStringField(formData, "criterion_option_id"),
+    rotulo: readStringField(formData, "rotulo"),
+    descricao: readStringField(formData, "descricao"),
+    valor_nota: readStringField(formData, "valor_nota"),
+    ordem: readStringField(formData, "ordem"),
     ativo: readStringField(formData, "ativo")
   };
 }
@@ -761,7 +837,7 @@ async function loadModel(modelId: string) {
   const adminClient = createSupabaseAdminClient();
   const { data, error } = await adminClient
     .from("modelos_avaliacao_curso")
-    .select("id, codigo, curso_id, nome, descricao, versao, ativo, metadata")
+    .select("id, codigo, curso_id, nome, descricao, versao, modalidade, ativo, metadata")
     .eq("id", modelId)
     .maybeSingle();
 
@@ -771,7 +847,15 @@ async function loadModel(modelId: string) {
 
   return data as Pick<
     ModelRow,
-    "id" | "codigo" | "curso_id" | "nome" | "descricao" | "versao" | "ativo" | "metadata"
+    | "id"
+    | "codigo"
+    | "curso_id"
+    | "nome"
+    | "descricao"
+    | "versao"
+    | "modalidade"
+    | "ativo"
+    | "metadata"
   >;
 }
 
@@ -805,6 +889,24 @@ async function loadCriterion(criterionId: string) {
   return data as Pick<
     CriterionRow,
     "id" | "codigo" | "nome" | "ativo" | "grupo_modelo_avaliacao_id"
+  >;
+}
+
+async function loadCriterionOption(criterionOptionId: string) {
+  const adminClient = createSupabaseAdminClient();
+  const { data, error } = await adminClient
+    .from("opcoes_criterio_modelo_avaliacao")
+    .select("id, criterio_modelo_avaliacao_id, rotulo, ativo")
+    .eq("id", criterionOptionId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data as Pick<
+    CriterionOptionRow,
+    "id" | "criterio_modelo_avaliacao_id" | "rotulo" | "ativo"
   >;
 }
 
@@ -1167,6 +1269,90 @@ export async function createCourseConfigurationCriterionAction(
   return buildActionState(
     "success",
     `Criterio ${parsedData.data.nome} criado com sucesso.`,
+    {},
+    submittedFormValues
+  );
+}
+
+export async function createCourseConfigurationCriterionOptionAction(
+  _previousState: CourseConfigurationActionState<CourseConfigurationCreateCriterionOptionFormValues>,
+  formData: FormData
+): Promise<CourseConfigurationActionState<CourseConfigurationCreateCriterionOptionFormValues>> {
+  await requireRole(["coordenador_master"]);
+  const submittedFormValues = buildCreateCriterionOptionFormValues(formData);
+  const parsedData = createCriterionOptionConfigurationSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return buildActionState(
+      "error",
+      "Revise os campos da nova opcao de rubrica.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const targetCriterion = await loadCriterion(parsedData.data.criterion_id);
+
+  if (!targetCriterion) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel localizar o criterio informado.",
+      { criterion_id: "Selecione um criterio valido." },
+      submittedFormValues
+    );
+  }
+
+  const targetGroup = await loadGroup(targetCriterion.grupo_modelo_avaliacao_id);
+  const targetModel = targetGroup
+    ? await loadModel(targetGroup.modelo_avaliacao_curso_id)
+    : null;
+
+  if (!targetGroup || !targetModel) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel validar o vinculo do criterio com o modelo de avaliacao.",
+      { criterion_id: "Selecione um criterio valido." },
+      submittedFormValues
+    );
+  }
+
+  if (targetModel.modalidade !== "rubrica") {
+    return buildActionState(
+      "error",
+      "Opcoes de rubrica so podem ser cadastradas em modelos com modalidade rubrica.",
+      { criterion_id: "Altere o modelo para modalidade rubrica antes de criar opcoes." },
+      submittedFormValues
+    );
+  }
+
+  const criterionOptionInsertPayload: CriterionOptionInsert = {
+    criterio_modelo_avaliacao_id: targetCriterion.id,
+    rotulo: parsedData.data.rotulo,
+    descricao: toNullableText(parsedData.data.descricao),
+    valor_nota: parsedData.data.valor_nota,
+    ordem: parsedData.data.ordem,
+    ativo: toBooleanValue(parsedData.data.ativo)
+  };
+
+  const adminClient = createSupabaseAdminClient();
+  const { error } = await adminClient
+    .from("opcoes_criterio_modelo_avaliacao")
+    .insert(criterionOptionInsertPayload as never);
+
+  if (error) {
+    return buildActionState(
+      "error",
+      error.message || "Nao foi possivel criar a opcao de rubrica.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  revalidateCourseConfigurationPaths();
+
+  return buildActionState(
+    "success",
+    `Opcao ${parsedData.data.rotulo} criada com sucesso.`,
     {},
     submittedFormValues
   );
@@ -1733,6 +1919,91 @@ export async function updateCourseConfigurationCriterionAction(
   return buildActionState(
     "success",
     `Criterio ${parsedData.data.nome} atualizado com sucesso.`,
+    {},
+    submittedFormValues
+  );
+}
+
+export async function updateCourseConfigurationCriterionOptionAction(
+  _previousState: CourseConfigurationActionState<CourseConfigurationCriterionOptionFormValues>,
+  formData: FormData
+): Promise<CourseConfigurationActionState<CourseConfigurationCriterionOptionFormValues>> {
+  await requireRole(["coordenador_master"]);
+  const submittedFormValues = buildCriterionOptionFormValues(formData);
+  const parsedData = criterionOptionConfigurationSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return buildActionState(
+      "error",
+      "Revise os campos da opcao de rubrica.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const existingOption = await loadCriterionOption(parsedData.data.criterion_option_id);
+
+  if (!existingOption) {
+    return buildActionState(
+      "error",
+      "A opcao de rubrica informada nao foi encontrada.",
+      { criterion_option_id: "Opcao de rubrica invalida." },
+      submittedFormValues
+    );
+  }
+
+  const existingCriterion = await loadCriterion(existingOption.criterio_modelo_avaliacao_id);
+  const existingGroup = existingCriterion
+    ? await loadGroup(existingCriterion.grupo_modelo_avaliacao_id)
+    : null;
+  const existingModel = existingGroup
+    ? await loadModel(existingGroup.modelo_avaliacao_curso_id)
+    : null;
+
+  if (!existingCriterion || !existingGroup || !existingModel) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel validar o vinculo da opcao com o modelo de avaliacao.",
+      { criterion_option_id: "Opcao de rubrica invalida." },
+      submittedFormValues
+    );
+  }
+
+  if (existingModel.modalidade !== "rubrica") {
+    return buildActionState(
+      "error",
+      "Opcoes de rubrica so podem ser mantidas em modelos com modalidade rubrica.",
+      { criterion_option_id: "Altere o modelo para modalidade rubrica antes de editar opcoes." },
+      submittedFormValues
+    );
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const { error } = await adminClient
+    .from("opcoes_criterio_modelo_avaliacao")
+    .update({
+      rotulo: parsedData.data.rotulo,
+      descricao: toNullableText(parsedData.data.descricao),
+      valor_nota: parsedData.data.valor_nota,
+      ordem: parsedData.data.ordem,
+      ativo: toBooleanValue(parsedData.data.ativo)
+    } satisfies Partial<CriterionOptionRow> as never)
+    .eq("id", existingOption.id);
+
+  if (error) {
+    return buildActionState(
+      "error",
+      error.message || "Nao foi possivel atualizar a opcao de rubrica.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  revalidateCourseConfigurationPaths();
+
+  return buildActionState(
+    "success",
+    `Opcao ${parsedData.data.rotulo} atualizada com sucesso.`,
     {},
     submittedFormValues
   );

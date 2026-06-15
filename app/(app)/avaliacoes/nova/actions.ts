@@ -59,6 +59,15 @@ interface RuntimeCriterionSubmissionDefinition {
 interface ReviewBaselineState {
   scoreByCriterionId: Map<string, number>;
   feedbackByCriterionId: Map<string, string>;
+  optionByCriterionId: Map<
+    string,
+    {
+      optionId: string | null;
+      label: string | null;
+      description: string | null;
+      scoreValue: number | null;
+    }
+  >;
 }
 
 const baseEvaluationSchema = z.object({
@@ -508,6 +517,7 @@ function buildItemsPayload(
   criterionFeedbacks: Record<string, string>,
   criterionRows: RuntimeCriterionSubmissionDefinition[],
   modality: EvaluationModelMode,
+  intent: "rascunho" | "publicado",
   reviewBaseline?: ReviewBaselineState | null
 ) {
   const itemsPayload: Array<{
@@ -536,6 +546,7 @@ function buildItemsPayload(
     const selectedOption = hasOptionSelection
       ? criterion.options.find((option) => option.id === selectedOptionId) ?? null
       : null;
+    const isRubricMode = modality === "rubrica";
 
     if (hasOptionSelection && !selectedOption) {
       fieldErrors[optionFieldName] = "Selecione uma opcao valida para este criterio.";
@@ -545,6 +556,24 @@ function buildItemsPayload(
     const rubricScoreValue = selectedOption ? selectedOption.scoreValue : null;
 
     if (!reviewBaseline) {
+      if (isRubricMode && hasScoreInput) {
+        fieldErrors[fieldName] =
+          "A nota deste criterio e definida pela opcao selecionada na rubrica.";
+        continue;
+      }
+
+      if (isRubricMode && !hasOptionSelection) {
+        if (intent === "publicado") {
+          fieldErrors[optionFieldName] =
+            "Selecione uma opcao para este criterio antes de publicar a avaliacao.";
+        } else if (hasFeedbackInput) {
+          fieldErrors[optionFieldName] =
+            "Selecione uma opcao da rubrica antes de registrar a observacao deste criterio.";
+        }
+
+        continue;
+      }
+
       if (!hasScoreInput && !hasOptionSelection) {
         if (hasFeedbackInput) {
           fieldErrors[feedbackFieldName] =
@@ -590,6 +619,12 @@ function buildItemsPayload(
       continue;
     }
 
+    if (isRubricMode && hasScoreInput) {
+      fieldErrors[fieldName] =
+        "A nota deste criterio e definida pela opcao selecionada na rubrica.";
+      continue;
+    }
+
     if (!hasScoreInput && !hasFeedbackInput && !hasOptionSelection) {
       continue;
     }
@@ -597,11 +632,22 @@ function buildItemsPayload(
     const baselineScore = reviewBaseline.scoreByCriterionId.get(criterion.fieldCriterionId);
     const baselineFeedback =
       reviewBaseline.feedbackByCriterionId.get(criterion.fieldCriterionId) ?? null;
+    const baselineOption =
+      reviewBaseline.optionByCriterionId.get(criterion.fieldCriterionId) ?? null;
 
     let resolvedScore = baselineScore ?? null;
+    let optionSnapshot = baselineOption;
 
     if (rubricScoreValue !== null) {
       resolvedScore = Math.round(rubricScoreValue * 100) / 100;
+      optionSnapshot = selectedOption
+        ? {
+            optionId: selectedOption.id,
+            label: selectedOption.label,
+            description: selectedOption.description,
+            scoreValue: resolvedScore
+          }
+        : null;
     } else if (hasScoreInput) {
       const parsedScore = Number(rawValue);
 
@@ -620,13 +666,21 @@ function buildItemsPayload(
 
     if (resolvedScore === null) {
       fieldErrors[feedbackFieldName] =
-        "Este critério ainda não possui nota anterior. Informe a nota para registrar a justificativa nesta revisão.";
+        "Este criterio ainda nao possui nota anterior. Informe a nota para registrar a justificativa nesta revisao.";
       continue;
     }
 
-    const scoreChanged =
-      baselineScore === undefined
-        ? hasScoreInput || hasOptionSelection
+    if (isRubricMode && hasFeedbackInput && !hasOptionSelection && !baselineOption) {
+      fieldErrors[optionFieldName] =
+        "Nao foi possivel identificar a opcao vigente deste criterio. Selecione a opcao correta para registrar a revisao.";
+      continue;
+    }
+
+    const scoreChanged = isRubricMode
+      ? hasOptionSelection &&
+        selectedOptionId !== (baselineOption?.optionId ?? "")
+      : baselineScore === undefined
+        ? hasScoreInput
         : resolvedScore !== baselineScore;
     const feedbackChanged = hasFeedbackInput
       ? feedbackValue !== (baselineFeedback ?? "")
@@ -639,10 +693,10 @@ function buildItemsPayload(
     itemsPayload.push({
       criterio_id: criterion.legacyCriterionId,
       criterio_modelo_avaliacao_id: criterion.modelCriterionId,
-      opcao_criterio_modelo_avaliacao_id: selectedOption?.id ?? null,
-      opcao_rotulo_snapshot: selectedOption?.label ?? null,
-      opcao_descricao_snapshot: selectedOption?.description ?? null,
-      opcao_valor_snapshot: selectedOption ? resolvedScore : null,
+      opcao_criterio_modelo_avaliacao_id: optionSnapshot?.optionId ?? null,
+      opcao_rotulo_snapshot: optionSnapshot?.label ?? null,
+      opcao_descricao_snapshot: optionSnapshot?.description ?? null,
+      opcao_valor_snapshot: optionSnapshot?.scoreValue ?? null,
       nota_bruta: resolvedScore,
       feedback: hasFeedbackInput ? feedbackValue : baselineFeedback
     });
@@ -651,7 +705,9 @@ function buildItemsPayload(
   if (!itemsPayload.length) {
     fieldErrors.criteria =
       modality === "rubrica"
-        ? "Selecione ao menos um criterio avaliado da rubrica."
+        ? intent === "publicado"
+          ? "Selecione uma opcao para cada criterio da rubrica antes de publicar a avaliacao."
+          : "Selecione ao menos um criterio avaliado da rubrica."
         : "Preencha ao menos um criterio avaliado.";
   }
 
@@ -739,7 +795,7 @@ async function loadReviewBaselineState(
     ? await supabase
         .from("itens_avaliados")
         .select(
-          "avaliacao_id, criterio_id, criterio_modelo_avaliacao_id, nota_bruta, feedback"
+          "avaliacao_id, criterio_id, criterio_modelo_avaliacao_id, opcao_criterio_modelo_avaliacao_id, opcao_rotulo_snapshot, opcao_descricao_snapshot, opcao_valor_snapshot, nota_bruta, feedback"
         )
         .in("avaliacao_id", chainEvaluationIds)
     : { data: [], error: null };
@@ -760,6 +816,10 @@ async function loadReviewBaselineState(
         | "avaliacao_id"
         | "criterio_id"
         | "criterio_modelo_avaliacao_id"
+        | "opcao_criterio_modelo_avaliacao_id"
+        | "opcao_rotulo_snapshot"
+        | "opcao_descricao_snapshot"
+        | "opcao_valor_snapshot"
         | "nota_bruta"
         | "feedback"
       >
@@ -772,6 +832,10 @@ async function loadReviewBaselineState(
       | "avaliacao_id"
       | "criterio_id"
       | "criterio_modelo_avaliacao_id"
+      | "opcao_criterio_modelo_avaliacao_id"
+      | "opcao_rotulo_snapshot"
+      | "opcao_descricao_snapshot"
+      | "opcao_valor_snapshot"
       | "nota_bruta"
       | "feedback"
     >
@@ -783,6 +847,15 @@ async function loadReviewBaselineState(
 
   const scoreByCriterionId = new Map<string, number>();
   const feedbackByCriterionId = new Map<string, string>();
+  const optionByCriterionId = new Map<
+    string,
+    {
+      optionId: string | null;
+      label: string | null;
+      description: string | null;
+      scoreValue: number | null;
+    }
+  >();
 
   for (const evaluation of chainEvaluationRows) {
     if (evaluation.status !== "publicado") {
@@ -796,6 +869,15 @@ async function loadReviewBaselineState(
       const criterionKey = item.criterio_modelo_avaliacao_id ?? item.criterio_id;
 
       scoreByCriterionId.set(criterionKey, Number(item.nota_bruta));
+      optionByCriterionId.set(criterionKey, {
+        optionId: item.opcao_criterio_modelo_avaliacao_id ?? null,
+        label: item.opcao_rotulo_snapshot ?? null,
+        description: item.opcao_descricao_snapshot ?? null,
+        scoreValue:
+          item.opcao_valor_snapshot !== null && item.opcao_valor_snapshot !== undefined
+            ? Number(item.opcao_valor_snapshot)
+            : null
+      });
 
       if (item.feedback && item.feedback.trim() !== "") {
         feedbackByCriterionId.set(criterionKey, item.feedback);
@@ -813,7 +895,8 @@ async function loadReviewBaselineState(
     ok: true,
     baseline: {
       scoreByCriterionId,
-      feedbackByCriterionId
+      feedbackByCriterionId,
+      optionByCriterionId
     }
   };
 }
@@ -1054,6 +1137,7 @@ export async function submitEvaluationAction(
     submittedFormValues.criterionFeedbacks,
     criterionRows,
     evaluationRuntimeContext.modality,
+    intent,
     reviewBaseline
   );
 

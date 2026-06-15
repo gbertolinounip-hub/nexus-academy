@@ -3,18 +3,21 @@
 import { useActionState, useEffect, useMemo, useState } from "react";
 import {
   createCourseConfigurationCriterionAction,
+  createCourseConfigurationCriterionOptionAction,
   createCourseConfigurationGroupAction,
   createCourseRequiredDocumentAction,
   deleteCourseConfigurationCriterionAction,
   deleteCourseConfigurationGroupAction,
   deleteCourseRequiredDocumentAction,
   updateCourseConfigurationCriterionAction,
+  updateCourseConfigurationCriterionOptionAction,
   updateCourseConfigurationGroupAction,
   updateCourseConfigurationModelAction,
   updateCourseConfigurationRequiredDocumentAction
 } from "@/app/(app)/master/cursos/configuracoes/actions";
 import {
   createEmptyCourseConfigurationCreateCriterionFormValues,
+  createEmptyCourseConfigurationCreateCriterionOptionFormValues,
   createEmptyCourseConfigurationCreateGroupFormValues,
   createEmptyCourseConfigurationCreateRequiredDocumentFormValues,
   createInitialCourseConfigurationActionState,
@@ -22,16 +25,19 @@ import {
   initialCourseConfigurationDeleteGroupActionState,
   initialCourseConfigurationDeleteRequiredDocumentActionState,
   initialCourseConfigurationCreateCriterionActionState,
+  initialCourseConfigurationCreateCriterionOptionActionState,
   initialCourseConfigurationCreateGroupActionState,
   initialCourseConfigurationCreateRequiredDocumentActionState,
   type CourseConfigurationActionState,
   type CourseConfigurationCreateCriterionFormValues,
+  type CourseConfigurationCreateCriterionOptionFormValues,
   type CourseConfigurationCreateGroupFormValues,
   type CourseConfigurationCreateRequiredDocumentFormValues,
   type CourseConfigurationDeleteCriterionFormValues,
   type CourseConfigurationDeleteGroupFormValues,
   type CourseConfigurationDeleteRequiredDocumentFormValues,
   type CourseConfigurationCriterionFormValues,
+  type CourseConfigurationCriterionOptionFormValues,
   type CourseConfigurationGroupFormValues,
   type CourseConfigurationModelFormValues,
   type CourseConfigurationRequiredDocumentFormValues
@@ -164,6 +170,33 @@ function buildCriterionDraft(
     escala_maxima: String(criterion.maxScale),
     ativo: criterion.isActive ? "true" : "false"
   };
+}
+
+function buildCriterionOptionDraft(
+  option: CourseConfigurationCriterionOptionEntry
+): CourseConfigurationCriterionOptionFormValues {
+  return {
+    criterion_option_id: option.id,
+    rotulo: option.label,
+    descricao: option.description ?? "",
+    valor_nota: String(option.scoreValue),
+    ordem: String(option.order),
+    ativo: option.isActive ? "true" : "false"
+  };
+}
+
+function buildCreateCriterionOptionDraft(
+  criterion: CourseConfigurationCriterionEntry
+): CourseConfigurationCreateCriterionOptionFormValues {
+  return createEmptyCourseConfigurationCreateCriterionOptionFormValues(
+    criterion.id,
+    getNextOrderValue(criterion.rubricOptions.map((option) => option.order)),
+    "0"
+  );
+}
+
+function formatRubricOptionScoreValue(value: number) {
+  return value.toFixed(2).replace(".", ",");
 }
 
 function buildRequiredDocumentDraft(
@@ -852,6 +885,261 @@ export function MasterCourseConfigurationCreateCriterionForm({
   );
 }
 
+function MasterCourseConfigurationCriterionOptionForm({
+  option
+}: {
+  option: CourseConfigurationCriterionOptionEntry;
+}) {
+  const [state, formAction] = useActionState(
+    updateCourseConfigurationCriterionOptionAction,
+    createInitialCourseConfigurationActionState<CourseConfigurationCriterionOptionFormValues>()
+  );
+  const safeState =
+    state ??
+    createInitialCourseConfigurationActionState<CourseConfigurationCriterionOptionFormValues>();
+  const fieldErrors = safeState.fieldErrors ?? {};
+  const [draft, setDraft] = useState<CourseConfigurationCriterionOptionFormValues>(() =>
+    buildCriterionOptionDraft(option)
+  );
+
+  useEffect(() => {
+    setDraft(buildCriterionOptionDraft(option));
+  }, [option]);
+
+  useEffect(() => {
+    if (safeState.formValues) {
+      setDraft({ ...safeState.formValues });
+    }
+  }, [safeState.formValues, safeState.status, safeState.submittedAt]);
+
+  function updateDraft(
+    field: keyof CourseConfigurationCriterionOptionFormValues,
+    value: string
+  ) {
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value
+    }));
+  }
+
+  return (
+    <form action={formAction} className="form-stack management-block-card">
+      <input type="hidden" name="criterion_option_id" value={draft.criterion_option_id} />
+      {renderNotice(safeState)}
+
+      <div className="management-block-header">
+        <div>
+          <strong>{option.label}</strong>
+          <p className="field-help">
+            Ordem {option.order} · Nota automática {formatRubricOptionScoreValue(option.scoreValue)}
+          </p>
+        </div>
+        <span className={`status-pill ${option.isActive ? "status-ativo" : "status-inativo"}`}>
+          {option.isActive ? "Ativa" : "Inativa"}
+        </span>
+      </div>
+
+      <div className="form-grid">
+        <label className={getFieldClassName(fieldErrors, "rotulo")}>
+          <span>Rótulo</span>
+          <input
+            className={getInputClassName(fieldErrors, "rotulo")}
+            name="rotulo"
+            value={draft.rotulo}
+            onChange={(event) => updateDraft("rotulo", event.currentTarget.value)}
+          />
+          {fieldErrors.rotulo ? <span className="field-error">{fieldErrors.rotulo}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "valor_nota")}>
+          <span>Nota</span>
+          <input
+            className={getInputClassName(fieldErrors, "valor_nota")}
+            name="valor_nota"
+            type="number"
+            min="0"
+            max="10"
+            step="0.01"
+            value={draft.valor_nota}
+            onChange={(event) => updateDraft("valor_nota", event.currentTarget.value)}
+          />
+          {fieldErrors.valor_nota ? (
+            <span className="field-error">{fieldErrors.valor_nota}</span>
+          ) : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "ordem")}>
+          <span>Ordem</span>
+          <input
+            className={getInputClassName(fieldErrors, "ordem")}
+            name="ordem"
+            type="number"
+            min="1"
+            step="1"
+            value={draft.ordem}
+            onChange={(event) => updateDraft("ordem", event.currentTarget.value)}
+          />
+          {fieldErrors.ordem ? <span className="field-error">{fieldErrors.ordem}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "ativo")}>
+          <span>Status</span>
+          <select
+            className={getInputClassName(fieldErrors, "ativo")}
+            name="ativo"
+            value={draft.ativo}
+            onChange={(event) => updateDraft("ativo", event.currentTarget.value)}
+          >
+            <option value="true">Ativa</option>
+            <option value="false">Inativa</option>
+          </select>
+          {fieldErrors.ativo ? <span className="field-error">{fieldErrors.ativo}</span> : null}
+        </label>
+      </div>
+
+      <label className={getFieldClassName(fieldErrors, "descricao")}>
+        <span>Descrição</span>
+        <textarea
+          className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
+          name="descricao"
+          rows={2}
+          value={draft.descricao}
+          onChange={(event) => updateDraft("descricao", event.currentTarget.value)}
+        />
+        {fieldErrors.descricao ? (
+          <span className="field-error">{fieldErrors.descricao}</span>
+        ) : null}
+      </label>
+
+      <div className="actions-row">
+        <button className="button button-secondary" type="submit">
+          Salvar opção
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function MasterCourseConfigurationCreateCriterionOptionForm({
+  criterion
+}: {
+  criterion: CourseConfigurationCriterionEntry;
+}) {
+  const [state, formAction] = useActionState(
+    createCourseConfigurationCriterionOptionAction,
+    initialCourseConfigurationCreateCriterionOptionActionState
+  );
+  const safeState = state ?? initialCourseConfigurationCreateCriterionOptionActionState;
+  const fieldErrors = safeState.fieldErrors ?? {};
+  const [draft, setDraft] = useState<CourseConfigurationCreateCriterionOptionFormValues>(() =>
+    buildCreateCriterionOptionDraft(criterion)
+  );
+
+  useEffect(() => {
+    if (safeState.status === "error" && safeState.formValues) {
+      setDraft({ ...safeState.formValues });
+      return;
+    }
+
+    setDraft(buildCreateCriterionOptionDraft(criterion));
+  }, [criterion, safeState.formValues, safeState.status, safeState.submittedAt]);
+
+  function updateDraft(
+    field: keyof CourseConfigurationCreateCriterionOptionFormValues,
+    value: string
+  ) {
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value
+    }));
+  }
+
+  return (
+    <form action={formAction} className="form-stack master-course-configuration-edit-form">
+      <input type="hidden" name="criterion_id" value={draft.criterion_id} />
+      {renderNotice(safeState)}
+
+      <div className="form-grid">
+        <label className={getFieldClassName(fieldErrors, "rotulo")}>
+          <span>Rótulo</span>
+          <input
+            className={getInputClassName(fieldErrors, "rotulo")}
+            name="rotulo"
+            value={draft.rotulo}
+            onChange={(event) => updateDraft("rotulo", event.currentTarget.value)}
+          />
+          {fieldErrors.rotulo ? <span className="field-error">{fieldErrors.rotulo}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "valor_nota")}>
+          <span>Nota</span>
+          <input
+            className={getInputClassName(fieldErrors, "valor_nota")}
+            name="valor_nota"
+            type="number"
+            min="0"
+            max="10"
+            step="0.01"
+            value={draft.valor_nota}
+            onChange={(event) => updateDraft("valor_nota", event.currentTarget.value)}
+          />
+          {fieldErrors.valor_nota ? (
+            <span className="field-error">{fieldErrors.valor_nota}</span>
+          ) : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "ordem")}>
+          <span>Ordem</span>
+          <input
+            className={getInputClassName(fieldErrors, "ordem")}
+            name="ordem"
+            type="number"
+            min="1"
+            step="1"
+            value={draft.ordem}
+            onChange={(event) => updateDraft("ordem", event.currentTarget.value)}
+          />
+          {fieldErrors.ordem ? <span className="field-error">{fieldErrors.ordem}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "ativo")}>
+          <span>Status inicial</span>
+          <select
+            className={getInputClassName(fieldErrors, "ativo")}
+            name="ativo"
+            value={draft.ativo}
+            onChange={(event) => updateDraft("ativo", event.currentTarget.value)}
+          >
+            <option value="true">Ativa</option>
+            <option value="false">Inativa</option>
+          </select>
+          {fieldErrors.ativo ? <span className="field-error">{fieldErrors.ativo}</span> : null}
+        </label>
+      </div>
+
+      <label className={getFieldClassName(fieldErrors, "descricao")}>
+        <span>Descrição</span>
+        <textarea
+          className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
+          name="descricao"
+          rows={2}
+          value={draft.descricao}
+          onChange={(event) => updateDraft("descricao", event.currentTarget.value)}
+        />
+        {fieldErrors.descricao ? (
+          <span className="field-error">{fieldErrors.descricao}</span>
+        ) : null}
+      </label>
+
+      <div className="actions-row">
+        <button className="button button-secondary" type="submit">
+          Adicionar opção
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function MasterCourseConfigurationCriterionForm({
   criterion
 }: {
@@ -1031,14 +1319,34 @@ export function MasterCourseConfigurationCriterionForm({
             <div>
               <h6>Opcoes da rubrica</h6>
               <p className="field-help">
-                As opcoes existentes ja sao carregadas no runtime. O cadastro completo dessas
-                opcoes entra na proxima subetapa.
+                Configure os rótulos, notas automáticas e a ordem de exibição usadas pelo
+                professor na avaliação por rubrica.
               </p>
             </div>
           </div>
-          {renderRubricOptionsSummary(criterion.rubricOptions)}
+          {criterion.rubricOptions.length ? (
+            <div className="stack">
+              {criterion.rubricOptions.map((option) => (
+                <MasterCourseConfigurationCriterionOptionForm
+                  key={option.id}
+                  option={option}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="form-notice form-notice-error">
+              Nenhuma opcao de rubrica cadastrada para este criterio ainda.
+            </div>
+          )}
+          <MasterCourseConfigurationCreateCriterionOptionForm criterion={criterion} />
         </div>
-      ) : null}
+      ) : (
+        <div className="form-stack master-course-configuration-edit-form">
+          <div className="form-notice">
+            Opcoes de rubrica disponiveis apenas para modelos do tipo Avaliacao por rubrica.
+          </div>
+        </div>
+      )}
       <form
         action={deleteFormAction}
         className="actions-row"

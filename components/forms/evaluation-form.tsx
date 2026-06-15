@@ -11,12 +11,16 @@ import type {
   EvaluationFormInitialValues,
   EvaluationFormMode,
   EvaluationFormPageData,
+  EvaluationRuntimeFormContext,
   EvaluationRubricCriterion
 } from "@/services/evaluations";
 
 interface EvaluationFormProps {
   studentOptions: EvaluationFormPageData["studentOptions"];
   rubricGroups: EvaluationFormPageData["rubricGroups"];
+  evaluationMode: EvaluationFormPageData["evaluationMode"];
+  evaluationModelName: EvaluationFormPageData["evaluationModelName"];
+  runtimeContextsByEnrollmentId: EvaluationFormPageData["runtimeContextsByEnrollmentId"];
   mode?: EvaluationFormMode;
   initialValues?: EvaluationFormInitialValues;
   readOnlyMessage?: string | null;
@@ -48,7 +52,11 @@ function buildResolvedFormValues(
     criterionFeedbacks:
       Object.keys(submittedValues?.criterionFeedbacks ?? {}).length > 0
         ? submittedValues!.criterionFeedbacks
-        : initialValues?.criterionFeedbacks ?? {}
+        : initialValues?.criterionFeedbacks ?? {},
+    criterionOptionSelections:
+      Object.keys(submittedValues?.criterionOptionSelections ?? {}).length > 0
+        ? submittedValues!.criterionOptionSelections
+        : initialValues?.criterionOptionSelections ?? {}
   };
 }
 
@@ -84,7 +92,46 @@ function formatScoreLabel(value?: string | null) {
   return value.replace(".", ",");
 }
 
-function CriterionField({
+function formatOptionScoreLabel(value: number) {
+  return value.toFixed(1).replace(".", ",");
+}
+
+function resolveCriterionOptionLabel(
+  criterion: EvaluationRubricCriterion,
+  optionId?: string | null
+) {
+  if (!optionId) {
+    return null;
+  }
+
+  const option = criterion.options.find((currentOption) => currentOption.id === optionId);
+
+  if (!option) {
+    return null;
+  }
+
+  return `${option.label} — ${formatOptionScoreLabel(option.scoreValue)} pontos`;
+}
+
+type CriterionFieldProps = {
+  criterion: EvaluationRubricCriterion;
+  error?: string;
+  feedbackError?: string;
+  defaultValue?: string;
+  feedbackValue?: string;
+  baselineValue?: string;
+  baselineFeedback?: string;
+  effectiveValue?: string;
+  effectiveFeedback?: string;
+  selectedOptionId?: string;
+  baselineSelectedOptionId?: string;
+  effectiveSelectedOptionId?: string;
+  changedInCurrent?: boolean;
+  disabled?: boolean;
+  showReviewContext?: boolean;
+};
+
+function DescriptiveCriterionField({
   criterion,
   error,
   feedbackError,
@@ -97,20 +144,7 @@ function CriterionField({
   changedInCurrent = false,
   disabled = false,
   showReviewContext = false
-}: {
-  criterion: EvaluationRubricCriterion;
-  error?: string;
-  feedbackError?: string;
-  defaultValue?: string;
-  feedbackValue?: string;
-  baselineValue?: string;
-  baselineFeedback?: string;
-  effectiveValue?: string;
-  effectiveFeedback?: string;
-  changedInCurrent?: boolean;
-  disabled?: boolean;
-  showReviewContext?: boolean;
-}) {
+}: CriterionFieldProps) {
   const formattedBaselineValue = formatScoreLabel(baselineValue);
   const formattedEffectiveValue = formatScoreLabel(effectiveValue);
   const formattedDefaultValue = formatScoreLabel(defaultValue);
@@ -176,9 +210,115 @@ function CriterionField({
   );
 }
 
+function RubricCriterionField({
+  criterion,
+  error,
+  feedbackError,
+  feedbackValue,
+  baselineFeedback,
+  effectiveFeedback,
+  selectedOptionId,
+  baselineSelectedOptionId,
+  effectiveSelectedOptionId,
+  changedInCurrent = false,
+  disabled = false,
+  showReviewContext = false
+}: CriterionFieldProps) {
+  const [currentOptionId, setCurrentOptionId] = useState(selectedOptionId ?? "");
+
+  useEffect(() => {
+    setCurrentOptionId(selectedOptionId ?? "");
+  }, [selectedOptionId]);
+
+  const currentSelectedOption = criterion.options.find((option) => option.id === currentOptionId) ?? null;
+  const baselineOptionLabel = resolveCriterionOptionLabel(criterion, baselineSelectedOptionId);
+  const effectiveOptionLabel = resolveCriterionOptionLabel(criterion, effectiveSelectedOptionId);
+  const visibleOptions = criterion.options
+    .filter(
+      (option) =>
+        option.active ||
+        option.id === selectedOptionId ||
+        option.id === baselineSelectedOptionId ||
+        option.id === effectiveSelectedOptionId
+    )
+    .sort((left, right) => left.order - right.order);
+
+  return (
+    <label
+      className={`field criterion-field${
+        error || feedbackError ? " criterion-field-invalid" : ""
+      }${changedInCurrent ? " criterion-field-changed" : ""}`}
+    >
+      <span>{criterion.name}</span>
+      <span className="field-help">
+        Peso {criterion.weightPercentage}% · nota definida pela opção selecionada
+      </span>
+      {showReviewContext && baselineOptionLabel ? (
+        <span className="field-help">
+          Opção vigente antes desta revisão: {baselineOptionLabel}
+        </span>
+      ) : null}
+      {!showReviewContext && disabled && effectiveOptionLabel ? (
+        <span className="field-help">
+          {changedInCurrent && baselineOptionLabel
+            ? `Anterior: ${baselineOptionLabel} · Nesta versão: ${effectiveOptionLabel}`
+            : `Opção considerada nesta versão: ${effectiveOptionLabel}`}
+        </span>
+      ) : null}
+      <select
+        className={error ? "input input-invalid" : "input"}
+        name={`option__${criterion.id}`}
+        value={currentOptionId}
+        disabled={disabled}
+        onChange={(event) => setCurrentOptionId(event.currentTarget.value)}
+      >
+        <option value="">
+          {showReviewContext ? "Manter valor atual" : "Selecione uma opção"}
+        </option>
+        {visibleOptions.map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.label} — {formatOptionScoreLabel(option.scoreValue)} pontos
+            {!option.active ? " (inativa)" : ""}
+          </option>
+        ))}
+      </select>
+      {currentSelectedOption ? (
+        <span className="field-help">
+          Nota aplicada automaticamente: {formatOptionScoreLabel(currentSelectedOption.scoreValue)}
+        </span>
+      ) : null}
+      {currentSelectedOption?.description ? (
+        <span className="field-help">{currentSelectedOption.description}</span>
+      ) : null}
+      {error ? <span className="field-error">{error}</span> : null}
+      {showReviewContext && baselineFeedback ? (
+        <span className="field-help">Justificativa vigente: {baselineFeedback}</span>
+      ) : null}
+      {!showReviewContext && disabled && effectiveFeedback ? (
+        <span className="field-help">Justificativa desta versão: {effectiveFeedback}</span>
+      ) : null}
+      <textarea
+        className={`${feedbackError ? "input input-invalid" : "input"} textarea criterion-feedback`}
+        name={`feedback__${criterion.id}`}
+        placeholder="Observação complementar (opcional)"
+        rows={3}
+        defaultValue={feedbackValue ?? ""}
+        disabled={disabled}
+      />
+      <span className="field-help">
+        Campo opcional. Use para complementar a observação deste critério.
+      </span>
+      {feedbackError ? <span className="field-error">{feedbackError}</span> : null}
+    </label>
+  );
+}
+
 export function EvaluationForm({
   studentOptions,
   rubricGroups,
+  evaluationMode,
+  evaluationModelName,
+  runtimeContextsByEnrollmentId,
   mode = "create",
   initialValues,
   readOnlyMessage,
@@ -209,6 +349,25 @@ export function EvaluationForm({
   const [selectedEnrollmentId, setSelectedEnrollmentId] = useState(
     resolvedFormValues.matriculaTurmaId
   );
+  const selectedRuntimeContext: EvaluationRuntimeFormContext = (() => {
+    return (
+      runtimeContextsByEnrollmentId[selectedEnrollmentId] ?? {
+        enrollmentId: selectedEnrollmentId,
+        courseId: null,
+        offerId: null,
+        modelId: null,
+        modelCode: null,
+        modelName: evaluationModelName ?? null,
+        modality: evaluationMode,
+        source: "legacy_global",
+        rubricGroups
+      }
+    );
+  })();
+  const activeRubricGroups = selectedRuntimeContext.rubricGroups.length
+    ? selectedRuntimeContext.rubricGroups
+    : rubricGroups;
+  const activeEvaluationMode = selectedRuntimeContext.modality;
   const selectedStudentLabel =
     studentOptions.find((student) => student.enrollmentId === selectedEnrollmentId)?.label ??
     "Aluno vinculado";
@@ -255,6 +414,17 @@ export function EvaluationForm({
       {exceptionalReleaseNotice ? (
         <ExceptionalReleaseNotice notice={exceptionalReleaseNotice} compact />
       ) : null}
+      <div className="management-tag-list">
+        <span className="badge badge-muted">
+          Modalidade:{" "}
+          {activeEvaluationMode === "rubrica"
+            ? "Avaliação por rubrica"
+            : "Avaliação descritiva"}
+        </span>
+        {selectedRuntimeContext.modelName ? (
+          <span className="badge badge-muted">Modelo: {selectedRuntimeContext.modelName}</span>
+        ) : null}
+      </div>
 
       {safeState.message ? (
         <div
@@ -363,7 +533,7 @@ export function EvaluationForm({
         </label>
       </div>
 
-      {rubricGroups.map((group) => (
+      {activeRubricGroups.map((group) => (
         <div
           key={group.id}
           className={`criteria-form-group${
@@ -377,21 +547,49 @@ export function EvaluationForm({
 
           <div className="criteria-input-grid">
             {group.criteria.map((criterion) => (
-              <CriterionField
-                key={criterion.id}
-                criterion={criterion}
-                defaultValue={resolvedFormValues.criterionScores[criterion.id] ?? ""}
-                feedbackValue={resolvedFormValues.criterionFeedbacks[criterion.id] ?? ""}
-                baselineValue={initialValues?.baselineCriterionScores[criterion.id]}
-                baselineFeedback={initialValues?.baselineCriterionFeedbacks[criterion.id]}
-                effectiveValue={initialValues?.effectiveCriterionScores[criterion.id]}
-                effectiveFeedback={initialValues?.effectiveCriterionFeedbacks[criterion.id]}
-                changedInCurrent={initialValues?.changedCriterionIds.includes(criterion.id) ?? false}
-                error={fieldErrors[`criterion__${criterion.id}`]}
-                feedbackError={fieldErrors[`feedback__${criterion.id}`]}
-                disabled={isReadOnly}
-                showReviewContext={isReviewFlow && !isReadOnly}
-              />
+              activeEvaluationMode === "rubrica" ? (
+                <RubricCriterionField
+                  key={`${selectedEnrollmentId}-${criterion.id}`}
+                  criterion={criterion}
+                  feedbackValue={resolvedFormValues.criterionFeedbacks[criterion.id] ?? ""}
+                  selectedOptionId={
+                    resolvedFormValues.criterionOptionSelections[criterion.id] ?? ""
+                  }
+                  baselineSelectedOptionId={
+                    initialValues?.baselineCriterionOptionSelections[criterion.id]
+                  }
+                  baselineFeedback={initialValues?.baselineCriterionFeedbacks[criterion.id]}
+                  effectiveSelectedOptionId={
+                    initialValues?.effectiveCriterionOptionSelections[criterion.id]
+                  }
+                  effectiveFeedback={initialValues?.effectiveCriterionFeedbacks[criterion.id]}
+                  changedInCurrent={
+                    initialValues?.changedCriterionIds.includes(criterion.id) ?? false
+                  }
+                  error={fieldErrors[`option__${criterion.id}`]}
+                  feedbackError={fieldErrors[`feedback__${criterion.id}`]}
+                  disabled={isReadOnly}
+                  showReviewContext={isReviewFlow && !isReadOnly}
+                />
+              ) : (
+                <DescriptiveCriterionField
+                  key={`${selectedEnrollmentId}-${criterion.id}`}
+                  criterion={criterion}
+                  defaultValue={resolvedFormValues.criterionScores[criterion.id] ?? ""}
+                  feedbackValue={resolvedFormValues.criterionFeedbacks[criterion.id] ?? ""}
+                  baselineValue={initialValues?.baselineCriterionScores[criterion.id]}
+                  baselineFeedback={initialValues?.baselineCriterionFeedbacks[criterion.id]}
+                  effectiveValue={initialValues?.effectiveCriterionScores[criterion.id]}
+                  effectiveFeedback={initialValues?.effectiveCriterionFeedbacks[criterion.id]}
+                  changedInCurrent={
+                    initialValues?.changedCriterionIds.includes(criterion.id) ?? false
+                  }
+                  error={fieldErrors[`criterion__${criterion.id}`]}
+                  feedbackError={fieldErrors[`feedback__${criterion.id}`]}
+                  disabled={isReadOnly}
+                  showReviewContext={isReviewFlow && !isReadOnly}
+                />
+              )
             ))}
           </div>
         </div>
