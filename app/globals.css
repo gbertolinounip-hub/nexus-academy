@@ -1165,6 +1165,46 @@ select {
   line-height: 1.55;
 }
 
+.criteria-table .criteria-feedback-details {
+  width: 100%;
+}
+
+.criteria-table .criteria-feedback-summary {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+  color: var(--brand);
+  font-size: 0.92rem;
+  font-weight: 600;
+  list-style: none;
+}
+
+.criteria-table .criteria-feedback-summary::-webkit-details-marker {
+  display: none;
+}
+
+.criteria-table .criteria-feedback-summary::before {
+  content: "▸";
+  font-size: 0.85rem;
+  transition: transform 0.18s ease;
+}
+
+.criteria-table .criteria-feedback-details[open] .criteria-feedback-summary::before {
+  transform: rotate(90deg);
+}
+
+.criteria-table .criteria-feedback-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.criteria-table .criteria-feedback-section + .criteria-feedback-section {
+  margin-top: 0.7rem;
+}
+
 .criteria-table tbody.criteria-block-even .criteria-justification-box {
   background: rgba(255, 255, 255, 0.64);
 }

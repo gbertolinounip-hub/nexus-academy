@@ -22,6 +22,10 @@ import { SemesterManagementForm } from "@/components/forms/semester-management-f
 import { StageAreaRegistrationForm } from "@/components/forms/stage-area-registration-form";
 import { StudentRegistrationForm } from "@/components/forms/student-registration-form";
 import { requireRole } from "@/lib/auth/session";
+import {
+  formatStageAssignmentLabel,
+  joinDisplayParts
+} from "@/lib/utils/format";
 import { getCoordinatorManagementPageData } from "@/services/management";
 
 function buildManagementListPath(input: {
@@ -413,14 +417,21 @@ export default async function AcademicManagementPage(props: {
                                   className="management-assignment-item"
                                 >
                                   <strong>
-                                    {assignment.semesterCode} - {assignment.areaName}
+                                    {formatStageAssignmentLabel({
+                                      semesterCode: assignment.semesterCode,
+                                      areaName: assignment.areaName
+                                    })}
                                   </strong>
                                   <span>
-                                    {assignment.blockName}
-                                    {assignment.unitName ? ` - ${assignment.unitName}` : ""} -{" "}
-                                    {assignment.supervisorNames.length
-                                      ? assignment.supervisorNames.join(", ")
-                                      : "Sem supervisores definidos"}
+                                    {joinDisplayParts(
+                                      [
+                                        assignment.unitName,
+                                        assignment.supervisorNames.length
+                                          ? assignment.supervisorNames.join(", ")
+                                          : "Sem supervisores definidos"
+                                      ],
+                                      " - "
+                                    )}
                                   </span>
                                 </div>
                               ))}

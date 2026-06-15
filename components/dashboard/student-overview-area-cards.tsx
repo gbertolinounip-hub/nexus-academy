@@ -7,7 +7,7 @@ import {
   markStudentAreaAsRead,
   readStudentAreaUpdateState
 } from "@/lib/student-area-updates";
-import { formatPercentage } from "@/lib/utils/format";
+import { formatPercentage, joinDisplayParts } from "@/lib/utils/format";
 
 interface StudentOverviewAreaCardData {
   enrollmentId: string;
@@ -76,10 +76,7 @@ export function StudentOverviewAreaCards({
             <div className="student-overview-card-header">
               <div>
                 <h3>{area.areaName}</h3>
-                <p>
-                  {area.blockName ? `${area.blockName} · ` : ""}
-                  {area.className}
-                </p>
+                <p>{joinDisplayParts([area.className])}</p>
               </div>
               <div className="student-overview-card-actions">
                 <Link
@@ -87,33 +84,33 @@ export function StudentOverviewAreaCards({
                   className="button button-secondary button-small"
                   onClick={() => handleAreaOpen(area)}
                 >
-                  Abrir área
+                  Abrir area
                 </Link>
                 {isUnreadUpdate ? (
                   <span className="student-area-update-notice">
-                    Avaliação atualizada
+                    Avaliacao atualizada
                   </span>
                 ) : null}
               </div>
             </div>
 
             <div className="student-overview-card-metrics">
-              <span>Média: {formatPercentage(area.finalPercentage)}</span>
+              <span>Media: {formatPercentage(area.finalPercentage)}</span>
               <span>Subtotal: {formatPercentage(area.subtotalPercentage)}</span>
               <span>
                 Desconto: {formatPercentage(area.absencePenaltyPercentage)}
               </span>
-              <span>Conclusão: {formatPercentage(area.completionRate)}</span>
+              <span>Conclusao: {formatPercentage(area.completionRate)}</span>
             </div>
 
             <p className="student-overview-card-copy">
               Supervisores:{" "}
               {area.professorNames.length
                 ? area.professorNames.join(", ")
-                : "ainda não vinculados"}
+                : "ainda nao vinculados"}
             </p>
             <p className="student-overview-card-copy">
-              Lançamentos publicados: {area.publishedLaunchCount} · Horas não
+              Lancamentos publicados: {area.publishedLaunchCount} - Horas nao
               justificadas: {area.unjustifiedAbsenceHours.toFixed(2).replace(".", ",")}h
             </p>
           </article>

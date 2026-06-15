@@ -1,8 +1,11 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { StudentDocumentReviewForm } from "@/components/documents/student-document-review-form";
-import { formatDateTime } from "@/lib/utils/format";
-import type { StudentDocumentReviewerRole, StudentDocumentSummary } from "@/types/domain";
+import { formatDateTime, joinDisplayParts } from "@/lib/utils/format";
+import type {
+  StudentDocumentReviewerRole,
+  StudentDocumentSummary
+} from "@/types/domain";
 
 interface StudentDocumentRecordListProps {
   documents: StudentDocumentSummary[];
@@ -14,16 +17,12 @@ interface StudentDocumentRecordListProps {
 
 function buildDocumentSubtitle(document: StudentDocumentSummary) {
   if (document.type === "carteira_vacinacao") {
-    return "Documento geral obrigatório do aluno.";
+    return "Documento geral obrigatorio do aluno.";
   }
 
-  const scopeParts = [document.blockName, document.areaName, document.semesterCode].filter(
-    Boolean
-  );
+  const scopeLabel = joinDisplayParts([document.areaName, document.semesterCode]);
 
-  return scopeParts.length
-    ? scopeParts.join(" · ")
-    : "Documento vinculado à área operacional do TCE.";
+  return scopeLabel || "Documento vinculado a area operacional do TCE.";
 }
 
 export function StudentDocumentRecordList({
@@ -56,7 +55,7 @@ export function StudentDocumentRecordList({
               <span className={`status-pill status-${document.status}`}>
                 {document.statusLabel}
               </span>
-              {!document.active ? <span className="badge">Versão anterior</span> : null}
+              {!document.active ? <span className="badge">Versao anterior</span> : null}
             </div>
           </div>
 
@@ -70,11 +69,11 @@ export function StudentDocumentRecordList({
               <strong>{formatDateTime(document.submittedAt)}</strong>
             </div>
             <div className="report-mini-card">
-              <span>Validação</span>
+              <span>Validacao</span>
               <strong>
                 {document.reviewedAt
                   ? formatDateTime(document.reviewedAt)
-                  : "Aguardando análise"}
+                  : "Aguardando analise"}
               </strong>
             </div>
             <div className="report-mini-card">
@@ -83,7 +82,7 @@ export function StudentDocumentRecordList({
                 {document.reviewedByName
                   ? `${document.reviewedByName}${
                       document.reviewerRoleLabel
-                        ? ` · ${document.reviewerRoleLabel}`
+                        ? ` - ${document.reviewerRoleLabel}`
                         : ""
                     }`
                   : "Ainda sem validador"}
@@ -93,7 +92,7 @@ export function StudentDocumentRecordList({
 
           {document.rejectionReason ? (
             <div className="form-notice form-notice-error student-document-record-reason">
-              <strong>Justificativa da reprovação:</strong> {document.rejectionReason}
+              <strong>Justificativa da reprovacao:</strong> {document.rejectionReason}
             </div>
           ) : null}
 
@@ -113,7 +112,9 @@ export function StudentDocumentRecordList({
             <StudentDocumentReviewForm
               documentId={document.id}
               currentStatus={document.status}
-              currentReviewerRole={document.reviewerRole as StudentDocumentReviewerRole | null}
+              currentReviewerRole={
+                document.reviewerRole as StudentDocumentReviewerRole | null
+              }
               currentReason={document.rejectionReason}
               reviewerLabel={reviewerLabel}
               readOnly={reviewReadOnly}

@@ -102,6 +102,9 @@ function buildGroupSnapshots(
           weightPercentage: criterion.weightPercentage,
           latestRawScore: latest ? latest.item.rawScore : null,
           latestFeedback: latest?.item.feedback ?? null,
+          latestRubricOptionLabel: latest?.item.rubricOptionLabel ?? null,
+          latestRubricOptionDescription:
+            latest?.item.rubricOptionDescription ?? null,
           earnedPercentage,
           updatedAt: latest ? latest.publishedAt : null
         };
@@ -204,9 +207,11 @@ export function buildStudentDashboardData(input: {
   classGroup: StudentDashboardData["classGroup"];
   professors: ProfessorRecord[];
   evaluations: EvaluationLaunch[];
+  effectiveEvaluations?: EvaluationLaunch[];
   absences: AbsenceRecord[];
 }): StudentDashboardData {
-  const groups = buildGroupSnapshots(input.evaluations);
+  const effectiveEvaluations = input.effectiveEvaluations ?? input.evaluations;
+  const groups = buildGroupSnapshots(effectiveEvaluations);
   const flatCriteria = groups.flatMap((group) => group.criteria);
   const subtotalPercentage = round(
     groups.reduce((sum, group) => sum + group.earnedPercentage, 0)

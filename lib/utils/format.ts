@@ -253,6 +253,45 @@ function normalizeText(value?: string | null) {
   return trimmedValue ? trimmedValue : null;
 }
 
+export function joinDisplayParts(
+  parts: Array<string | null | undefined>,
+  separator = " · "
+) {
+  return parts
+    .map((part) => normalizeText(part))
+    .filter((part): part is string => Boolean(part))
+    .join(separator);
+}
+
+export function formatStageAreaLabel(areaName?: string | null) {
+  return normalizeText(areaName) ?? "Área não identificada";
+}
+
+export function formatStageAreaDisplayFromLegacyLabel(label?: string | null) {
+  const normalizedLabel = normalizeText(label);
+
+  if (!normalizedLabel) {
+    return "Área não identificada";
+  }
+
+  const parts = normalizedLabel
+    .split("·")
+    .map((part) => normalizeText(part))
+    .filter((part): part is string => Boolean(part));
+
+  return formatStageAreaLabel(parts.at(-1) ?? normalizedLabel);
+}
+
+export function formatStageAssignmentLabel(input: {
+  semesterCode?: string | null;
+  areaName?: string | null;
+}) {
+  return joinDisplayParts(
+    [input.semesterCode, formatStageAreaLabel(input.areaName)],
+    " - "
+  );
+}
+
 function isValidDateValue(value?: string | null) {
   const normalizedValue = normalizeText(value);
 

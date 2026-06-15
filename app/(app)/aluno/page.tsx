@@ -109,7 +109,7 @@ function renderAreaDashboard(dashboard: StudentDashboardData) {
         title="Detalhamento por subitem"
         description="Cada critério mostra a nota mais recente, a pontuação real da área e as justificativas do supervisor quando houver."
       >
-        <CriteriaTable groups={dashboard.groups} />
+        <CriteriaTable groups={dashboard.groups} collapsibleFeedback />
       </SectionCard>
 
       <SectionCard

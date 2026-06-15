@@ -7,6 +7,7 @@ import {
   initialStudentTceUploadState,
   initialStudentVaccinationUploadState
 } from "@/app/(app)/documentos/state";
+import { formatStageAssignmentLabel } from "@/lib/utils/format";
 import type { StudentDocumentAreaOption, StudentDocumentType } from "@/types/domain";
 
 interface StudentDocumentUploadFormProps {
@@ -79,22 +80,25 @@ export function StudentDocumentUploadForm({
 
         {documentType === "tce" ? (
           <label className={fieldErrors.enrollment_id ? "field field-invalid" : "field"}>
-            <span>Área / bloco do TCE</span>
+            <span>Area operacional do TCE</span>
             <select
               name="enrollment_id"
               className={fieldErrors.enrollment_id ? "input input-invalid" : "input"}
               defaultValue={safeState.formValues.enrollment_id}
               disabled={disableForm}
             >
-              <option value="">Selecione a área e o bloco</option>
+              <option value="">Selecione a area operacional</option>
               {tceOptions.map((option) => (
                 <option key={option.enrollmentId} value={option.enrollmentId}>
-                  {option.label}
+                  {formatStageAssignmentLabel({
+                    semesterCode: option.semesterCode,
+                    areaName: option.areaName
+                  })}
                 </option>
               ))}
             </select>
             <span className="field-help">
-              O TCE fica vinculado à área operacional escolhida neste seletor.
+              O TCE fica vinculado a area operacional escolhida neste seletor.
             </span>
             {fieldErrors.enrollment_id ? (
               <span className="field-error">{fieldErrors.enrollment_id}</span>
@@ -112,7 +116,7 @@ export function StudentDocumentUploadForm({
             disabled={disableForm}
           />
           <span className="field-help">
-            Aceitamos PDF, JPG, JPEG e PNG com até 10 MB.
+            Aceitamos PDF, JPG, JPEG e PNG com ate 10 MB.
           </span>
           {fieldErrors.document_file ? (
             <span className="field-error">{fieldErrors.document_file}</span>

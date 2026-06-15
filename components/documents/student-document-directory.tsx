@@ -1,5 +1,8 @@
 import Link from "next/link";
 import type { Route } from "next";
+import {
+  formatStageAreaDisplayFromLegacyLabel
+} from "@/lib/utils/format";
 import type { StudentDocumentDirectoryEntry } from "@/services/student-documents";
 
 interface StudentDocumentDirectoryProps {
@@ -63,11 +66,11 @@ export function StudentDocumentDirectory({
             <tr>
               <th>Aluno</th>
               {showUnitColumn ? <th>Unidade</th> : null}
-              <th>Áreas</th>
+              <th>Areas</th>
               <th>Carteira</th>
               <th>TCEs</th>
-              <th>Pendências</th>
-              <th>Ações</th>
+              <th>Pendencias</th>
+              <th>Acoes</th>
             </tr>
           </thead>
           <tbody>
@@ -76,21 +79,21 @@ export function StudentDocumentDirectory({
                 <td className="student-document-directory-cell-identity">
                   <strong>{entry.studentName}</strong>
                   <span className="table-helper">
-                    {entry.registration} · {entry.email}
+                    {entry.registration} - {entry.email}
                   </span>
                 </td>
-                {showUnitColumn ? <td>{entry.unitName ?? "Não informada"}</td> : null}
+                {showUnitColumn ? <td>{entry.unitName ?? "Nao informada"}</td> : null}
                 <td>
                   {entry.areaLabels.length ? (
                     <div className="management-tag-list">
                       {entry.areaLabels.map((label) => (
                         <span key={label} className="badge">
-                          {label}
+                          {formatStageAreaDisplayFromLegacyLabel(label)}
                         </span>
                       ))}
                     </div>
                   ) : (
-                    <span className="table-helper">Sem área ativa identificada</span>
+                    <span className="table-helper">Sem area ativa identificada</span>
                   )}
                 </td>
                 <td>{renderVaccinationStatus(entry)}</td>
@@ -99,7 +102,7 @@ export function StudentDocumentDirectory({
                   <div className="student-document-directory-status-stack">
                     <strong>{entry.pendingCount}</strong>
                     <span className="table-helper">
-                      {entry.unreadNotificationCount} notificação(ões) não lida(s)
+                      {entry.unreadNotificationCount} notificacao(oes) nao lida(s)
                     </span>
                   </div>
                 </td>
@@ -129,7 +132,7 @@ export function StudentDocumentDirectory({
               <div>
                 <h3>{entry.studentName}</h3>
                 <p className="field-help">
-                  {entry.registration} · {entry.email}
+                  {entry.registration} - {entry.email}
                 </p>
               </div>
               <span className={`status-pill ${entry.active ? "status-ativo" : "status-inativo"}`}>
@@ -139,7 +142,7 @@ export function StudentDocumentDirectory({
 
             {showUnitColumn ? (
               <p className="field-help student-document-directory-mobile-unit">
-                Unidade: <strong>{entry.unitName ?? "Não informada"}</strong>
+                Unidade: <strong>{entry.unitName ?? "Nao informada"}</strong>
               </p>
             ) : null}
 
@@ -147,11 +150,11 @@ export function StudentDocumentDirectory({
               {entry.areaLabels.length ? (
                 entry.areaLabels.map((label) => (
                   <span key={label} className="badge">
-                    {label}
+                    {formatStageAreaDisplayFromLegacyLabel(label)}
                   </span>
                 ))
               ) : (
-                <span className="table-helper">Sem área ativa identificada</span>
+                <span className="table-helper">Sem area ativa identificada</span>
               )}
             </div>
 
@@ -169,7 +172,7 @@ export function StudentDocumentDirectory({
                 <dd>{entry.currentTces.length}</dd>
               </div>
               <div>
-                <dt>Pendências</dt>
+                <dt>Pendencias</dt>
                 <dd>{entry.pendingCount}</dd>
               </div>
             </dl>

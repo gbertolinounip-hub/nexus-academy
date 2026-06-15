@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { useEffect, useMemo, useState } from "react";
+import { formatStageAreaDisplayFromLegacyLabel } from "@/lib/utils/format";
 import type { StudentDocumentDirectoryPageData } from "@/services/student-documents";
 
 interface MasterStudentDocumentFiltersProps {
@@ -97,7 +98,7 @@ export function MasterStudentDocumentFilters({
           <option value="">Todas</option>
           {areaOptions.map((option) => (
             <option key={option.value} value={option.value}>
-              {option.label}
+              {formatStageAreaDisplayFromLegacyLabel(option.label)}
             </option>
           ))}
         </select>

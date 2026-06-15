@@ -4,6 +4,7 @@ import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
 import { StudentDocumentDirectory } from "@/components/documents/student-document-directory";
 import { MasterStudentDocumentFilters } from "@/components/forms/master-student-document-filters";
+import { formatStageAreaDisplayFromLegacyLabel } from "@/lib/utils/format";
 import type { StudentDocumentDirectoryPageData } from "@/services/student-documents";
 
 interface StudentDocumentDirectoryScreenProps {
@@ -97,7 +98,7 @@ export function StudentDocumentDirectoryScreen({
                 <option value="">Todas</option>
                 {pageData.areaOptions.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {formatStageAreaDisplayFromLegacyLabel(option.label)}
                   </option>
                 ))}
               </select>

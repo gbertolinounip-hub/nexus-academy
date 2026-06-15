@@ -233,7 +233,6 @@ export default async function CoordinatorDashboardPage({
             <table className="table">
               <thead>
                 <tr>
-                  <th>Bloco</th>
                   <th>Área</th>
                   <th>Alunos</th>
                   <th>Supervisores</th>
@@ -242,7 +241,6 @@ export default async function CoordinatorDashboardPage({
               <tbody>
                 {dashboard.areaCoverage.map((area) => (
                   <tr key={area.areaId}>
-                    <td>{area.blockName}</td>
                     <td>{area.areaName}</td>
                     <td>{area.studentCount}</td>
                     <td>{area.professorCount}</td>

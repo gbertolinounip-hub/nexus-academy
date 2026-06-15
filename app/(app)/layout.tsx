@@ -1,6 +1,7 @@
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { getNavigationForUser } from "@/lib/auth/navigation";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
+import { joinDisplayParts } from "@/lib/utils/format";
 import { getAuthenticatedStudentDashboardPageData } from "@/services/dashboard";
 import { getClinicalUnreadNotificationCount } from "@/services/clinical-supervision";
 import { getStudentDocumentUnreadNotificationCount } from "@/services/student-documents";
@@ -28,15 +29,12 @@ export default async function AppLayout({
           label: area.areaName,
           enrollmentId: area.enrollmentId,
           recentUpdateAt: area.recentUpdateAt,
-          description: area.blockName
-            ? `${area.blockName} · ${
-                area.professorNames.length
-                  ? area.professorNames.join(", ")
-                  : "Supervisor ainda não vinculado"
-              }`
-            : area.professorNames.length
+          description: joinDisplayParts([
+            area.className,
+            area.professorNames.length
               ? area.professorNames.join(", ")
-              : "Supervisor ainda não vinculado"
+              : "Supervisor ainda nao vinculado"
+          ])
         })) ?? []
       : [];
   const navigationItems = getNavigationForUser(currentUser).map((item) =>
@@ -68,7 +66,7 @@ export default async function AppLayout({
           ? [
               {
                 key: "overview",
-                label: "Visão geral",
+                label: "Visao geral",
                 description: "Consolidado do semestre atual"
               },
               ...studentSecondaryNavigationItems

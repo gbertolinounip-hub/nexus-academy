@@ -382,6 +382,98 @@ function buildProfessorRecords(
     }));
 }
 
+function safeSortableTimestamp(value?: string | null) {
+  return typeof value === "string" ? value : "";
+}
+
+function compareEvaluationRows(left: EvaluationRow, right: EvaluationRow) {
+  const evaluatedDifference = safeSortableTimestamp(left.avaliado_em).localeCompare(
+    safeSortableTimestamp(right.avaliado_em)
+  );
+
+  if (evaluatedDifference !== 0) {
+    return evaluatedDifference;
+  }
+
+  const createdDifference = safeSortableTimestamp(left.created_at).localeCompare(
+    safeSortableTimestamp(right.created_at)
+  );
+
+  if (createdDifference !== 0) {
+    return createdDifference;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function mapEvaluationItemsByEvaluationId(items: EvaluationItemRow[]) {
+  const itemsByEvaluationId = new Map<string, EvaluationItemRow[]>();
+
+  for (const item of items) {
+    const currentItems = itemsByEvaluationId.get(item.avaliacao_id) ?? [];
+    currentItems.push(item);
+    itemsByEvaluationId.set(item.avaliacao_id, currentItems);
+  }
+
+  return itemsByEvaluationId;
+}
+
+function resolveEvaluationItemMergeKey(item: EvaluationItemRow) {
+  return item.criterio_modelo_avaliacao_id ?? item.criterio_id;
+}
+
+function resolveEvaluationChainKey(
+  evaluation: EvaluationRow,
+  evaluationById: Map<string, EvaluationRow>
+) {
+  if (evaluation.avaliacao_raiz_id) {
+    return evaluation.avaliacao_raiz_id;
+  }
+
+  let cursor = evaluation;
+  let guard = 0;
+
+  while (cursor.avaliacao_origem_id && guard < 20) {
+    const originEvaluation = evaluationById.get(cursor.avaliacao_origem_id);
+
+    if (!originEvaluation) {
+      return cursor.avaliacao_origem_id;
+    }
+
+    if (originEvaluation.avaliacao_raiz_id) {
+      return originEvaluation.avaliacao_raiz_id;
+    }
+
+    cursor = originEvaluation;
+    guard += 1;
+  }
+
+  return cursor.id;
+}
+
+function mapEvaluationItemsToLaunchItems(
+  items: EvaluationItemRow[],
+  criterionCodeById: Map<string, string>
+) {
+  return items
+    .map((item) => {
+      const criterionCode = criterionCodeById.get(item.criterio_id);
+
+      if (!criterionCode) {
+        return null;
+      }
+
+      return {
+        criterionId: criterionCode,
+        rawScore: numberValue(item.nota_bruta),
+        feedback: item.feedback ?? undefined,
+        rubricOptionLabel: item.opcao_rotulo_snapshot ?? null,
+        rubricOptionDescription: item.opcao_descricao_snapshot ?? null
+      };
+    })
+    .filter(Boolean) as EvaluationLaunch["items"];
+}
+
 function buildEvaluationLaunches(
   evaluations: EvaluationRow[],
   evaluationItems: EvaluationItemRow[],
@@ -412,24 +504,106 @@ function buildEvaluationLaunches(
         identity.effectiveDateValue ?? evaluation.created_at ?? evaluation.avaliado_em,
       createdAt: evaluation.created_at,
       notes: evaluation.observacoes ?? undefined,
-      items: evaluationItems
-        .filter((item) => item.avaliacao_id === evaluation.id)
-        .map((item) => {
-          const criterionCode = criterionCodeById.get(item.criterio_id);
-
-          if (!criterionCode) {
-            return null;
-          }
-
-          return {
-            criterionId: criterionCode,
-            rawScore: numberValue(item.nota_bruta),
-            feedback: item.feedback ?? undefined
-          };
-        })
-        .filter(Boolean) as EvaluationLaunch["items"]
+      items: mapEvaluationItemsToLaunchItems(
+        evaluationItems.filter((item) => item.avaliacao_id === evaluation.id),
+        criterionCodeById
+      )
     };
   });
+}
+
+function buildEffectivePublishedEvaluationLaunches(
+  evaluations: EvaluationRow[],
+  evaluationItems: EvaluationItemRow[],
+  criteria: CriterionRow[],
+  enrollmentId: string
+): EvaluationLaunch[] {
+  const publishedEvaluations = evaluations.filter(
+    (evaluation) => evaluation.status === "publicado"
+  );
+
+  if (!publishedEvaluations.length) {
+    return [];
+  }
+
+  const criterionCodeById = new Map(
+    criteria.map((criterion) => [criterion.id, criterion.codigo])
+  );
+  const evaluationById = new Map(
+    publishedEvaluations.map((evaluation) => [evaluation.id, evaluation])
+  );
+  const itemsByEvaluationId = mapEvaluationItemsByEvaluationId(evaluationItems);
+  const chainRowsByKey = new Map<string, EvaluationRow[]>();
+
+  for (const evaluation of publishedEvaluations) {
+    const chainKey = resolveEvaluationChainKey(evaluation, evaluationById);
+    const currentRows = chainRowsByKey.get(chainKey) ?? [];
+    currentRows.push(evaluation);
+    chainRowsByKey.set(chainKey, currentRows);
+  }
+
+  return [...chainRowsByKey.values()]
+    .map((chainRows) => {
+      const sortedChainRows = [...chainRows].sort(compareEvaluationRows);
+      const latestPublishedEvaluation = sortedChainRows.at(-1);
+
+      if (!latestPublishedEvaluation) {
+        return null;
+      }
+
+      const effectiveItemsByCriterion = new Map<string, EvaluationItemRow>();
+
+      for (const evaluation of sortedChainRows) {
+        for (const item of itemsByEvaluationId.get(evaluation.id) ?? []) {
+          effectiveItemsByCriterion.set(resolveEvaluationItemMergeKey(item), item);
+        }
+      }
+
+      const identity = resolveLaunchIdentity({
+        launchType: latestPublishedEvaluation.tipo_lancamento,
+        evaluatedAt: latestPublishedEvaluation.avaliado_em,
+        reference: latestPublishedEvaluation.referencia,
+        createdAt: latestPublishedEvaluation.created_at
+      });
+
+      return {
+        id: latestPublishedEvaluation.id,
+        enrollmentId,
+        semesterId: latestPublishedEvaluation.semestre_id,
+        professorId: latestPublishedEvaluation.professor_id,
+        reference: identity.label,
+        isLegacyRecord: identity.isLegacyRecord,
+        launchType: latestPublishedEvaluation.tipo_lancamento,
+        publishedAt:
+          identity.effectiveDateValue ??
+          latestPublishedEvaluation.created_at ??
+          latestPublishedEvaluation.avaliado_em,
+        createdAt: latestPublishedEvaluation.created_at,
+        notes: latestPublishedEvaluation.observacoes ?? undefined,
+        items: mapEvaluationItemsToLaunchItems(
+          [...effectiveItemsByCriterion.values()],
+          criterionCodeById
+        )
+      } satisfies EvaluationLaunch;
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const publishedDifference = left!.publishedAt.localeCompare(right!.publishedAt);
+
+      if (publishedDifference !== 0) {
+        return publishedDifference;
+      }
+
+      const createdDifference = safeSortableTimestamp(left!.createdAt).localeCompare(
+        safeSortableTimestamp(right!.createdAt)
+      );
+
+      if (createdDifference !== 0) {
+        return createdDifference;
+      }
+
+      return left!.id.localeCompare(right!.id);
+    }) as EvaluationLaunch[];
 }
 
 function buildAbsenceRecords(absenceRows: AbsenceRow[], enrollmentId: string) {
@@ -486,6 +660,18 @@ export function buildStudentDashboardFromRows(input: {
   absenceRows: AbsenceRow[];
 }): StudentDashboardData {
   const professorIds = input.professorLinks.map((link) => link.professor_id);
+  const timelineEvaluations = buildEvaluationLaunches(
+    input.evaluationRows,
+    input.evaluationItemRows,
+    input.criterionRows,
+    input.enrollment.id
+  );
+  const effectiveEvaluations = buildEffectivePublishedEvaluationLaunches(
+    input.evaluationRows,
+    input.evaluationItemRows,
+    input.criterionRows,
+    input.enrollment.id
+  );
 
   return buildStudentDashboardData({
     student: buildStudentRecordFromRows({
@@ -514,12 +700,8 @@ export function buildStudentDashboardFromRows(input: {
       input.linkedProfessorUsers,
       input.professorLinks
     ),
-    evaluations: buildEvaluationLaunches(
-      input.evaluationRows,
-      input.evaluationItemRows,
-      input.criterionRows,
-      input.enrollment.id
-    ),
+    evaluations: timelineEvaluations,
+    effectiveEvaluations,
     absences: buildAbsenceRecords(input.absenceRows, input.enrollment.id)
   });
 }

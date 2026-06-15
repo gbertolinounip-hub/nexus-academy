@@ -14,6 +14,7 @@ import { StudentProfileForm } from "@/components/forms/student-profile-form";
 import { StudentStageManagementForm } from "@/components/forms/student-stage-management-form";
 import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/session";
+import { formatStageAreaLabel } from "@/lib/utils/format";
 import { getStudentManagementDetailData } from "@/services/management";
 
 export default async function StudentManagementDetailPage(props: {
@@ -247,9 +248,7 @@ export default async function StudentManagementDetailPage(props: {
                           key={assignment.enrollmentId}
                           className="management-assignment-item management-history-assignment"
                         >
-                          <strong>
-                            {assignment.areaName} - {assignment.blockName}
-                          </strong>
+                          <strong>{formatStageAreaLabel(assignment.areaName)}</strong>
                           <span>Turma operacional: {assignment.className}</span>
                           <span>
                             Status da matrícula:{" "}

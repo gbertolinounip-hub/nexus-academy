@@ -3,9 +3,72 @@ import type { StudentGroupSnapshot } from "@/types/domain";
 
 interface CriteriaTableProps {
   groups: StudentGroupSnapshot[];
+  collapsibleFeedback?: boolean;
 }
 
-export function CriteriaTable({ groups }: CriteriaTableProps) {
+function hasCriterionNarrative(criterion: StudentGroupSnapshot["criteria"][number]) {
+  return Boolean(
+    criterion.latestRubricOptionLabel ||
+      criterion.latestRubricOptionDescription ||
+      criterion.latestFeedback
+  );
+}
+
+function renderCriterionNarrative(
+  criterion: StudentGroupSnapshot["criteria"][number],
+  collapsibleFeedback: boolean
+) {
+  const content = (
+    <div className="criteria-justification-box">
+      {criterion.latestRubricOptionLabel ? (
+        <div className="criteria-feedback-section">
+          <span className="criteria-justification-label">
+            Opcao selecionada pelo supervisor:
+          </span>
+          <span className="criteria-justification-text">
+            {criterion.latestRubricOptionLabel}
+          </span>
+        </div>
+      ) : null}
+
+      {criterion.latestRubricOptionDescription ? (
+        <div className="criteria-feedback-section">
+          <span className="criteria-justification-label">Detalhamento:</span>
+          <span className="criteria-justification-text">
+            {criterion.latestRubricOptionDescription}
+          </span>
+        </div>
+      ) : null}
+
+      {criterion.latestFeedback ? (
+        <div className="criteria-feedback-section">
+          <span className="criteria-justification-label">
+            Comentario do supervisor:
+          </span>
+          <span className="criteria-justification-text">
+            {criterion.latestFeedback}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+
+  if (!collapsibleFeedback) {
+    return content;
+  }
+
+  return (
+    <details className="criteria-feedback-details">
+      <summary className="criteria-feedback-summary">Ver devolutiva</summary>
+      {content}
+    </details>
+  );
+}
+
+export function CriteriaTable({
+  groups,
+  collapsibleFeedback = false
+}: CriteriaTableProps) {
   return (
     <div className="table-wrap">
       <table className="table criteria-table">
@@ -34,12 +97,13 @@ export function CriteriaTable({ groups }: CriteriaTableProps) {
               </tr>
               {group.criteria.flatMap((criterion, criterionIndex) => {
                 const isLastCriterion = criterionIndex === group.criteria.length - 1;
+                const hasNarrative = hasCriterionNarrative(criterion);
                 const rows = [
                   <tr
                     key={criterion.criterionId}
                     className={`criteria-block-row criteria-main-row${
-                      criterion.latestFeedback ? " criteria-main-row-with-justification" : ""
-                    }${isLastCriterion && !criterion.latestFeedback ? " criteria-block-row-end" : ""}`}
+                      hasNarrative ? " criteria-main-row-with-justification" : ""
+                    }${isLastCriterion && !hasNarrative ? " criteria-block-row-end" : ""}`}
                   >
                     <td>{criterion.name}</td>
                     <td>{formatPercentage(criterion.weightPercentage)}</td>
@@ -53,7 +117,7 @@ export function CriteriaTable({ groups }: CriteriaTableProps) {
                   </tr>
                 ];
 
-                if (criterion.latestFeedback) {
+                if (hasNarrative) {
                   rows.push(
                     <tr
                       key={`${criterion.criterionId}-feedback`}
@@ -62,14 +126,7 @@ export function CriteriaTable({ groups }: CriteriaTableProps) {
                       }`}
                     >
                       <td colSpan={5} className="criteria-justification-cell">
-                        <div className="criteria-justification-box">
-                          <span className="criteria-justification-label">
-                            Justificativa do supervisor:
-                          </span>{" "}
-                          <span className="criteria-justification-text">
-                            {criterion.latestFeedback}
-                          </span>
-                        </div>
+                        {renderCriterionNarrative(criterion, collapsibleFeedback)}
                       </td>
                     </tr>
                   );

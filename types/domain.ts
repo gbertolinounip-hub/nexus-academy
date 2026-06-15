@@ -256,6 +256,8 @@ export interface EvaluationItemInput {
   criterionId: string;
   rawScore: number;
   feedback?: string;
+  rubricOptionLabel?: string | null;
+  rubricOptionDescription?: string | null;
 }
 
 export interface EvaluationLaunch {
@@ -306,6 +308,8 @@ export interface StudentCriterionSnapshot {
   weightPercentage: number;
   latestRawScore: number | null;
   latestFeedback?: string | null;
+  latestRubricOptionLabel?: string | null;
+  latestRubricOptionDescription?: string | null;
   earnedPercentage: number;
   updatedAt: string | null;
 }
