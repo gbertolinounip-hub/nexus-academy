@@ -5,6 +5,7 @@ import {
   type MasterOperationalFilterValues
 } from "@/components/forms/master-operational-filters";
 import { MasterClassForm } from "@/components/forms/master-class-form";
+import { MasterClassCurricularPeriodForm } from "@/components/forms/master-class-curricular-period-form";
 import { requireRole } from "@/lib/auth/session";
 import { getClassManagementPageData } from "@/services/class-management";
 
@@ -99,7 +100,7 @@ export default async function MasterClassesPage({
 
       <SectionCard
         title="Criar turma por semestre"
-        description="Selecione instituicao, curso, oferta e semestre. A oferta da turma sera herdada do semestre validado."
+        description="Selecione instituicao, curso, oferta e semestre. A oferta da turma sera herdada do semestre validado, e o periodo curricular pode ser informado para futuras regras de avaliacao."
       >
         <div className="management-block-card">
           <MasterClassForm
@@ -125,6 +126,7 @@ export default async function MasterClassesPage({
                   <th>Curso</th>
                   <th>Oferta</th>
                   <th>Semestre</th>
+                  <th>Periodo curricular</th>
                   <th>Turma</th>
                   <th>Status</th>
                   <th>Matriculas</th>
@@ -150,6 +152,13 @@ export default async function MasterClassesPage({
                     <td>
                       <strong>{classEntry.semesterCode}</strong>
                       <div className="table-helper">{classEntry.semesterName}</div>
+                    </td>
+                    <td>
+                      <MasterClassCurricularPeriodForm
+                        classId={classEntry.id}
+                        className={classEntry.className}
+                        curricularPeriod={classEntry.curricularPeriod}
+                      />
                     </td>
                     <td>
                       <strong>{classEntry.classCode}</strong>

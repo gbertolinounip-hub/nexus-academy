@@ -9,7 +9,7 @@ import {
   resolveExceptionalReleaseGate
 } from "@/services/exceptional-releases";
 import {
-  loadEvaluationRuntimeContextsForEnrollments,
+  loadEvaluationRuntimeContextForSelection,
   type EvaluationRubricCriterion,
   type EvaluationRuntimeContext
 } from "@/services/evaluations";
@@ -44,6 +44,8 @@ type EvaluationValidationRow = Pick<
   | "professor_id"
   | "avaliacao_origem_id"
   | "avaliacao_raiz_id"
+  | "modelo_avaliacao_curso_id"
+  | "modalidade_snapshot"
   | "avaliado_em"
   | "created_at"
 >;
@@ -446,24 +448,17 @@ async function loadEvaluationOperationalScope(
 }
 
 async function loadEvaluationRuntimeContextForEnrollment(
-  enrollmentId: string
+  enrollmentId: string,
+  input?: {
+    evaluationModelId?: string | null;
+    modalitySnapshot?: EvaluationModelMode | null;
+  }
 ): Promise<EvaluationRuntimeContext> {
-  const runtimeContextByEnrollmentId =
-    await loadEvaluationRuntimeContextsForEnrollments([enrollmentId]);
-
-  return (
-    runtimeContextByEnrollmentId.get(enrollmentId) ?? {
-      enrollmentId,
-      courseId: null,
-      offerId: null,
-      modelId: null,
-      modelCode: null,
-      modelName: null,
-      modality: "descritiva",
-      source: "legacy_global",
-      rubricGroups: []
-    }
-  );
+  return loadEvaluationRuntimeContextForSelection({
+    enrollmentId,
+    evaluationModelId: input?.evaluationModelId ?? null,
+    modalitySnapshot: input?.modalitySnapshot ?? null
+  });
 }
 
 async function validateProfessorLink(
@@ -748,7 +743,7 @@ async function loadReviewBaselineState(
   const { data: originEvaluationData, error: originEvaluationError } = await supabase
     .from("avaliacoes")
     .select(
-      "id, professor_id, matricula_turma_id, status, avaliacao_origem_id, avaliacao_raiz_id, avaliado_em, created_at"
+      "id, professor_id, matricula_turma_id, status, avaliacao_origem_id, avaliacao_raiz_id, modelo_avaliacao_curso_id, modalidade_snapshot, avaliado_em, created_at"
     )
     .eq("id", originEvaluationId)
     .eq("professor_id", professorId)
@@ -770,7 +765,7 @@ async function loadReviewBaselineState(
     await supabase
       .from("avaliacoes")
       .select(
-        "id, professor_id, matricula_turma_id, status, avaliacao_origem_id, avaliacao_raiz_id, avaliado_em, created_at"
+        "id, professor_id, matricula_turma_id, status, avaliacao_origem_id, avaliacao_raiz_id, modelo_avaliacao_curso_id, modalidade_snapshot, avaliado_em, created_at"
       )
       .or(`id.eq.${rootEvaluationId},avaliacao_raiz_id.eq.${rootEvaluationId}`);
 
@@ -967,12 +962,13 @@ export async function submitEvaluationAction(
   let targetEnrollmentId = matricula_turma_id;
   let isEditing = false;
   let existingEvaluation: EvaluationValidationRow | null = null;
+  let originEvaluation: EvaluationValidationRow | null = null;
 
   if (avaliacao_id) {
     const { data: existingEvaluationData, error: existingEvaluationError } = await supabase
       .from("avaliacoes")
       .select(
-        "id, matricula_turma_id, status, professor_id, avaliacao_origem_id, avaliacao_raiz_id, avaliado_em, created_at"
+        "id, matricula_turma_id, status, professor_id, avaliacao_origem_id, avaliacao_raiz_id, modelo_avaliacao_curso_id, modalidade_snapshot, avaliado_em, created_at"
       )
       .eq("id", avaliacao_id)
       .eq("professor_id", currentUser.id)
@@ -999,6 +995,31 @@ export async function submitEvaluationAction(
 
     targetEnrollmentId = existingEvaluation.matricula_turma_id;
     isEditing = true;
+  }
+
+  const reviewOriginId =
+    avaliacao_origem_id ?? existingEvaluation?.avaliacao_origem_id ?? null;
+
+  if (reviewOriginId) {
+    const { data: originEvaluationData, error: originEvaluationError } = await supabase
+      .from("avaliacoes")
+      .select(
+        "id, matricula_turma_id, status, professor_id, avaliacao_origem_id, avaliacao_raiz_id, modelo_avaliacao_curso_id, modalidade_snapshot, avaliado_em, created_at"
+      )
+      .eq("id", reviewOriginId)
+      .eq("professor_id", currentUser.id)
+      .maybeSingle();
+
+    originEvaluation =
+      (originEvaluationData ?? null) as EvaluationValidationRow | null;
+
+    if (originEvaluationError || !originEvaluation) {
+      return buildErrorState(
+        "Não foi possível localizar a avaliação publicada que serve de base para esta revisão.",
+        {},
+        submittedFormValues
+      );
+    }
   }
 
   let evaluationScope;
@@ -1057,7 +1078,17 @@ export async function submitEvaluationAction(
 
   try {
     evaluationRuntimeContext = await loadEvaluationRuntimeContextForEnrollment(
-      targetEnrollmentId
+      targetEnrollmentId,
+      {
+        evaluationModelId:
+          existingEvaluation?.modelo_avaliacao_curso_id ??
+          originEvaluation?.modelo_avaliacao_curso_id ??
+          null,
+        modalitySnapshot:
+          existingEvaluation?.modalidade_snapshot ??
+          originEvaluation?.modalidade_snapshot ??
+          null
+      }
     );
   } catch (error) {
     return buildErrorState(
@@ -1104,9 +1135,6 @@ export async function submitEvaluationAction(
   let reviewBaseline: ReviewBaselineState | null = null;
 
   if (isIncrementalReview) {
-    const reviewOriginId =
-      avaliacao_origem_id ?? existingEvaluation?.avaliacao_origem_id ?? null;
-
     if (!reviewOriginId) {
       return buildErrorState(
         "Não foi possível identificar a avaliação publicada que serve de base para esta revisão.",

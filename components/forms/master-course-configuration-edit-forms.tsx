@@ -2,10 +2,15 @@
 
 import { useActionState, useEffect, useMemo, useState } from "react";
 import {
+  MasterCourseConfigurationCreateModelApplicationRuleForm,
+  MasterCourseConfigurationModelApplicationRuleForm
+} from "@/components/forms/master-course-configuration-application-rule-forms";
+import {
   createCourseConfigurationCriterionAction,
   createCourseConfigurationCriterionOptionAction,
   createCourseConfigurationGroupAction,
   createCourseRequiredDocumentAction,
+  setCourseConfigurationModelLaunchDefaultAction,
   deleteCourseConfigurationCriterionAction,
   deleteCourseConfigurationGroupAction,
   deleteCourseRequiredDocumentAction,
@@ -28,6 +33,7 @@ import {
   initialCourseConfigurationCreateCriterionOptionActionState,
   initialCourseConfigurationCreateGroupActionState,
   initialCourseConfigurationCreateRequiredDocumentActionState,
+  initialCourseConfigurationSetLaunchDefaultActionState,
   type CourseConfigurationActionState,
   type CourseConfigurationCreateCriterionFormValues,
   type CourseConfigurationCreateCriterionOptionFormValues,
@@ -47,7 +53,9 @@ import type {
   CourseConfigurationCriterionOptionEntry,
   CourseConfigurationDocumentTypeOption,
   CourseConfigurationGroupEntry,
+  CourseConfigurationModelApplicationRuleEntry,
   CourseConfigurationModelEntry,
+  CourseConfigurationModelApplicationRuleOptions,
   CourseConfigurationRequiredDocumentEntry
 } from "@/services/course-configurations";
 
@@ -115,6 +123,49 @@ function buildModelDraft(model: CourseConfigurationModelEntry): CourseConfigurat
 
 function getModelModalityLabel(modality: CourseConfigurationModelEntry["modality"]) {
   return modality === "rubrica" ? "Avaliacao por rubrica" : "Avaliacao descritiva";
+}
+
+function renderModelApplicationRuleSummary(
+  applicationRule: CourseConfigurationModelApplicationRuleEntry
+) {
+  return (
+    <div key={applicationRule.id} className="management-block-card">
+      <div className="management-block-header">
+        <div>
+          <strong>{applicationRule.summary}</strong>
+          <p className="field-help">
+            Prioridade {applicationRule.priority} · Especificidade {applicationRule.specificity}
+          </p>
+        </div>
+        <span
+          className={`status-pill ${
+            applicationRule.active ? "status-ativo" : "status-inativo"
+          }`}
+        >
+          {applicationRule.active ? "Ativa" : "Inativa"}
+        </span>
+      </div>
+      <div className="management-tag-list">
+        {applicationRule.classLabel ? (
+          <span className="badge badge-muted">{applicationRule.classLabel}</span>
+        ) : null}
+        {applicationRule.areaName ? (
+          <span className="badge badge-muted">Area: {applicationRule.areaName}</span>
+        ) : null}
+        {applicationRule.curricularPeriod ? (
+          <span className="badge badge-muted">
+            {applicationRule.curricularPeriod}º periodo
+          </span>
+        ) : null}
+        {applicationRule.semesterLabel ? (
+          <span className="badge badge-muted">{applicationRule.semesterLabel}</span>
+        ) : null}
+        {applicationRule.offerName ? (
+          <span className="badge badge-muted">{applicationRule.offerName}</span>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 function renderRubricOptionsSummary(options: CourseConfigurationCriterionOptionEntry[]) {
@@ -273,13 +324,19 @@ function buildCreateRequiredDocumentDraft(
 }
 
 export function MasterCourseConfigurationModelForm({
-  model
+  model,
+  ruleOptions
 }: {
   model: CourseConfigurationModelEntry;
+  ruleOptions: CourseConfigurationModelApplicationRuleOptions;
 }) {
   const [state, formAction] = useActionState(
     updateCourseConfigurationModelAction,
     createInitialCourseConfigurationActionState<CourseConfigurationModelFormValues>()
+  );
+  const [setLaunchDefaultState, setLaunchDefaultFormAction] = useActionState(
+    setCourseConfigurationModelLaunchDefaultAction,
+    initialCourseConfigurationSetLaunchDefaultActionState
   );
   const safeState =
     state ?? createInitialCourseConfigurationActionState<CourseConfigurationModelFormValues>();
@@ -299,98 +356,147 @@ export function MasterCourseConfigurationModelForm({
   }, [safeState.formValues, safeState.status, safeState.submittedAt]);
 
   return (
-    <form action={formAction} className="form-stack master-course-configuration-edit-form">
-      <input type="hidden" name="model_id" value={draft.model_id} />
-      {renderNotice(safeState)}
+    <>
+      <form action={formAction} className="form-stack master-course-configuration-edit-form">
+        <input type="hidden" name="model_id" value={draft.model_id} />
+        {renderNotice(safeState)}
+        {renderNotice(setLaunchDefaultState)}
 
-      <div className="management-tag-list">
-        <span className="badge badge-muted">Codigo fixo: {model.code}</span>
-        <span className="badge badge-muted">Versao fixa: {model.version}</span>
-        <span className="badge badge-muted">{getModelModalityLabel(model.modality)}</span>
-      </div>
+        <div className="management-tag-list">
+          <span className="badge badge-muted">Codigo fixo: {model.code}</span>
+          <span className="badge badge-muted">Versao fixa: {model.version}</span>
+          <span className="badge badge-muted">{getModelModalityLabel(model.modality)}</span>
+          {model.isLaunchDefault ? (
+            <span className="status-pill status-bem">Padrao para lancamento</span>
+          ) : (
+            <span className="badge badge-muted">Modelo complementar</span>
+          )}
+        </div>
 
-      <div className="form-grid">
-        <label className={getFieldClassName(fieldErrors, "nome")}>
-          <span>Nome</span>
-          <input
-            className={getInputClassName(fieldErrors, "nome")}
-            name="nome"
-            value={draft.nome}
+        <div className="form-grid">
+          <label className={getFieldClassName(fieldErrors, "nome")}>
+            <span>Nome</span>
+            <input
+              className={getInputClassName(fieldErrors, "nome")}
+              name="nome"
+              value={draft.nome}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({ ...currentDraft, nome: value }));
+              }}
+            />
+            {fieldErrors.nome ? <span className="field-error">{fieldErrors.nome}</span> : null}
+          </label>
+
+          <label className={getFieldClassName(fieldErrors, "modalidade")}>
+            <span>Modalidade</span>
+            <select
+              className={getInputClassName(fieldErrors, "modalidade")}
+              name="modalidade"
+              value={draft.modalidade}
+              onChange={(event) => {
+                const value = event.currentTarget.value as "descritiva" | "rubrica";
+
+                setDraft((currentDraft) => ({ ...currentDraft, modalidade: value }));
+              }}
+            >
+              <option value="descritiva">Avaliacao descritiva</option>
+              <option value="rubrica">Avaliacao por rubrica</option>
+            </select>
+            {fieldErrors.modalidade ? (
+              <span className="field-error">{fieldErrors.modalidade}</span>
+            ) : null}
+          </label>
+
+          <label className={getFieldClassName(fieldErrors, "ativo")}>
+            <span>Status</span>
+            <select
+              className={getInputClassName(fieldErrors, "ativo")}
+              name="ativo"
+              value={draft.ativo}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+
+                setDraft((currentDraft) => ({ ...currentDraft, ativo: value }));
+              }}
+            >
+              <option value="true">Ativo</option>
+              <option value="false">Inativo</option>
+            </select>
+            {fieldErrors.ativo ? <span className="field-error">{fieldErrors.ativo}</span> : null}
+          </label>
+        </div>
+
+        <label className={getFieldClassName(fieldErrors, "descricao")}>
+          <span>Descricao</span>
+          <textarea
+            className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
+            name="descricao"
+            rows={3}
+            value={draft.descricao}
             onChange={(event) => {
               const value = event.currentTarget.value;
 
-              setDraft((currentDraft) => ({ ...currentDraft, nome: value }));
+              setDraft((currentDraft) => ({
+                ...currentDraft,
+                descricao: value
+              }));
             }}
           />
-          {fieldErrors.nome ? <span className="field-error">{fieldErrors.nome}</span> : null}
-        </label>
-
-        <label className={getFieldClassName(fieldErrors, "modalidade")}>
-          <span>Modalidade</span>
-          <select
-            className={getInputClassName(fieldErrors, "modalidade")}
-            name="modalidade"
-            value={draft.modalidade}
-            onChange={(event) => {
-              const value = event.currentTarget.value as "descritiva" | "rubrica";
-
-              setDraft((currentDraft) => ({ ...currentDraft, modalidade: value }));
-            }}
-          >
-            <option value="descritiva">Avaliacao descritiva</option>
-            <option value="rubrica">Avaliacao por rubrica</option>
-          </select>
-          {fieldErrors.modalidade ? (
-            <span className="field-error">{fieldErrors.modalidade}</span>
+          {fieldErrors.descricao ? (
+            <span className="field-error">{fieldErrors.descricao}</span>
           ) : null}
         </label>
 
-        <label className={getFieldClassName(fieldErrors, "ativo")}>
-          <span>Status</span>
-          <select
-            className={getInputClassName(fieldErrors, "ativo")}
-            name="ativo"
-            value={draft.ativo}
-            onChange={(event) => {
-              const value = event.currentTarget.value;
-
-              setDraft((currentDraft) => ({ ...currentDraft, ativo: value }));
-            }}
+        <div className="actions-row">
+          <button className="button button-secondary" type="submit">
+            Salvar modelo
+          </button>
+          <button
+            className="button button-secondary"
+            formAction={setLaunchDefaultFormAction}
+            type="submit"
+            disabled={!model.isActive || model.isLaunchDefault}
           >
-            <option value="true">Ativo</option>
-            <option value="false">Inativo</option>
-          </select>
-          {fieldErrors.ativo ? <span className="field-error">{fieldErrors.ativo}</span> : null}
-        </label>
-      </div>
+            {model.isLaunchDefault ? "Padrao atual" : "Definir como padrao"}
+          </button>
+        </div>
+      </form>
 
-      <label className={getFieldClassName(fieldErrors, "descricao")}>
-        <span>Descricao</span>
-        <textarea
-          className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
-          name="descricao"
-          rows={3}
-          value={draft.descricao}
-          onChange={(event) => {
-            const value = event.currentTarget.value;
-
-            setDraft((currentDraft) => ({
-              ...currentDraft,
-              descricao: value
-            }));
-          }}
-        />
-        {fieldErrors.descricao ? (
-          <span className="field-error">{fieldErrors.descricao}</span>
+      <div className="stack">
+        <div>
+          <strong>Regras de aplicacao</strong>
+          <p className="field-help">
+            Defina onde este modelo deve ser usado. Regras mais especificas e com maior
+            prioridade vencem no runtime futuro.
+          </p>
+        </div>
+        {model.applicationRuleConflictWarning ? (
+          <div className="form-notice">{model.applicationRuleConflictWarning}</div>
         ) : null}
-      </label>
-
-      <div className="actions-row">
-        <button className="button button-secondary" type="submit">
-          Salvar modelo
-        </button>
+        {model.applicationRules.length ? (
+          <div className="stack">
+            {model.applicationRules.map((applicationRule) => (
+              <MasterCourseConfigurationModelApplicationRuleForm
+                key={applicationRule.id}
+                applicationRule={applicationRule}
+                ruleOptions={ruleOptions}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="field-help">
+            Nenhuma regra especifica cadastrada. Neste caso, o modelo depende do padrao geral
+            do curso ou do fallback legado.
+          </p>
+        )}
+        <MasterCourseConfigurationCreateModelApplicationRuleForm
+          modelId={model.id}
+          ruleOptions={ruleOptions}
+        />
       </div>
-    </form>
+    </>
   );
 }
 

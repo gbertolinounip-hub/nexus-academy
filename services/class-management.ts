@@ -78,6 +78,7 @@ export interface ClassManagementClassEntry {
   offerName: string | null;
   semesterCode: string;
   semesterName: string;
+  curricularPeriod: number | null;
   classCode: string;
   className: string;
   stageArea: string;
@@ -339,6 +340,7 @@ export async function getClassManagementPageData(
         offerName: offerRow?.nome_exibicao ?? null,
         semesterCode: semesterRow?.codigo ?? "Sem semestre",
         semesterName: semesterRow?.nome ?? "Sem semestre vinculado",
+        curricularPeriod: classRow.periodo_curricular,
         classCode: classRow.codigo,
         className: classRow.nome,
         stageArea: classRow.area_estagio,

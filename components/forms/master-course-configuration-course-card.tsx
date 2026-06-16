@@ -245,7 +245,10 @@ export function MasterCourseConfigurationCourseCard({
                       {renderBooleanPill(model.isActive)}
                     </div>
                     {renderWeightDiagnostic("Grupos", "grupos", model.groupWeightDiagnostic)}
-                    <MasterCourseConfigurationModelForm model={model} />
+                    <MasterCourseConfigurationModelForm
+                      model={model}
+                      ruleOptions={course.applicationRuleOptions}
+                    />
                   </div>
                 ))}
               </div>

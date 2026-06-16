@@ -67,6 +67,37 @@ export interface CourseConfigurationModelFormValues {
   ativo: string;
 }
 
+export interface CourseConfigurationSetLaunchDefaultFormValues {
+  model_id: string;
+}
+
+export interface CourseConfigurationCreateModelApplicationRuleFormValues {
+  model_id: string;
+  oferta_curso_unidade_id: string;
+  periodo_curricular: string;
+  semestre_id: string;
+  turma_id: string;
+  area_estagio_id: string;
+  prioridade: string;
+  ativo: string;
+}
+
+export interface CourseConfigurationModelApplicationRuleFormValues {
+  rule_id: string;
+  oferta_curso_unidade_id: string;
+  periodo_curricular: string;
+  semestre_id: string;
+  turma_id: string;
+  area_estagio_id: string;
+  prioridade: string;
+  ativo: string;
+}
+
+export interface CourseConfigurationToggleModelApplicationRuleFormValues {
+  rule_id: string;
+  ativo: string;
+}
+
 export interface CourseConfigurationGroupFormValues {
   group_id: string;
   nome: string;
@@ -165,6 +196,26 @@ export const initialCourseConfigurationDeleteRequiredDocumentActionState:
     ...createInitialCourseConfigurationActionState<CourseConfigurationDeleteRequiredDocumentFormValues>()
   };
 
+export const initialCourseConfigurationSetLaunchDefaultActionState:
+  CourseConfigurationActionState<CourseConfigurationSetLaunchDefaultFormValues> = {
+    ...createInitialCourseConfigurationActionState<CourseConfigurationSetLaunchDefaultFormValues>()
+  };
+
+export const initialCourseConfigurationCreateModelApplicationRuleActionState:
+  CourseConfigurationActionState<CourseConfigurationCreateModelApplicationRuleFormValues> = {
+    ...createInitialCourseConfigurationActionState<CourseConfigurationCreateModelApplicationRuleFormValues>()
+  };
+
+export const initialCourseConfigurationModelApplicationRuleActionState:
+  CourseConfigurationActionState<CourseConfigurationModelApplicationRuleFormValues> = {
+    ...createInitialCourseConfigurationActionState<CourseConfigurationModelApplicationRuleFormValues>()
+  };
+
+export const initialCourseConfigurationToggleModelApplicationRuleActionState:
+  CourseConfigurationActionState<CourseConfigurationToggleModelApplicationRuleFormValues> = {
+    ...createInitialCourseConfigurationActionState<CourseConfigurationToggleModelApplicationRuleFormValues>()
+  };
+
 export function createEmptyCourseConfigurationCopyFormValues():
   CourseConfigurationCopyFormValues {
   return {
@@ -193,6 +244,48 @@ export function createEmptyCourseConfigurationCreateGroupFormValues(
     ordem: order,
     peso_percentual: weightPercent,
     ativo: "true"
+  };
+}
+
+export function createEmptyCourseConfigurationCreateModelApplicationRuleFormValues(
+  modelId = "",
+  priority = "100"
+): CourseConfigurationCreateModelApplicationRuleFormValues {
+  return {
+    model_id: modelId,
+    oferta_curso_unidade_id: "",
+    periodo_curricular: "",
+    semestre_id: "",
+    turma_id: "",
+    area_estagio_id: "",
+    prioridade: priority,
+    ativo: "true"
+  };
+}
+
+export function createEmptyCourseConfigurationModelApplicationRuleFormValues(
+  ruleId = "",
+  priority = "100"
+): CourseConfigurationModelApplicationRuleFormValues {
+  return {
+    rule_id: ruleId,
+    oferta_curso_unidade_id: "",
+    periodo_curricular: "",
+    semestre_id: "",
+    turma_id: "",
+    area_estagio_id: "",
+    prioridade: priority,
+    ativo: "true"
+  };
+}
+
+export function createEmptyCourseConfigurationToggleModelApplicationRuleFormValues(
+  ruleId = "",
+  active = "true"
+): CourseConfigurationToggleModelApplicationRuleFormValues {
+  return {
+    rule_id: ruleId,
+    ativo: active
   };
 }
 

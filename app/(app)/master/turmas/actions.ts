@@ -7,6 +7,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/types/database";
 import type {
   ClassManagementActionState,
+  ClassManagementCurricularPeriodActionState,
+  MasterClassCurricularPeriodFormValues,
   MasterClassFormValues
 } from "@/app/(app)/master/turmas/state";
 
@@ -19,6 +21,15 @@ const classSchema = z.object({
   curso_id: z.string().uuid("Selecione um curso valido."),
   oferta_curso_unidade_id: z.string().uuid("Selecione uma oferta valida."),
   semestre_id: z.string().uuid("Selecione um semestre valido."),
+  periodo_curricular: z
+    .string()
+    .trim()
+    .refine((value) => !value || /^\d+$/.test(value), {
+      message: "Informe um periodo curricular numerico valido."
+    })
+    .refine((value) => !value || Number(value) > 0, {
+      message: "O periodo curricular deve ser maior que zero."
+    }),
   codigo: z
     .string()
     .trim()
@@ -46,6 +57,19 @@ const classSchema = z.object({
   ativa: z.enum(["true", "false"])
 });
 
+const classCurricularPeriodSchema = z.object({
+  turma_id: z.string().uuid("Selecione uma turma valida."),
+  periodo_curricular: z
+    .string()
+    .trim()
+    .refine((value) => !value || /^\d+$/.test(value), {
+      message: "Informe um periodo curricular numerico valido."
+    })
+    .refine((value) => !value || Number(value) > 0, {
+      message: "O periodo curricular deve ser maior que zero."
+    })
+});
+
 function readStringField(formData: FormData, name: string) {
   const value = formData.get(name);
   return typeof value === "string" ? value.trim() : "";
@@ -69,11 +93,21 @@ function buildClassFormValues(formData: FormData): MasterClassFormValues {
     curso_id: readStringField(formData, "curso_id"),
     oferta_curso_unidade_id: readStringField(formData, "oferta_curso_unidade_id"),
     semestre_id: readStringField(formData, "semestre_id"),
+    periodo_curricular: readStringField(formData, "periodo_curricular"),
     codigo: readStringField(formData, "codigo").toUpperCase(),
     nome: readStringField(formData, "nome"),
     area_estagio: readStringField(formData, "area_estagio"),
     capacidade: readStringField(formData, "capacidade"),
     ativa: activeValue === "false" ? "false" : "true"
+  };
+}
+
+function buildClassCurricularPeriodFormValues(
+  formData: FormData
+): MasterClassCurricularPeriodFormValues {
+  return {
+    turma_id: readStringField(formData, "turma_id"),
+    periodo_curricular: readStringField(formData, "periodo_curricular")
   };
 }
 
@@ -258,6 +292,9 @@ export async function createMasterClassAction(
   const insertPayload: ClassInsert = {
     semestre_id: validation.semesterRow.id,
     oferta_curso_unidade_id: validation.semesterRow.oferta_curso_unidade_id,
+    periodo_curricular: parsedData.data.periodo_curricular
+      ? Number(parsedData.data.periodo_curricular)
+      : null,
     codigo: parsedData.data.codigo,
     nome: parsedData.data.nome,
     area_estagio: parsedData.data.area_estagio,
@@ -289,4 +326,70 @@ export async function createMasterClassAction(
     "success",
     `Turma ${parsedData.data.nome} criada com sucesso em ${validation.semesterRow.codigo}.`
   );
+}
+
+export async function updateMasterClassCurricularPeriodAction(
+  _previousState: ClassManagementCurricularPeriodActionState,
+  formData: FormData
+): Promise<ClassManagementCurricularPeriodActionState> {
+  await requireRole(["coordenador_master"]);
+  const submittedFormValues = buildClassCurricularPeriodFormValues(formData);
+  const parsedData = classCurricularPeriodSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return {
+      status: "error",
+      message: "Revise o periodo curricular informado.",
+      fieldErrors: normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      formValues: submittedFormValues,
+      submittedAt: Date.now()
+    };
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const { data, error: loadError } = await adminClient
+    .from("turmas")
+    .select("id, nome")
+    .eq("id", parsedData.data.turma_id)
+    .maybeSingle();
+  const existingClass = (data ?? null) as Pick<Database["public"]["Tables"]["turmas"]["Row"], "id" | "nome"> | null;
+
+  if (loadError || !existingClass) {
+    return {
+      status: "error",
+      message: "A turma selecionada nao foi encontrada.",
+      fieldErrors: { turma_id: "Turma invalida." },
+      formValues: submittedFormValues,
+      submittedAt: Date.now()
+    };
+  }
+
+  const { error } = await adminClient
+    .from("turmas")
+    .update({
+      periodo_curricular: parsedData.data.periodo_curricular
+        ? Number(parsedData.data.periodo_curricular)
+        : null
+    } satisfies Partial<Database["public"]["Tables"]["turmas"]["Row"]> as never)
+    .eq("id", existingClass.id);
+
+  if (error) {
+    return {
+      status: "error",
+      message: error.message || "Nao foi possivel atualizar o periodo curricular da turma.",
+      fieldErrors: {},
+      formValues: submittedFormValues,
+      submittedAt: Date.now()
+    };
+  }
+
+  revalidateClassManagementPaths();
+
+  return {
+    status: "success",
+    message: `Periodo curricular da turma ${existingClass.nome} atualizado com sucesso.`,
+    fieldErrors: {},
+    formValues: submittedFormValues,
+    submittedAt: Date.now()
+  };
 }

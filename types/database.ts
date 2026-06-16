@@ -339,6 +339,7 @@ export interface Database {
           descricao: string | null;
           versao: number;
           modalidade: "descritiva" | "rubrica";
+          padrao_lancamento: boolean;
           ativo: boolean;
           metadata: Record<string, unknown>;
           created_at: string;
@@ -352,6 +353,7 @@ export interface Database {
           descricao?: string | null;
           versao?: number;
           modalidade?: "descritiva" | "rubrica";
+          padrao_lancamento?: boolean;
           ativo?: boolean;
           metadata?: Record<string, unknown>;
           created_at?: string;
@@ -365,6 +367,7 @@ export interface Database {
           descricao?: string | null;
           versao?: number;
           modalidade?: "descritiva" | "rubrica";
+          padrao_lancamento?: boolean;
           ativo?: boolean;
           metadata?: Record<string, unknown>;
           created_at?: string;
@@ -866,6 +869,7 @@ export interface Database {
           id: string;
           semestre_id: string;
           oferta_curso_unidade_id: string | null;
+          periodo_curricular: number | null;
           codigo: string;
           nome: string;
           area_estagio: string;
@@ -880,6 +884,7 @@ export interface Database {
           id?: string;
           semestre_id: string;
           oferta_curso_unidade_id?: string | null;
+          periodo_curricular?: number | null;
           codigo: string;
           nome: string;
           area_estagio: string;
@@ -894,6 +899,7 @@ export interface Database {
           id?: string;
           semestre_id?: string;
           oferta_curso_unidade_id?: string | null;
+          periodo_curricular?: number | null;
           codigo?: string;
           nome?: string;
           area_estagio?: string;
@@ -901,6 +907,51 @@ export interface Database {
           coordenador_id?: string | null;
           capacidade?: number | null;
           ativa?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      regras_aplicacao_modelo_avaliacao: {
+        Row: {
+          id: string;
+          modelo_avaliacao_curso_id: string;
+          oferta_curso_unidade_id: string | null;
+          periodo_curricular: number | null;
+          semestre_id: string | null;
+          turma_id: string | null;
+          area_estagio_id: string | null;
+          prioridade: number;
+          ativo: boolean;
+          metadata: Record<string, unknown>;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          modelo_avaliacao_curso_id: string;
+          oferta_curso_unidade_id?: string | null;
+          periodo_curricular?: number | null;
+          semestre_id?: string | null;
+          turma_id?: string | null;
+          area_estagio_id?: string | null;
+          prioridade?: number;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          modelo_avaliacao_curso_id?: string;
+          oferta_curso_unidade_id?: string | null;
+          periodo_curricular?: number | null;
+          semestre_id?: string | null;
+          turma_id?: string | null;
+          area_estagio_id?: string | null;
+          prioridade?: number;
+          ativo?: boolean;
+          metadata?: Record<string, unknown>;
           created_at?: string;
           updated_at?: string;
         };

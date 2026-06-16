@@ -360,6 +360,8 @@ export function EvaluationForm({
         modelName: evaluationModelName ?? null,
         modality: evaluationMode,
         source: "legacy_global",
+        applicationRuleId: null,
+        applicationRuleSummary: null,
         rubricGroups
       }
     );

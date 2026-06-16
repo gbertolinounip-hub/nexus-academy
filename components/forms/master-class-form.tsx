@@ -256,6 +256,29 @@ export function MasterClassForm({
           {fieldErrors.codigo ? <span className="field-error">{fieldErrors.codigo}</span> : null}
         </label>
 
+        <label className={getFieldClassName("periodo_curricular")}>
+          <span>Periodo curricular</span>
+          <input
+            className={getInputClassName("periodo_curricular")}
+            name="periodo_curricular"
+            inputMode="numeric"
+            placeholder="Ex.: 6, 7 ou 8"
+            value={draft.periodo_curricular}
+            onChange={(event) =>
+              updateDraft(
+                "periodo_curricular",
+                event.currentTarget.value.replace(/[^\d]/g, "")
+              )
+            }
+          />
+          <span className="field-help">
+            Informe o periodo/semestre curricular do curso, por exemplo: 6, 7 ou 8.
+          </span>
+          {fieldErrors.periodo_curricular ? (
+            <span className="field-error">{fieldErrors.periodo_curricular}</span>
+          ) : null}
+        </label>
+
         <label className={getFieldClassName("nome")}>
           <span>Nome da turma</span>
           <input

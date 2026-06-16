@@ -51,6 +51,31 @@ export type StudentDocumentType = "carteira_vacinacao" | "tce";
 export type StudentDocumentStatus = "enviado" | "aprovado" | "reprovado";
 export type StudentDocumentReviewerRole = "professor" | "coordenador";
 export type EvaluationModelMode = "descritiva" | "rubrica";
+
+export interface EvaluationModelApplicationRule {
+  id: string;
+  modelId: string;
+  offerId: string | null;
+  curricularPeriod: number | null;
+  semesterId: string | null;
+  classId: string | null;
+  stageAreaId: string | null;
+  priority: number;
+  active: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EvaluationModelSelectionContext {
+  courseId: string | null;
+  offerId: string | null;
+  curricularPeriod: number | null;
+  semesterId: string | null;
+  classId: string | null;
+  stageAreaId: string | null;
+}
+
 export type StudentDocumentNotificationType =
   | "documento_reprovado_professor"
   | "documento_reprovado_coordenador";

@@ -11,6 +11,7 @@ import type {
   CourseConfigurationCreateCriterionFormValues,
   CourseConfigurationCreateCriterionOptionFormValues,
   CourseConfigurationCreateGroupFormValues,
+  CourseConfigurationCreateModelApplicationRuleFormValues,
   CourseConfigurationCreateRequiredDocumentFormValues,
   CourseConfigurationDeleteCriterionFormValues,
   CourseConfigurationDeleteGroupFormValues,
@@ -19,16 +20,25 @@ import type {
   CourseConfigurationCriterionOptionFormValues,
   CourseConfigurationGroupFormValues,
   CourseConfigurationInitializeFormValues,
+  CourseConfigurationModelApplicationRuleFormValues,
   CourseConfigurationModelFormValues,
+  CourseConfigurationSetLaunchDefaultFormValues,
+  CourseConfigurationToggleModelApplicationRuleFormValues,
   CourseConfigurationRequiredDocumentFormValues
 } from "@/app/(app)/master/cursos/configuracoes/state";
 
 type CourseRow = Database["public"]["Tables"]["cursos"]["Row"];
+type OfferRow = Database["public"]["Tables"]["ofertas_curso_unidade"]["Row"];
+type SemesterRow = Database["public"]["Tables"]["semestres"]["Row"];
+type ClassRow = Database["public"]["Tables"]["turmas"]["Row"];
+type StageAreaRow = Database["public"]["Tables"]["areas_estagio"]["Row"];
 type ModelRow = Database["public"]["Tables"]["modelos_avaliacao_curso"]["Row"];
 type GroupRow = Database["public"]["Tables"]["grupos_modelo_avaliacao"]["Row"];
 type CriterionRow = Database["public"]["Tables"]["criterios_modelo_avaliacao"]["Row"];
 type CriterionOptionRow =
   Database["public"]["Tables"]["opcoes_criterio_modelo_avaliacao"]["Row"];
+type ModelApplicationRuleRow =
+  Database["public"]["Tables"]["regras_aplicacao_modelo_avaliacao"]["Row"];
 type DocumentTypeRow = Database["public"]["Tables"]["tipos_documento"]["Row"];
 type RequiredDocumentRow =
   Database["public"]["Tables"]["documentos_obrigatorios_curso"]["Row"];
@@ -37,6 +47,8 @@ type GroupInsert = Database["public"]["Tables"]["grupos_modelo_avaliacao"]["Inse
 type CriterionInsert = Database["public"]["Tables"]["criterios_modelo_avaliacao"]["Insert"];
 type CriterionOptionInsert =
   Database["public"]["Tables"]["opcoes_criterio_modelo_avaliacao"]["Insert"];
+type ModelApplicationRuleInsert =
+  Database["public"]["Tables"]["regras_aplicacao_modelo_avaliacao"]["Insert"];
 type RequiredDocumentInsert =
   Database["public"]["Tables"]["documentos_obrigatorios_curso"]["Insert"];
 type FisioterapiaSourceScope = "same_institution" | "global_default";
@@ -196,6 +208,88 @@ const modelConfigurationSchema = z.object({
   modalidade: z.enum(["descritiva", "rubrica"], {
     message: "Selecione uma modalidade valida."
   }),
+  ativo: z.enum(["true", "false"], {
+    message: "Selecione um status valido."
+  })
+});
+
+const setLaunchDefaultConfigurationSchema = z.object({
+  model_id: z.string().uuid("Modelo invalido.")
+});
+
+const optionalUuidSelectionSchema = (message: string) =>
+  z.preprocess(
+    (value) => {
+      if (typeof value === "string" && value.trim() === "") {
+        return null;
+      }
+
+      return value;
+    },
+    z.union([z.string().uuid(message), z.null()])
+  );
+
+const optionalPositiveIntegerSelectionSchema = (
+  invalidMessage: string,
+  positiveMessage: string
+) =>
+  z.preprocess(
+    (value) => {
+      if (typeof value === "string" && value.trim() === "") {
+        return null;
+      }
+
+      return value;
+    },
+    z.union([
+      z.coerce
+        .number({ message: invalidMessage })
+        .int("Informe um numero inteiro valido.")
+        .gt(0, positiveMessage),
+      z.null()
+    ])
+  );
+
+const createModelApplicationRuleConfigurationSchema = z.object({
+  model_id: z.string().uuid("Modelo invalido."),
+  oferta_curso_unidade_id: optionalUuidSelectionSchema("Selecione uma oferta valida."),
+  periodo_curricular: optionalPositiveIntegerSelectionSchema(
+    "Informe um periodo curricular valido.",
+    "O periodo curricular deve ser maior que zero."
+  ),
+  semestre_id: optionalUuidSelectionSchema("Selecione um semestre academico valido."),
+  turma_id: optionalUuidSelectionSchema("Selecione uma turma valida."),
+  area_estagio_id: optionalUuidSelectionSchema("Selecione uma area de estagio valida."),
+  prioridade: z.coerce
+    .number({ message: "Informe uma prioridade valida." })
+    .int("A prioridade precisa ser um numero inteiro.")
+    .min(0, "A prioridade precisa ser maior ou igual a zero."),
+  ativo: z.enum(["true", "false"], {
+    message: "Selecione um status valido."
+  })
+});
+
+const modelApplicationRuleConfigurationSchema = z.object({
+  rule_id: z.string().uuid("Regra invalida."),
+  oferta_curso_unidade_id: optionalUuidSelectionSchema("Selecione uma oferta valida."),
+  periodo_curricular: optionalPositiveIntegerSelectionSchema(
+    "Informe um periodo curricular valido.",
+    "O periodo curricular deve ser maior que zero."
+  ),
+  semestre_id: optionalUuidSelectionSchema("Selecione um semestre academico valido."),
+  turma_id: optionalUuidSelectionSchema("Selecione uma turma valida."),
+  area_estagio_id: optionalUuidSelectionSchema("Selecione uma area de estagio valida."),
+  prioridade: z.coerce
+    .number({ message: "Informe uma prioridade valida." })
+    .int("A prioridade precisa ser um numero inteiro.")
+    .min(0, "A prioridade precisa ser maior ou igual a zero."),
+  ativo: z.enum(["true", "false"], {
+    message: "Selecione um status valido."
+  })
+});
+
+const toggleModelApplicationRuleConfigurationSchema = z.object({
+  rule_id: z.string().uuid("Regra invalida."),
   ativo: z.enum(["true", "false"], {
     message: "Selecione um status valido."
   })
@@ -422,6 +516,53 @@ function buildModelFormValues(formData: FormData): CourseConfigurationModelFormV
       | "descritiva"
       | "rubrica"
       | "",
+    ativo: readStringField(formData, "ativo")
+  };
+}
+
+function buildSetLaunchDefaultFormValues(
+  formData: FormData
+): CourseConfigurationSetLaunchDefaultFormValues {
+  return {
+    model_id: readStringField(formData, "model_id")
+  };
+}
+
+function buildCreateModelApplicationRuleFormValues(
+  formData: FormData
+): CourseConfigurationCreateModelApplicationRuleFormValues {
+  return {
+    model_id: readStringField(formData, "model_id"),
+    oferta_curso_unidade_id: readStringField(formData, "oferta_curso_unidade_id"),
+    periodo_curricular: readStringField(formData, "periodo_curricular"),
+    semestre_id: readStringField(formData, "semestre_id"),
+    turma_id: readStringField(formData, "turma_id"),
+    area_estagio_id: readStringField(formData, "area_estagio_id"),
+    prioridade: readStringField(formData, "prioridade"),
+    ativo: readStringField(formData, "ativo")
+  };
+}
+
+function buildModelApplicationRuleFormValues(
+  formData: FormData
+): CourseConfigurationModelApplicationRuleFormValues {
+  return {
+    rule_id: readStringField(formData, "rule_id"),
+    oferta_curso_unidade_id: readStringField(formData, "oferta_curso_unidade_id"),
+    periodo_curricular: readStringField(formData, "periodo_curricular"),
+    semestre_id: readStringField(formData, "semestre_id"),
+    turma_id: readStringField(formData, "turma_id"),
+    area_estagio_id: readStringField(formData, "area_estagio_id"),
+    prioridade: readStringField(formData, "prioridade"),
+    ativo: readStringField(formData, "ativo")
+  };
+}
+
+function buildToggleModelApplicationRuleFormValues(
+  formData: FormData
+): CourseConfigurationToggleModelApplicationRuleFormValues {
+  return {
+    rule_id: readStringField(formData, "rule_id"),
     ativo: readStringField(formData, "ativo")
   };
 }
@@ -775,7 +916,7 @@ async function loadCourseConfigurationSummary(courseId: string) {
   const [modelsResult, requiredDocumentsResult] = await Promise.all([
     adminClient
       .from("modelos_avaliacao_curso")
-      .select("id, codigo, nome, descricao, versao, ativo, metadata")
+      .select("id, codigo, nome, descricao, versao, modalidade, padrao_lancamento, ativo, metadata")
       .eq("curso_id", courseId)
       .order("versao", { ascending: true }),
     adminClient
@@ -791,7 +932,18 @@ async function loadCourseConfigurationSummary(courseId: string) {
   }
 
   const modelRows = (modelsResult.data ?? []) as Array<
-    Pick<ModelRow, "id" | "codigo" | "nome" | "descricao" | "versao" | "ativo" | "metadata">
+    Pick<
+      ModelRow,
+      | "id"
+      | "codigo"
+      | "nome"
+      | "descricao"
+      | "versao"
+      | "modalidade"
+      | "padrao_lancamento"
+      | "ativo"
+      | "metadata"
+    >
   >;
   const modelIds = modelRows.map((modelRow) => modelRow.id);
   const groupsResult = modelIds.length
@@ -837,7 +989,7 @@ async function loadModel(modelId: string) {
   const adminClient = createSupabaseAdminClient();
   const { data, error } = await adminClient
     .from("modelos_avaliacao_curso")
-    .select("id, codigo, curso_id, nome, descricao, versao, modalidade, ativo, metadata")
+    .select("id, codigo, curso_id, nome, descricao, versao, modalidade, padrao_lancamento, ativo, metadata")
     .eq("id", modelId)
     .maybeSingle();
 
@@ -854,9 +1006,263 @@ async function loadModel(modelId: string) {
     | "descricao"
     | "versao"
     | "modalidade"
+    | "padrao_lancamento"
     | "ativo"
     | "metadata"
   >;
+}
+
+function resolveLaunchDefaultModelId(modelRows: Pick<ModelRow, "id" | "ativo" | "padrao_lancamento">[]) {
+  const explicitLaunchDefault = modelRows.find(
+    (modelRow) => modelRow.ativo && modelRow.padrao_lancamento
+  );
+
+  if (explicitLaunchDefault) {
+    return explicitLaunchDefault.id;
+  }
+
+  const activeModels = modelRows.filter((modelRow) => modelRow.ativo);
+
+  if (activeModels.length === 1) {
+    return activeModels[0]?.id ?? null;
+  }
+
+  return null;
+}
+
+async function loadModelApplicationRule(ruleId: string) {
+  const adminClient = createSupabaseAdminClient();
+  const { data, error } = await adminClient
+    .from("regras_aplicacao_modelo_avaliacao")
+    .select("*")
+    .eq("id", ruleId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data as ModelApplicationRuleRow;
+}
+
+async function loadOffer(offerId: string) {
+  const adminClient = createSupabaseAdminClient();
+  const { data, error } = await adminClient
+    .from("ofertas_curso_unidade")
+    .select("id, curso_id, nome_exibicao")
+    .eq("id", offerId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data as Pick<OfferRow, "id" | "curso_id" | "nome_exibicao">;
+}
+
+async function loadSemester(semesterId: string) {
+  const adminClient = createSupabaseAdminClient();
+  const { data, error } = await adminClient
+    .from("semestres")
+    .select("id, oferta_curso_unidade_id, codigo, nome")
+    .eq("id", semesterId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data as Pick<SemesterRow, "id" | "oferta_curso_unidade_id" | "codigo" | "nome">;
+}
+
+async function loadClass(classId: string) {
+  const adminClient = createSupabaseAdminClient();
+  const { data, error } = await adminClient
+    .from("turmas")
+    .select("id, semestre_id, oferta_curso_unidade_id, periodo_curricular, codigo, nome")
+    .eq("id", classId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data as Pick<
+    ClassRow,
+    "id" | "semestre_id" | "oferta_curso_unidade_id" | "periodo_curricular" | "codigo" | "nome"
+  >;
+}
+
+async function loadStageArea(areaId: string) {
+  const adminClient = createSupabaseAdminClient();
+  const { data, error } = await adminClient
+    .from("areas_estagio")
+    .select("id, oferta_curso_unidade_id, nome")
+    .eq("id", areaId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data as Pick<StageAreaRow, "id" | "oferta_curso_unidade_id" | "nome">;
+}
+
+function hasAnyModelApplicationScope(input: {
+  offerId: string | null;
+  curricularPeriod: number | null;
+  semesterId: string | null;
+  classId: string | null;
+  stageAreaId: string | null;
+}) {
+  return Boolean(
+    input.offerId ??
+      input.curricularPeriod ??
+      input.semesterId ??
+      input.classId ??
+      input.stageAreaId
+  );
+}
+
+async function validateModelApplicationRuleInput(input: {
+  model: Pick<ModelRow, "id" | "curso_id" | "nome">;
+  offerId: string | null;
+  curricularPeriod: number | null;
+  semesterId: string | null;
+  classId: string | null;
+  stageAreaId: string | null;
+}) {
+  const fieldErrors: Record<string, string> = {};
+
+  if (!hasAnyModelApplicationScope(input)) {
+    fieldErrors.oferta_curso_unidade_id =
+      "Preencha pelo menos um escopo de aplicacao para a regra.";
+
+    return { fieldErrors };
+  }
+
+  const [offerRow, semesterRow, classRow, stageAreaRow] = await Promise.all([
+    input.offerId ? loadOffer(input.offerId) : Promise.resolve(null),
+    input.semesterId ? loadSemester(input.semesterId) : Promise.resolve(null),
+    input.classId ? loadClass(input.classId) : Promise.resolve(null),
+    input.stageAreaId ? loadStageArea(input.stageAreaId) : Promise.resolve(null)
+  ]);
+  const resolvedOffersById = new Map<string, Pick<OfferRow, "id" | "curso_id" | "nome_exibicao">>();
+
+  if (input.offerId) {
+    if (!offerRow) {
+      fieldErrors.oferta_curso_unidade_id = "Selecione uma oferta valida.";
+    } else if (offerRow.curso_id !== input.model.curso_id) {
+      fieldErrors.oferta_curso_unidade_id =
+        "A oferta precisa pertencer ao mesmo curso do modelo.";
+    } else {
+      resolvedOffersById.set(offerRow.id, offerRow);
+    }
+  }
+
+  let semesterOfferRow: Pick<OfferRow, "id" | "curso_id" | "nome_exibicao"> | null = null;
+
+  if (input.semesterId) {
+    if (!semesterRow) {
+      fieldErrors.semestre_id = "Selecione um semestre academico valido.";
+    } else if (!semesterRow.oferta_curso_unidade_id) {
+      fieldErrors.semestre_id = "O semestre selecionado precisa estar vinculado a uma oferta.";
+    } else {
+      semesterOfferRow =
+        resolvedOffersById.get(semesterRow.oferta_curso_unidade_id) ??
+        (await loadOffer(semesterRow.oferta_curso_unidade_id));
+
+      if (!semesterOfferRow || semesterOfferRow.curso_id !== input.model.curso_id) {
+        fieldErrors.semestre_id = "O semestre precisa pertencer ao mesmo curso do modelo.";
+      } else {
+        resolvedOffersById.set(semesterOfferRow.id, semesterOfferRow);
+
+        if (input.offerId && semesterOfferRow.id !== input.offerId) {
+          fieldErrors.semestre_id = "O semestre precisa pertencer a oferta selecionada.";
+        }
+      }
+    }
+  }
+
+  let classOfferRow: Pick<OfferRow, "id" | "curso_id" | "nome_exibicao"> | null = null;
+
+  if (input.classId) {
+    if (!classRow) {
+      fieldErrors.turma_id = "Selecione uma turma valida.";
+    } else {
+      const classSemesterRow =
+        semesterRow && semesterRow.id === classRow.semestre_id
+          ? semesterRow
+          : await loadSemester(classRow.semestre_id);
+      const resolvedClassOfferId =
+        classRow.oferta_curso_unidade_id ?? classSemesterRow?.oferta_curso_unidade_id ?? null;
+
+      if (!resolvedClassOfferId) {
+        fieldErrors.turma_id = "A turma selecionada precisa estar vinculada a uma oferta.";
+      } else {
+        classOfferRow =
+          resolvedOffersById.get(resolvedClassOfferId) ?? (await loadOffer(resolvedClassOfferId));
+
+        if (!classOfferRow || classOfferRow.curso_id !== input.model.curso_id) {
+          fieldErrors.turma_id = "A turma precisa pertencer ao mesmo curso do modelo.";
+        } else {
+          resolvedOffersById.set(classOfferRow.id, classOfferRow);
+
+          if (input.offerId && classOfferRow.id !== input.offerId) {
+            fieldErrors.turma_id = "A turma precisa pertencer a oferta selecionada.";
+          }
+
+          if (input.semesterId && classRow.semestre_id !== input.semesterId) {
+            fieldErrors.turma_id =
+              "A turma precisa pertencer ao semestre academico selecionado.";
+          }
+
+          if (
+            input.curricularPeriod !== null &&
+            classRow.periodo_curricular !== input.curricularPeriod
+          ) {
+            fieldErrors.turma_id =
+              "A turma precisa pertencer ao periodo curricular selecionado.";
+          }
+        }
+      }
+    }
+  }
+
+  if (input.stageAreaId) {
+    if (!stageAreaRow) {
+      fieldErrors.area_estagio_id = "Selecione uma area de estagio valida.";
+    } else if (!stageAreaRow.oferta_curso_unidade_id) {
+      fieldErrors.area_estagio_id =
+        "A area selecionada precisa estar vinculada explicitamente a uma oferta.";
+    } else {
+      const stageAreaOfferRow =
+        resolvedOffersById.get(stageAreaRow.oferta_curso_unidade_id) ??
+        (await loadOffer(stageAreaRow.oferta_curso_unidade_id));
+
+      if (!stageAreaOfferRow || stageAreaOfferRow.curso_id !== input.model.curso_id) {
+        fieldErrors.area_estagio_id = "A area precisa pertencer ao mesmo curso do modelo.";
+      } else {
+        resolvedOffersById.set(stageAreaOfferRow.id, stageAreaOfferRow);
+
+        if (input.offerId && stageAreaOfferRow.id !== input.offerId) {
+          fieldErrors.area_estagio_id = "A area precisa pertencer a oferta selecionada.";
+        }
+
+        if (semesterOfferRow && stageAreaOfferRow.id !== semesterOfferRow.id) {
+          fieldErrors.area_estagio_id =
+            "A area precisa pertencer ao mesmo escopo do semestre selecionado.";
+        }
+
+        if (classOfferRow && stageAreaOfferRow.id !== classOfferRow.id) {
+          fieldErrors.area_estagio_id =
+            "A area precisa pertencer ao mesmo escopo da turma selecionada.";
+        }
+      }
+    }
+  }
+
+  return { fieldErrors };
 }
 
 async function loadGroup(groupId: string) {
@@ -1001,6 +1407,7 @@ export async function initializeCourseConfigurationAction(
     nome: `Modelo de avaliacao - ${targetCourse.nome}`,
     descricao: `Modelo inicial de avaliacao academica do curso ${targetCourse.nome}.`,
     modalidade: "descritiva",
+    padrao_lancamento: true,
     versao: 1,
     ativo: true,
     metadata: {
@@ -1777,13 +2184,15 @@ export async function updateCourseConfigurationModelAction(
   }
 
   const adminClient = createSupabaseAdminClient();
+  const nextActive = toBooleanValue(parsedData.data.ativo);
   const { error } = await adminClient
     .from("modelos_avaliacao_curso")
     .update({
       nome: parsedData.data.nome,
       descricao: toNullableText(parsedData.data.descricao),
       modalidade: parsedData.data.modalidade,
-      ativo: toBooleanValue(parsedData.data.ativo)
+      ativo: nextActive,
+      padrao_lancamento: nextActive ? existingModel.padrao_lancamento : false
     } satisfies Partial<ModelRow> as never)
     .eq("id", existingModel.id);
 
@@ -1801,6 +2210,319 @@ export async function updateCourseConfigurationModelAction(
   return buildActionState(
     "success",
     `Modelo ${parsedData.data.nome} atualizado com sucesso.`,
+    {},
+    submittedFormValues
+  );
+}
+
+export async function setCourseConfigurationModelLaunchDefaultAction(
+  _previousState: CourseConfigurationActionState<CourseConfigurationSetLaunchDefaultFormValues>,
+  formData: FormData
+): Promise<CourseConfigurationActionState<CourseConfigurationSetLaunchDefaultFormValues>> {
+  await requireRole(["coordenador_master"]);
+  const submittedFormValues = buildSetLaunchDefaultFormValues(formData);
+  const parsedData = setLaunchDefaultConfigurationSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel identificar o modelo selecionado.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const existingModel = await loadModel(parsedData.data.model_id);
+
+  if (!existingModel) {
+    return buildActionState(
+      "error",
+      "O modelo de avaliacao informado nao foi encontrado.",
+      { model_id: "Modelo invalido." },
+      submittedFormValues
+    );
+  }
+
+  if (!existingModel.ativo) {
+    return buildActionState(
+      "error",
+      "Somente modelos ativos podem ser definidos como padrao para lancamento.",
+      { model_id: "Ative o modelo antes de defini-lo como padrao." },
+      submittedFormValues
+    );
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const clearDefaultsResult = await adminClient
+    .from("modelos_avaliacao_curso")
+    .update({ padrao_lancamento: false } satisfies Partial<ModelRow> as never)
+    .eq("curso_id", existingModel.curso_id)
+    .neq("id", existingModel.id);
+
+  if (clearDefaultsResult.error) {
+    return buildActionState(
+      "error",
+      clearDefaultsResult.error.message ||
+        "Nao foi possivel limpar o modelo padrao atual antes da troca.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const setDefaultResult = await adminClient
+    .from("modelos_avaliacao_curso")
+    .update({ padrao_lancamento: true } satisfies Partial<ModelRow> as never)
+    .eq("id", existingModel.id);
+
+  if (setDefaultResult.error) {
+    return buildActionState(
+      "error",
+      setDefaultResult.error.message ||
+        "Nao foi possivel definir o modelo selecionado como padrao para lancamento.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  revalidateCourseConfigurationPaths();
+
+  return buildActionState(
+    "success",
+    `Modelo ${existingModel.nome} definido como padrao para lancamento.`,
+    {},
+    submittedFormValues
+  );
+}
+
+export async function createCourseConfigurationModelApplicationRuleAction(
+  _previousState: CourseConfigurationActionState<CourseConfigurationCreateModelApplicationRuleFormValues>,
+  formData: FormData
+): Promise<
+  CourseConfigurationActionState<CourseConfigurationCreateModelApplicationRuleFormValues>
+> {
+  await requireRole(["coordenador_master"]);
+  const submittedFormValues = buildCreateModelApplicationRuleFormValues(formData);
+  const parsedData =
+    createModelApplicationRuleConfigurationSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return buildActionState(
+      "error",
+      "Revise os campos da regra de aplicacao.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const existingModel = await loadModel(parsedData.data.model_id);
+
+  if (!existingModel) {
+    return buildActionState(
+      "error",
+      "O modelo informado nao foi encontrado.",
+      { model_id: "Modelo invalido." },
+      submittedFormValues
+    );
+  }
+
+  const validation = await validateModelApplicationRuleInput({
+    model: existingModel,
+    offerId: parsedData.data.oferta_curso_unidade_id,
+    curricularPeriod: parsedData.data.periodo_curricular,
+    semesterId: parsedData.data.semestre_id,
+    classId: parsedData.data.turma_id,
+    stageAreaId: parsedData.data.area_estagio_id
+  });
+
+  if (Object.keys(validation.fieldErrors).length > 0) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel salvar a regra de aplicacao com os dados informados.",
+      validation.fieldErrors,
+      submittedFormValues
+    );
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const insertPayload: ModelApplicationRuleInsert = {
+    modelo_avaliacao_curso_id: existingModel.id,
+    oferta_curso_unidade_id: parsedData.data.oferta_curso_unidade_id,
+    periodo_curricular: parsedData.data.periodo_curricular,
+    semestre_id: parsedData.data.semestre_id,
+    turma_id: parsedData.data.turma_id,
+    area_estagio_id: parsedData.data.area_estagio_id,
+    prioridade: parsedData.data.prioridade,
+    ativo: toBooleanValue(parsedData.data.ativo),
+    metadata: {}
+  };
+
+  const { error } = await adminClient
+    .from("regras_aplicacao_modelo_avaliacao")
+    .insert(insertPayload as never);
+
+  if (error) {
+    return buildActionState(
+      "error",
+      error.message || "Nao foi possivel criar a regra de aplicacao.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  revalidateCourseConfigurationPaths();
+
+  return buildActionState(
+    "success",
+    `Regra de aplicacao criada com sucesso para o modelo ${existingModel.nome}.`,
+    {},
+    submittedFormValues
+  );
+}
+
+export async function updateCourseConfigurationModelApplicationRuleAction(
+  _previousState: CourseConfigurationActionState<CourseConfigurationModelApplicationRuleFormValues>,
+  formData: FormData
+): Promise<CourseConfigurationActionState<CourseConfigurationModelApplicationRuleFormValues>> {
+  await requireRole(["coordenador_master"]);
+  const submittedFormValues = buildModelApplicationRuleFormValues(formData);
+  const parsedData = modelApplicationRuleConfigurationSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return buildActionState(
+      "error",
+      "Revise os campos da regra de aplicacao.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const existingRule = await loadModelApplicationRule(parsedData.data.rule_id);
+
+  if (!existingRule) {
+    return buildActionState(
+      "error",
+      "A regra de aplicacao informada nao foi encontrada.",
+      { rule_id: "Regra invalida." },
+      submittedFormValues
+    );
+  }
+
+  const existingModel = await loadModel(existingRule.modelo_avaliacao_curso_id);
+
+  if (!existingModel) {
+    return buildActionState(
+      "error",
+      "O modelo vinculado a esta regra nao foi encontrado.",
+      { rule_id: "Modelo nao identificado para a regra selecionada." },
+      submittedFormValues
+    );
+  }
+
+  const validation = await validateModelApplicationRuleInput({
+    model: existingModel,
+    offerId: parsedData.data.oferta_curso_unidade_id,
+    curricularPeriod: parsedData.data.periodo_curricular,
+    semesterId: parsedData.data.semestre_id,
+    classId: parsedData.data.turma_id,
+    stageAreaId: parsedData.data.area_estagio_id
+  });
+
+  if (Object.keys(validation.fieldErrors).length > 0) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel atualizar a regra de aplicacao com os dados informados.",
+      validation.fieldErrors,
+      submittedFormValues
+    );
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const { error } = await adminClient
+    .from("regras_aplicacao_modelo_avaliacao")
+    .update({
+      oferta_curso_unidade_id: parsedData.data.oferta_curso_unidade_id,
+      periodo_curricular: parsedData.data.periodo_curricular,
+      semestre_id: parsedData.data.semestre_id,
+      turma_id: parsedData.data.turma_id,
+      area_estagio_id: parsedData.data.area_estagio_id,
+      prioridade: parsedData.data.prioridade,
+      ativo: toBooleanValue(parsedData.data.ativo)
+    } satisfies Partial<ModelApplicationRuleRow> as never)
+    .eq("id", existingRule.id);
+
+  if (error) {
+    return buildActionState(
+      "error",
+      error.message || "Nao foi possivel atualizar a regra de aplicacao.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  revalidateCourseConfigurationPaths();
+
+  return buildActionState(
+    "success",
+    `Regra de aplicacao do modelo ${existingModel.nome} atualizada com sucesso.`,
+    {},
+    submittedFormValues
+  );
+}
+
+export async function toggleCourseConfigurationModelApplicationRuleAction(
+  _previousState: CourseConfigurationActionState<CourseConfigurationToggleModelApplicationRuleFormValues>,
+  formData: FormData
+): Promise<
+  CourseConfigurationActionState<CourseConfigurationToggleModelApplicationRuleFormValues>
+> {
+  await requireRole(["coordenador_master"]);
+  const submittedFormValues = buildToggleModelApplicationRuleFormValues(formData);
+  const parsedData =
+    toggleModelApplicationRuleConfigurationSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel identificar a regra selecionada.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const existingRule = await loadModelApplicationRule(parsedData.data.rule_id);
+
+  if (!existingRule) {
+    return buildActionState(
+      "error",
+      "A regra de aplicacao informada nao foi encontrada.",
+      { rule_id: "Regra invalida." },
+      submittedFormValues
+    );
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const nextActive = toBooleanValue(parsedData.data.ativo);
+  const { error } = await adminClient
+    .from("regras_aplicacao_modelo_avaliacao")
+    .update({ ativo: nextActive } satisfies Partial<ModelApplicationRuleRow> as never)
+    .eq("id", existingRule.id);
+
+  if (error) {
+    return buildActionState(
+      "error",
+      error.message || "Nao foi possivel atualizar o status da regra de aplicacao.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  revalidateCourseConfigurationPaths();
+
+  return buildActionState(
+    "success",
+    nextActive
+      ? "Regra de aplicacao reativada com sucesso."
+      : "Regra de aplicacao inativada com sucesso.",
     {},
     submittedFormValues
   );
@@ -2181,6 +2903,7 @@ export async function copyFisioterapiaConfigurationAction(
   const sourceModels = (sourceModelsResult.data ?? []) as ModelRow[];
   const sourceRequiredDocuments =
     (sourceRequiredDocumentsResult.data ?? []) as RequiredDocumentRow[];
+  const sourceLaunchDefaultModelId = resolveLaunchDefaultModelId(sourceModels);
 
   if (!sourceModels.length && !sourceRequiredDocuments.length) {
     return buildActionState(
@@ -2328,6 +3051,7 @@ export async function copyFisioterapiaConfigurationAction(
             ),
             versao: sourceModel.versao,
             modalidade: sourceModel.modalidade,
+            padrao_lancamento: sourceModel.id === sourceLaunchDefaultModelId,
             ativo: sourceModel.ativo,
             metadata: mergeCopiedMetadata(sourceModel.metadata, {
               source_course_id: sourceCourse.id,
@@ -2366,6 +3090,7 @@ export async function copyFisioterapiaConfigurationAction(
           ),
           versao: sourceModel.versao,
           modalidade: sourceModel.modalidade,
+          padrao_lancamento: sourceModel.id === sourceLaunchDefaultModelId,
           ativo: sourceModel.ativo,
           metadata: mergeCopiedMetadata(sourceModel.metadata, {
             source_course_id: sourceCourse.id,
@@ -2561,6 +3286,8 @@ export async function copyFisioterapiaConfigurationAction(
           nome: reusableInitialModelSnapshot.nome,
           descricao: reusableInitialModelSnapshot.descricao,
           versao: reusableInitialModelSnapshot.versao,
+          modalidade: reusableInitialModelSnapshot.modalidade,
+          padrao_lancamento: reusableInitialModelSnapshot.padrao_lancamento,
           ativo: reusableInitialModelSnapshot.ativo,
           metadata: reusableInitialModelSnapshot.metadata
         } satisfies Partial<ModelRow> as never)

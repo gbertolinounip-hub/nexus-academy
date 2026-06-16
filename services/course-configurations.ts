@@ -1,14 +1,21 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/types/database";
+import type { EvaluationModelApplicationRule } from "@/types/domain";
 
 type InstitutionRow = Database["public"]["Tables"]["instituicoes"]["Row"];
 type CourseRow = Database["public"]["Tables"]["cursos"]["Row"];
+type OfferRow = Database["public"]["Tables"]["ofertas_curso_unidade"]["Row"];
 type ModelRow = Database["public"]["Tables"]["modelos_avaliacao_curso"]["Row"];
 type GroupRow = Database["public"]["Tables"]["grupos_modelo_avaliacao"]["Row"];
 type CriterionRow = Database["public"]["Tables"]["criterios_modelo_avaliacao"]["Row"];
 type CriterionOptionRow =
   Database["public"]["Tables"]["opcoes_criterio_modelo_avaliacao"]["Row"];
+type SemesterRow = Database["public"]["Tables"]["semestres"]["Row"];
+type AreaRow = Database["public"]["Tables"]["areas_estagio"]["Row"];
+type ClassRow = Database["public"]["Tables"]["turmas"]["Row"];
+type ModelApplicationRuleRow =
+  Database["public"]["Tables"]["regras_aplicacao_modelo_avaliacao"]["Row"];
 type DocumentTypeRow = Database["public"]["Tables"]["tipos_documento"]["Row"];
 type RequiredDocumentRow =
   Database["public"]["Tables"]["documentos_obrigatorios_curso"]["Row"];
@@ -47,8 +54,21 @@ export interface CourseConfigurationModelEntry {
   description: string | null;
   version: number;
   modality: ModelRow["modalidade"];
+  isLaunchDefault: boolean;
   isActive: boolean;
+  applicationRules: CourseConfigurationModelApplicationRuleEntry[];
+  applicationRuleConflictWarning: string | null;
   groupWeightDiagnostic: CourseConfigurationWeightDiagnostic;
+}
+
+export interface CourseConfigurationModelApplicationRuleEntry
+  extends EvaluationModelApplicationRule {
+  offerName: string | null;
+  semesterLabel: string | null;
+  classLabel: string | null;
+  areaName: string | null;
+  specificity: number;
+  summary: string;
 }
 
 export interface CourseConfigurationCriterionOptionEntry {
@@ -111,6 +131,38 @@ export interface CourseConfigurationDocumentTypeOption {
   name: string;
 }
 
+export interface CourseConfigurationModelApplicationOfferOption {
+  id: string;
+  label: string;
+}
+
+export interface CourseConfigurationModelApplicationSemesterOption {
+  id: string;
+  offerId: string | null;
+  label: string;
+}
+
+export interface CourseConfigurationModelApplicationClassOption {
+  id: string;
+  offerId: string | null;
+  semesterId: string;
+  curricularPeriod: number | null;
+  label: string;
+}
+
+export interface CourseConfigurationModelApplicationAreaOption {
+  id: string;
+  offerId: string | null;
+  label: string;
+}
+
+export interface CourseConfigurationModelApplicationRuleOptions {
+  offers: CourseConfigurationModelApplicationOfferOption[];
+  semesters: CourseConfigurationModelApplicationSemesterOption[];
+  classes: CourseConfigurationModelApplicationClassOption[];
+  areas: CourseConfigurationModelApplicationAreaOption[];
+}
+
 export interface CourseConfigurationCourseEntry {
   id: string;
   institutionId: string;
@@ -133,6 +185,7 @@ export interface CourseConfigurationCourseEntry {
   groups: CourseConfigurationGroupEntry[];
   criteria: CourseConfigurationCriterionEntry[];
   requiredDocuments: CourseConfigurationRequiredDocumentEntry[];
+  applicationRuleOptions: CourseConfigurationModelApplicationRuleOptions;
 }
 
 export interface CourseConfigurationCopyTargetOption {
@@ -168,6 +221,10 @@ function formatSupabaseErrorMessage(context: string, error: PostgrestError | nul
   return details.length ? `${context} (${details.join(" | ")})` : context;
 }
 
+function isMissingRelationError(error: PostgrestError | null) {
+  return error?.code === "42P01";
+}
+
 function buildMapById<T extends { id: string | number }>(rows: T[]) {
   return new Map(rows.map((row) => [String(row.id), row]));
 }
@@ -187,6 +244,10 @@ function compareByLocale(left: string, right: string) {
   return left.localeCompare(right, "pt-BR");
 }
 
+function safeSortableTimestamp(value?: string | null) {
+  return typeof value === "string" ? value : "";
+}
+
 function sortModels(left: ModelRow, right: ModelRow) {
   if (left.versao !== right.versao) {
     return left.versao - right.versao;
@@ -201,6 +262,119 @@ function sortGroups(left: GroupRow, right: GroupRow) {
   }
 
   return compareByLocale(left.nome, right.nome);
+}
+
+function countModelApplicationRuleSpecificity(rule: Pick<
+  ModelApplicationRuleRow,
+  "oferta_curso_unidade_id" | "periodo_curricular" | "semestre_id" | "turma_id" | "area_estagio_id"
+>) {
+  return [
+    rule.oferta_curso_unidade_id,
+    rule.periodo_curricular,
+    rule.semestre_id,
+    rule.turma_id,
+    rule.area_estagio_id
+  ].filter((value) => value !== null).length;
+}
+
+function sortModelApplicationRules(left: ModelApplicationRuleRow, right: ModelApplicationRuleRow) {
+  const specificityDifference =
+    countModelApplicationRuleSpecificity(right) - countModelApplicationRuleSpecificity(left);
+
+  if (specificityDifference !== 0) {
+    return specificityDifference;
+  }
+
+  if (left.prioridade !== right.prioridade) {
+    return right.prioridade - left.prioridade;
+  }
+
+  const updatedDifference = safeSortableTimestamp(right.updated_at).localeCompare(
+    safeSortableTimestamp(left.updated_at)
+  );
+
+  if (updatedDifference !== 0) {
+    return updatedDifference;
+  }
+
+  return right.id.localeCompare(left.id);
+}
+
+function buildModelApplicationRuleSummary(input: {
+  rule: ModelApplicationRuleRow;
+  offersById: Map<string, OfferRow>;
+  semestersById: Map<string, SemesterRow>;
+  classesById: Map<string, ClassRow>;
+  areasById: Map<string, AreaRow>;
+}) {
+  const offerName = input.rule.oferta_curso_unidade_id
+    ? input.offersById.get(input.rule.oferta_curso_unidade_id)?.nome_exibicao ?? null
+    : null;
+  const semesterRow = input.rule.semestre_id
+    ? input.semestersById.get(input.rule.semestre_id) ?? null
+    : null;
+  const classRow = input.rule.turma_id ? input.classesById.get(input.rule.turma_id) ?? null : null;
+  const areaRow = input.rule.area_estagio_id
+    ? input.areasById.get(input.rule.area_estagio_id) ?? null
+    : null;
+  const summaryParts = [
+    classRow ? `Turma: ${classRow.codigo} - ${classRow.nome}` : null,
+    areaRow ? `Area: ${areaRow.nome}` : null,
+    input.rule.periodo_curricular ? `${input.rule.periodo_curricular}º periodo` : null,
+    semesterRow ? `Semestre academico: ${semesterRow.codigo}` : null,
+    offerName ? `Oferta: ${offerName}` : null
+  ].filter(Boolean);
+
+  return {
+    offerName,
+    semesterLabel: semesterRow ? `${semesterRow.codigo} - ${semesterRow.nome}` : null,
+    classLabel: classRow ? `${classRow.codigo} - ${classRow.nome}` : null,
+    areaName: areaRow?.nome ?? null,
+    specificity: countModelApplicationRuleSpecificity(input.rule),
+    summary: summaryParts.join(" · ") || "Escopo especifico nao identificado."
+  };
+}
+
+function doModelApplicationRulesPotentiallyOverlap(
+  left: Pick<
+    ModelApplicationRuleRow,
+    "oferta_curso_unidade_id" | "periodo_curricular" | "semestre_id" | "turma_id" | "area_estagio_id"
+  >,
+  right: Pick<
+    ModelApplicationRuleRow,
+    "oferta_curso_unidade_id" | "periodo_curricular" | "semestre_id" | "turma_id" | "area_estagio_id"
+  >
+) {
+  const comparableFields = [
+    [left.oferta_curso_unidade_id, right.oferta_curso_unidade_id],
+    [left.periodo_curricular, right.periodo_curricular],
+    [left.semestre_id, right.semestre_id],
+    [left.turma_id, right.turma_id],
+    [left.area_estagio_id, right.area_estagio_id]
+  ];
+
+  return comparableFields.every(
+    ([leftValue, rightValue]) =>
+      leftValue === null || rightValue === null || leftValue === rightValue
+  );
+}
+
+function resolveModelApplicationRuleConflictWarning(applicationRules: ModelApplicationRuleRow[]) {
+  const activeRules = applicationRules.filter((applicationRule) => applicationRule.ativo);
+
+  for (let leftIndex = 0; leftIndex < activeRules.length; leftIndex += 1) {
+    const leftRule = activeRules[leftIndex];
+
+    for (let rightIndex = leftIndex + 1; rightIndex < activeRules.length; rightIndex += 1) {
+      const rightRule = activeRules[rightIndex];
+
+      if (doModelApplicationRulesPotentiallyOverlap(leftRule, rightRule)) {
+        return "Atencao: existem regras que podem se sobrepor. O runtime usara a regra mais especifica e com maior prioridade.";
+      }
+    }
+  }
+
+  return null;
 }
 
 function sortCriteria(left: CriterionRow, right: CriterionRow) {
@@ -550,16 +724,193 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
   const requiredDocumentRows =
     (requiredDocumentsResult.data ?? []) as RequiredDocumentRow[];
   const documentTypeRows = (documentTypesResult.data ?? []) as DocumentTypeRow[];
+  const courseIds = [...new Set(courseRows.map((courseRow) => courseRow.id))];
+  const courseOffersResult = courseIds.length
+    ? await supabase
+        .from("ofertas_curso_unidade")
+        .select("id, curso_id, nome_exibicao")
+        .in("curso_id", courseIds)
+        .order("nome_exibicao", { ascending: true })
+    : { data: [], error: null };
+
+  if (courseOffersResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Nao foi possivel carregar as ofertas do curso para as regras de aplicacao.",
+        courseOffersResult.error
+      )
+    );
+  }
+
+  const courseOfferRows =
+    (courseOffersResult.data ?? []) as Array<Pick<OfferRow, "id" | "curso_id" | "nome_exibicao">>;
+  const courseOfferIds = courseOfferRows.map((offerRow) => offerRow.id);
+  const courseSemestersResult = courseOfferIds.length
+    ? await supabase
+        .from("semestres")
+        .select("id, oferta_curso_unidade_id, codigo, nome")
+        .in("oferta_curso_unidade_id", courseOfferIds)
+        .order("codigo", { ascending: true })
+    : { data: [], error: null };
+
+  if (courseSemestersResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Nao foi possivel carregar os semestres disponiveis para as regras de aplicacao.",
+        courseSemestersResult.error
+      )
+    );
+  }
+
+  const courseSemesterRows = (courseSemestersResult.data ?? []) as Array<
+    Pick<SemesterRow, "id" | "oferta_curso_unidade_id" | "codigo" | "nome">
+  >;
+  const courseSemesterIds = courseSemesterRows.map((semesterRow) => semesterRow.id);
+  const courseClassesResult = courseSemesterIds.length
+    ? await supabase
+        .from("turmas")
+        .select("id, semestre_id, oferta_curso_unidade_id, periodo_curricular, codigo, nome")
+        .in("semestre_id", courseSemesterIds)
+        .order("codigo", { ascending: true })
+    : { data: [], error: null };
+
+  if (courseClassesResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Nao foi possivel carregar as turmas disponiveis para as regras de aplicacao.",
+        courseClassesResult.error
+      )
+    );
+  }
+
+  const courseClassRows = (courseClassesResult.data ?? []) as Array<
+    Pick<
+      ClassRow,
+      "id" | "semestre_id" | "oferta_curso_unidade_id" | "periodo_curricular" | "codigo" | "nome"
+    >
+  >;
+  const courseAreasResult = courseOfferIds.length
+    ? await supabase
+        .from("areas_estagio")
+        .select("id, oferta_curso_unidade_id, nome")
+        .in("oferta_curso_unidade_id", courseOfferIds)
+        .order("nome", { ascending: true })
+    : { data: [], error: null };
+
+  if (courseAreasResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Nao foi possivel carregar as areas de estagio disponiveis para as regras de aplicacao.",
+        courseAreasResult.error
+      )
+    );
+  }
+
+  const courseAreaRows = (courseAreasResult.data ?? []) as Array<
+    Pick<AreaRow, "id" | "oferta_curso_unidade_id" | "nome">
+  >;
+  const modelApplicationRulesResult = await supabase
+    .from("regras_aplicacao_modelo_avaliacao")
+    .select("*")
+    .order("modelo_avaliacao_curso_id", { ascending: true })
+    .order("prioridade", { ascending: false })
+    .order("updated_at", { ascending: false });
+
+  if (modelApplicationRulesResult.error && !isMissingRelationError(modelApplicationRulesResult.error)) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Nao foi possivel carregar as regras de aplicacao dos modelos de avaliacao.",
+        modelApplicationRulesResult.error
+      )
+    );
+  }
+
+  const modelApplicationRuleRows = modelApplicationRulesResult.error
+    ? []
+    : ((modelApplicationRulesResult.data ?? []) as ModelApplicationRuleRow[]);
+  const offerIds = [...new Set(
+    modelApplicationRuleRows
+      .map((ruleRow) => ruleRow.oferta_curso_unidade_id)
+      .filter((value): value is string => Boolean(value))
+  )];
+  const semesterIds = [...new Set(
+    modelApplicationRuleRows
+      .map((ruleRow) => ruleRow.semestre_id)
+      .filter((value): value is string => Boolean(value))
+  )];
+  const classIds = [...new Set(
+    modelApplicationRuleRows
+      .map((ruleRow) => ruleRow.turma_id)
+      .filter((value): value is string => Boolean(value))
+  )];
+  const areaIds = [...new Set(
+    modelApplicationRuleRows
+      .map((ruleRow) => ruleRow.area_estagio_id)
+      .filter((value): value is string => Boolean(value))
+  )];
+  const [ruleOffersResult, ruleSemestersResult, ruleClassesResult, ruleAreasResult] = await Promise.all([
+    offerIds.length
+      ? supabase.from("ofertas_curso_unidade").select("id, nome_exibicao").in("id", offerIds)
+      : Promise.resolve({ data: [], error: null }),
+    semesterIds.length
+      ? supabase.from("semestres").select("id, codigo, nome").in("id", semesterIds)
+      : Promise.resolve({ data: [], error: null }),
+    classIds.length
+      ? supabase.from("turmas").select("id, codigo, nome").in("id", classIds)
+      : Promise.resolve({ data: [], error: null }),
+    areaIds.length
+      ? supabase.from("areas_estagio").select("id, nome").in("id", areaIds)
+      : Promise.resolve({ data: [], error: null })
+  ]);
+
+  if (
+    ruleOffersResult.error ||
+    ruleSemestersResult.error ||
+    ruleClassesResult.error ||
+    ruleAreasResult.error
+  ) {
+    throw new Error("Nao foi possivel carregar os metadados das regras de aplicacao dos modelos.");
+  }
 
   const institutionsById = buildMapById(institutionRows);
   const documentTypesById = buildMapById(documentTypeRows);
   const modelsById = buildMapById(modelRows);
   const groupsById = buildMapById(groupRows);
+  const offersById = buildMapById((ruleOffersResult.data ?? []) as Array<Pick<OfferRow, "id" | "nome_exibicao">>);
+  const semestersById = buildMapById(
+    (ruleSemestersResult.data ?? []) as Array<Pick<SemesterRow, "id" | "codigo" | "nome">>
+  );
+  const classesById = buildMapById(
+    (ruleClassesResult.data ?? []) as Array<Pick<ClassRow, "id" | "codigo" | "nome">>
+  );
+  const areasById = buildMapById((ruleAreasResult.data ?? []) as Array<Pick<AreaRow, "id" | "nome">>);
+  const courseOffersByCourseId = new Map<
+    string,
+    Array<Pick<OfferRow, "id" | "curso_id" | "nome_exibicao">>
+  >();
+  const courseSemestersByOfferId = new Map<
+    string,
+    Array<Pick<SemesterRow, "id" | "oferta_curso_unidade_id" | "codigo" | "nome">>
+  >();
+  const courseClassesByOfferId = new Map<
+    string,
+    Array<
+      Pick<
+        ClassRow,
+        "id" | "semestre_id" | "oferta_curso_unidade_id" | "periodo_curricular" | "codigo" | "nome"
+      >
+    >
+  >();
+  const courseAreasByOfferId = new Map<
+    string,
+    Array<Pick<AreaRow, "id" | "oferta_curso_unidade_id" | "nome">>
+  >();
 
   const modelsByCourseId = new Map<string, ModelRow[]>();
   const groupsByModelId = new Map<string, GroupRow[]>();
   const criteriaByGroupId = new Map<string, CriterionRow[]>();
   const optionsByCriterionId = new Map<string, CriterionOptionRow[]>();
+  const applicationRulesByModelId = new Map<string, ModelApplicationRuleRow[]>();
   const requiredDocumentsByCourseId = new Map<string, RequiredDocumentRow[]>();
 
   for (const modelRow of modelRows) {
@@ -582,8 +933,47 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
     );
   }
 
+  for (const applicationRuleRow of modelApplicationRuleRows) {
+    pushToMap(applicationRulesByModelId, applicationRuleRow.modelo_avaliacao_curso_id, applicationRuleRow);
+  }
+
   for (const requiredDocumentRow of requiredDocumentRows) {
     pushToMap(requiredDocumentsByCourseId, requiredDocumentRow.curso_id, requiredDocumentRow);
+  }
+
+  for (const courseOfferRow of courseOfferRows) {
+    pushToMap(courseOffersByCourseId, courseOfferRow.curso_id, courseOfferRow);
+  }
+
+  for (const courseSemesterRow of courseSemesterRows) {
+    if (!courseSemesterRow.oferta_curso_unidade_id) {
+      continue;
+    }
+
+    pushToMap(courseSemestersByOfferId, courseSemesterRow.oferta_curso_unidade_id, courseSemesterRow);
+  }
+
+  const courseSemesterById = buildMapById(courseSemesterRows);
+
+  for (const courseClassRow of courseClassRows) {
+    const resolvedOfferId =
+      courseClassRow.oferta_curso_unidade_id ??
+      courseSemesterById.get(courseClassRow.semestre_id)?.oferta_curso_unidade_id ??
+      null;
+
+    if (!resolvedOfferId) {
+      continue;
+    }
+
+    pushToMap(courseClassesByOfferId, resolvedOfferId, courseClassRow);
+  }
+
+  for (const courseAreaRow of courseAreaRows) {
+    if (!courseAreaRow.oferta_curso_unidade_id) {
+      continue;
+    }
+
+    pushToMap(courseAreasByOfferId, courseAreaRow.oferta_curso_unidade_id, courseAreaRow);
   }
 
   const baseCourses = courseRows
@@ -606,6 +996,50 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
         criterionCount: sourceCriteria.length,
         requiredDocumentCount: sourceDocuments.length
       });
+      const courseScopedOffers = [...(courseOffersByCourseId.get(courseRow.id) ?? [])].sort(
+        (left, right) =>
+          compareByLocale(left.nome_exibicao ?? left.id, right.nome_exibicao ?? right.id)
+      );
+      const applicationRuleOptions: CourseConfigurationModelApplicationRuleOptions = {
+        offers: courseScopedOffers.map((offerRow) => ({
+          id: offerRow.id,
+          label: offerRow.nome_exibicao ?? "Oferta sem nome"
+        })),
+        semesters: courseScopedOffers.flatMap((offerRow) =>
+          [...(courseSemestersByOfferId.get(offerRow.id) ?? [])]
+            .sort((left, right) => compareByLocale(left.codigo, right.codigo))
+            .map((semesterRow) => ({
+              id: semesterRow.id,
+              offerId: offerRow.id,
+              label: `${semesterRow.codigo} - ${semesterRow.nome}`
+            }))
+        ),
+        classes: courseScopedOffers.flatMap((offerRow) =>
+          [...(courseClassesByOfferId.get(offerRow.id) ?? [])]
+            .sort((left, right) => compareByLocale(left.codigo, right.codigo))
+            .map((classRow) => {
+              const semesterLabel =
+                courseSemesterById.get(classRow.semestre_id)?.codigo ?? "Sem semestre";
+
+              return {
+                id: classRow.id,
+                offerId: offerRow.id,
+                semesterId: classRow.semestre_id,
+                curricularPeriod: classRow.periodo_curricular,
+                label: `${classRow.codigo} - ${classRow.nome} (${semesterLabel})`
+              };
+            })
+        ),
+        areas: courseScopedOffers.flatMap((offerRow) =>
+          [...(courseAreasByOfferId.get(offerRow.id) ?? [])]
+            .sort((left, right) => compareByLocale(left.nome, right.nome))
+            .map((areaRow) => ({
+              id: areaRow.id,
+              offerId: offerRow.id,
+              label: areaRow.nome
+            }))
+        )
+      };
 
       return {
         id: courseRow.id,
@@ -625,8 +1059,42 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
         duplicateBaseBlockedReason: null,
         duplicateBaseSourceLabel: null,
         hasReusableInitialModel: false,
+        applicationRuleOptions,
         models: sourceModels.map((modelRow) => {
           const modelGroups = [...(groupsByModelId.get(modelRow.id) ?? [])].sort(sortGroups);
+          const sourceApplicationRules = [...(applicationRulesByModelId.get(modelRow.id) ?? [])]
+            .sort(sortModelApplicationRules);
+          const applicationRules = sourceApplicationRules
+            .map((ruleRow) => {
+              const summary = buildModelApplicationRuleSummary({
+                rule: ruleRow,
+                offersById: offersById as Map<string, OfferRow>,
+                semestersById: semestersById as Map<string, SemesterRow>,
+                classesById: classesById as Map<string, ClassRow>,
+                areasById: areasById as Map<string, AreaRow>
+              });
+
+              return {
+                id: ruleRow.id,
+                modelId: ruleRow.modelo_avaliacao_curso_id,
+                offerId: ruleRow.oferta_curso_unidade_id,
+                curricularPeriod: ruleRow.periodo_curricular,
+                semesterId: ruleRow.semestre_id,
+                classId: ruleRow.turma_id,
+                stageAreaId: ruleRow.area_estagio_id,
+                priority: ruleRow.prioridade,
+                active: ruleRow.ativo,
+                metadata: ruleRow.metadata,
+                createdAt: ruleRow.created_at,
+                updatedAt: ruleRow.updated_at,
+                offerName: summary.offerName,
+                semesterLabel: summary.semesterLabel,
+                classLabel: summary.classLabel,
+                areaName: summary.areaName,
+                specificity: summary.specificity,
+                summary: summary.summary
+              } satisfies CourseConfigurationModelApplicationRuleEntry;
+            });
 
           return {
             id: modelRow.id,
@@ -635,7 +1103,11 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
             description: modelRow.descricao,
             version: modelRow.versao,
             modality: modelRow.modalidade,
+            isLaunchDefault: modelRow.padrao_lancamento,
             isActive: modelRow.ativo,
+            applicationRules,
+            applicationRuleConflictWarning:
+              resolveModelApplicationRuleConflictWarning(sourceApplicationRules),
             groupWeightDiagnostic: buildWeightDiagnostic(
               modelGroups.filter((groupRow) => groupRow.ativo).map((groupRow) => groupRow.peso_percentual),
               "Sem grupos ativos"
