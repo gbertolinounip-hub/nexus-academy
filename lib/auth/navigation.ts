@@ -97,11 +97,6 @@ export const navigationItems: NavigationItem[] = [
     allowedRoles: ["coordenador_master"]
   },
   {
-    href: "/master/turmas" as Route,
-    label: "Turmas por semestre",
-    allowedRoles: ["coordenador_master"]
-  },
-  {
     href: "/master/matriculas" as Route,
     label: "Matrículas por oferta",
     allowedRoles: ["coordenador_master"]

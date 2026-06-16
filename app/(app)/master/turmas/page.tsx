@@ -47,11 +47,12 @@ export default async function MasterClassesPage({
   return (
     <div className="stack master-dashboard master-classes-dashboard">
       <section className="hero-card">
-        <p className="eyebrow">Turmas por semestre e oferta</p>
-        <h1>Estrutura de turmas na arquitetura multicurso</h1>
+        <p className="eyebrow">Auditoria de turmas por oferta</p>
+        <h1>Visão administrativa de turmas</h1>
         <p>
-          Cadastre turmas vinculadas ao semestre certo e herde a oferta da estrutura
-          institucional, sem interferir no modelo legado de operacao academica.
+          Acompanhe a trilha instituicao - unidade - curso - oferta - semestre - turma e
+          audite o periodo curricular usado pelas regras de avaliacao. A criacao operacional
+          das turmas deve ocorrer prioritariamente no Coordenador local.
         </p>
       </section>
 
@@ -86,7 +87,7 @@ export default async function MasterClassesPage({
 
       <SectionCard
         title="Filtros institucionais"
-        description="Refine a leitura administrativa por instituicao, unidade, curso e oferta sem perder a capacidade de criacao emergencial pelo Master."
+        description="Refine a leitura administrativa por instituicao, unidade, curso e oferta para auditar a estrutura multicurso sem assumir a operacao academica cotidiana."
       >
         <MasterOperationalFilters
           actionPath="/master/turmas"
@@ -99,10 +100,14 @@ export default async function MasterClassesPage({
       </SectionCard>
 
       <SectionCard
-        title="Criar turma por semestre"
-        description="Selecione instituicao, curso, oferta e semestre. A oferta da turma sera herdada do semestre validado, e o periodo curricular pode ser informado para futuras regras de avaliacao."
+        title="Acao administrativa excepcional"
+        description="Use este bloco apenas em cenarios administrativos excepcionais. A criacao operacional das turmas reais deve ser feita pelo Coordenador local da oferta, junto do ajuste de periodo curricular."
       >
         <div className="management-block-card">
+          <p className="field-help">
+            Se precisar agir aqui, informe o periodo curricular para manter a selecao de
+            modelos de avaliacao coerente com as regras do curso.
+          </p>
           <MasterClassForm
             institutions={pageData.institutions}
             courses={pageData.courses}

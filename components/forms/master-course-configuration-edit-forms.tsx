@@ -468,7 +468,8 @@ export function MasterCourseConfigurationModelForm({
         <div>
           <strong>Regras de aplicacao</strong>
           <p className="field-help">
-            Defina onde este modelo deve ser usado. Regras mais especificas e com maior
+            Defina onde este modelo deve ser usado. Para modelos por 6o, 7o ou 8o periodo,
+            prefira regras por periodo curricular. Regras mais especificas e com maior
             prioridade vencem no runtime futuro.
           </p>
         </div>

@@ -14,6 +14,7 @@ import {
   updateSemesterStatusAction
 } from "@/app/(app)/gestao/alunos/actions";
 import { SectionCard } from "@/components/common/section-card";
+import { CoordinatorClassCurricularPeriodForm } from "@/components/forms/coordinator-class-curricular-period-form";
 import { CourseManagerUnitCoordinatorForm } from "@/components/forms/course-manager-unit-coordinator-form";
 import { ConfirmActionForm } from "@/components/forms/confirm-action-form";
 import { ProfessorRegistrationForm } from "@/components/forms/professor-registration-form";
@@ -123,7 +124,7 @@ export default async function AcademicManagementPage(props: {
         <p>
           {isCourseManager
             ? "Acompanhe os cadastros do curso em todas as unidades permitidas, filtre por unidade e habilite coordenadores locais sem assumir as operações acadêmicas do campus."
-            : "Cadastre alunos e supervisores com acesso real ao sistema, vincule áreas dinamicamente por semestre, registre a secretária da unidade e mantenha a supervisão organizada por bloco e área de estágio."}
+            : "Cadastre alunos e supervisores com acesso real ao sistema, vincule áreas dinamicamente por semestre, ajuste o período curricular das turmas reais da oferta e mantenha a supervisão organizada por turma e área de estágio."}
         </p>
         {!isCourseManager ? (
           <div className="actions-row">
@@ -258,6 +259,58 @@ export default async function AcademicManagementPage(props: {
 
           {!isCourseManager ? (
             <>
+              <SectionCard
+                title="Turmas da unidade/oferta"
+                description="As turmas operacionais surgem a partir do semestre e das áreas vinculadas. Ajuste aqui o período curricular que define quais regras de avaliação serão aplicadas."
+              >
+                {pageData.classes.length ? (
+                  <div className="table-wrap">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Semestre</th>
+                          <th>Turma</th>
+                          <th>Área</th>
+                          <th>Período curricular</th>
+                          <th>Alunos ativos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pageData.classes.map((classEntry) => (
+                          <tr key={classEntry.id}>
+                            <td>
+                              <strong>{classEntry.semesterCode}</strong>
+                              <div className="table-helper">{classEntry.semesterName}</div>
+                            </td>
+                            <td>
+                              <strong>{classEntry.name}</strong>
+                              <div className="table-helper">{classEntry.code}</div>
+                            </td>
+                            <td>
+                              {joinDisplayParts([classEntry.areaName, classEntry.unitName])}
+                            </td>
+                            <td>
+                              <CoordinatorClassCurricularPeriodForm
+                                classId={classEntry.id}
+                                className={classEntry.name}
+                                curricularPeriod={classEntry.curricularPeriod}
+                              />
+                            </td>
+                            <td>{classEntry.enrollmentCount}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="empty-message">
+                    As turmas operacionais aparecerão aqui assim que houver vínculo entre
+                    semestre e área. Quando surgirem, ajuste o período curricular para acionar
+                    o modelo de avaliação correto.
+                  </p>
+                )}
+              </SectionCard>
+
               <SectionCard
                 title="Cadastrar área supervisionada"
                 description="Cadastre áreas específicas da oferta ativa para alimentar aluno, professor, relatórios e a organização do estágio sem depender de listas fixas."

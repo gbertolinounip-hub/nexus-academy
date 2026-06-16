@@ -229,7 +229,8 @@ function ModelApplicationRuleFields<TDraft extends {
             }
           />
           <span className="field-help">
-            Campo opcional. Use quando o modelo variar por periodo do curso.
+            Use este campo como regra principal para aplicar o modelo a todas as turmas do
+            periodo, independentemente do semestre academico ativo.
           </span>
           {fieldErrors.periodo_curricular ? (
             <span className="field-error">{fieldErrors.periodo_curricular}</span>
@@ -332,8 +333,9 @@ function ModelApplicationRuleFields<TDraft extends {
       </div>
 
       <p className="field-help">
-        Preencha pelo menos um escopo. O runtime futuro vai preferir regras mais especificas e com
-        maior prioridade.
+        Preencha pelo menos um escopo. Para regras gerais do curso, prefira o periodo
+        curricular. Semestre academico, turma, area e oferta funcionam como refinamentos
+        opcionais quando houver necessidade operacional.
       </p>
     </>
   );
@@ -392,8 +394,9 @@ export function MasterCourseConfigurationCreateModelApplicationRuleForm({
       <div>
         <strong>Adicionar regra</strong>
         <p className="field-help">
-          Regras podem ser portaveis por periodo curricular ou mais especificas por oferta,
-          semestre, turma e area.
+          Use o periodo curricular para aplicar o modelo a qualquer turma do 6o, 7o ou 8o
+          periodo, por exemplo. Oferta, semestre, turma e area ficam como refinamentos
+          opcionais quando a regra precisar ser mais especifica.
         </p>
       </div>
       <ModelApplicationRuleFields

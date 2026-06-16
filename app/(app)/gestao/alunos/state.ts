@@ -66,6 +66,11 @@ export interface SemesterManagementFormValues {
   status: "planejado" | "ativo" | "encerrado";
 }
 
+export interface ClassCurricularPeriodFormValues {
+  turma_id: string;
+  periodo_curricular: string;
+}
+
 export interface StageAreaRegistrationFormValues {
   nome: string;
   codigo: string;
@@ -127,6 +132,14 @@ export interface SemesterManagementActionState {
   message: string | null;
   fieldErrors: Record<string, string>;
   formValues?: SemesterManagementFormValues;
+  submittedAt?: number;
+}
+
+export interface ClassCurricularPeriodActionState {
+  status: "idle" | "success" | "error";
+  message: string | null;
+  fieldErrors: Record<string, string>;
+  formValues?: ClassCurricularPeriodFormValues;
   submittedAt?: number;
 }
 
@@ -298,6 +311,23 @@ export const initialSemesterManagementActionState: SemesterManagementActionState
     data_fim: "",
     status: "planejado"
   }
+};
+
+export function createInitialClassCurricularPeriodFormValues(
+  turmaId = "",
+  periodoCurricular = ""
+): ClassCurricularPeriodFormValues {
+  return {
+    turma_id: turmaId,
+    periodo_curricular: periodoCurricular
+  };
+}
+
+export const initialClassCurricularPeriodActionState: ClassCurricularPeriodActionState = {
+  status: "idle",
+  message: null,
+  fieldErrors: {},
+  formValues: createInitialClassCurricularPeriodFormValues()
 };
 
 export function createInitialStageAreaRegistrationFormValues(

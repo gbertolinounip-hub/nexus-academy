@@ -15,6 +15,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 import type { SessionUser } from "@/types/domain";
 import type {
+  ClassCurricularPeriodActionState,
+  ClassCurricularPeriodFormValues,
   ExistingStudentResolutionAction,
   StudentProfileActionState,
   StudentRegistrationConflictInfo,
@@ -179,6 +181,19 @@ const studentStageManagementSchema = z.object({
   assignments: z
     .array(studentAssignmentSchema)
     .max(20, "Reduza a quantidade de areas vinculadas neste envio.")
+});
+
+const classCurricularPeriodSchema = z.object({
+  turma_id: z.string().uuid("Turma invalida."),
+  periodo_curricular: z
+    .string()
+    .trim()
+    .refine((value) => !value || /^\d+$/.test(value), {
+      message: "Informe um periodo curricular numerico valido."
+    })
+    .refine((value) => !value || Number(value) > 0, {
+      message: "O periodo curricular deve ser maior que zero."
+    })
 });
 
 const professorRegistrationSchema = z.object({
@@ -403,6 +418,20 @@ function buildSemesterErrorState(
   };
 }
 
+function buildClassCurricularPeriodErrorState(
+  message: string,
+  fieldErrors: Record<string, string> = {},
+  formValues?: ClassCurricularPeriodFormValues
+): ClassCurricularPeriodActionState {
+  return {
+    status: "error",
+    message,
+    fieldErrors,
+    formValues,
+    submittedAt: Date.now()
+  };
+}
+
 function buildStageAreaErrorState(
   message: string,
   fieldErrors: Record<string, string> = {},
@@ -490,6 +519,19 @@ function buildSemesterSuccessState(message: string): SemesterManagementActionSta
     status: "success",
     message,
     fieldErrors: {},
+    submittedAt: Date.now()
+  };
+}
+
+function buildClassCurricularPeriodSuccessState(
+  message: string,
+  formValues?: ClassCurricularPeriodFormValues
+): ClassCurricularPeriodActionState {
+  return {
+    status: "success",
+    message,
+    fieldErrors: {},
+    formValues,
     submittedAt: Date.now()
   };
 }
@@ -690,6 +732,15 @@ function buildSemesterFormValues(formData: FormData): SemesterManagementFormValu
     data_fim: readStringField(formData, "data_fim"),
     status:
       status === "ativo" || status === "encerrado" ? status : "planejado"
+  };
+}
+
+function buildClassCurricularPeriodFormValues(
+  formData: FormData
+): ClassCurricularPeriodFormValues {
+  return {
+    turma_id: readStringField(formData, "turma_id"),
+    periodo_curricular: readStringField(formData, "periodo_curricular")
   };
 }
 
@@ -2079,6 +2130,8 @@ function revalidateAcademicViews(studentId?: string) {
     revalidatePath(`/gestao/alunos/${studentId}`);
   }
 
+  revalidatePath("/avaliacoes");
+  revalidatePath("/avaliacoes/nova");
   revalidatePath("/coordenador");
   revalidatePath("/professor");
   revalidatePath("/secretaria");
@@ -4631,6 +4684,124 @@ export async function updateSemesterStatusAction(formData: FormData) {
   if (returnPath) {
     redirectWithManagementNotice(returnPath, "success", successMessage);
   }
+}
+
+export async function updateCoordinatorClassCurricularPeriodAction(
+  _previousState: ClassCurricularPeriodActionState,
+  formData: FormData
+): Promise<ClassCurricularPeriodActionState> {
+  const currentUser = await requireRole(["coordenador"]);
+  assertOperationalMutationAllowed(currentUser);
+  const operationalScope = await resolveOperationalScopeForCurrentCoordinator(currentUser);
+  const submittedFormValues = buildClassCurricularPeriodFormValues(formData);
+  const parsedData = classCurricularPeriodSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return buildClassCurricularPeriodErrorState(
+      "Nao foi possivel validar o periodo curricular desta turma.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const scope = await resolveScopedDataAccess(currentUser, {
+    supabase
+  });
+  const { data: classData, error: classError } = await supabase
+    .from("turmas")
+    .select("id, nome, oferta_curso_unidade_id, semestre_id")
+    .eq("id", parsedData.data.turma_id)
+    .maybeSingle();
+
+  const classRow = (classData ?? null) as Pick<
+    ClassRow,
+    "id" | "nome" | "oferta_curso_unidade_id" | "semestre_id"
+  > | null;
+
+  if (classError || !classRow) {
+    return buildClassCurricularPeriodErrorState(
+      "Nao foi possivel localizar a turma informada.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const { data: semesterData, error: semesterError } = await supabase
+    .from("semestres")
+    .select("id, unidade_id, oferta_curso_unidade_id")
+    .eq("id", classRow.semestre_id)
+    .maybeSingle();
+
+  const semesterRow = (semesterData ?? null) as Pick<
+    SemesterRow,
+    "id" | "unidade_id" | "oferta_curso_unidade_id"
+  > | null;
+
+  if (semesterError || !semesterRow) {
+    return buildClassCurricularPeriodErrorState(
+      "Nao foi possivel validar o semestre vinculado a esta turma.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const resolvedOfferId =
+    classRow.oferta_curso_unidade_id ?? semesterRow.oferta_curso_unidade_id ?? null;
+  const resolvedUnitId = semesterRow.unidade_id ?? operationalScope.unitId;
+
+  if (scope.offerIds.length > 0) {
+    if (!resolvedOfferId || !scope.offerIds.includes(resolvedOfferId)) {
+      return buildClassCurricularPeriodErrorState(
+        "Voce nao pode editar o periodo curricular de turmas fora do escopo institucional ativo.",
+        {},
+        submittedFormValues
+      );
+    }
+  }
+
+  if (operationalScope.offerId) {
+    if (!resolvedOfferId || resolvedOfferId !== operationalScope.offerId) {
+      return buildClassCurricularPeriodErrorState(
+        "Voce nao pode editar o periodo curricular de turmas fora da oferta ativa.",
+        {},
+        submittedFormValues
+      );
+    }
+  } else if (resolvedUnitId !== operationalScope.unitId) {
+    return buildClassCurricularPeriodErrorState(
+      "Voce nao pode editar o periodo curricular de turmas fora da unidade ativa.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const nextCurricularPeriod = parsedData.data.periodo_curricular
+    ? Number(parsedData.data.periodo_curricular)
+    : null;
+  const { error: updateError } = await (supabase
+    .from("turmas") as any)
+    .update({
+      periodo_curricular: nextCurricularPeriod
+    })
+    .eq("id", classRow.id);
+
+  if (updateError) {
+    return buildClassCurricularPeriodErrorState(
+      updateError.message || "Nao foi possivel atualizar o periodo curricular da turma.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  revalidateAcademicViews();
+
+  return buildClassCurricularPeriodSuccessState(
+    nextCurricularPeriod
+      ? `Periodo curricular da turma ${classRow.nome} atualizado para ${nextCurricularPeriod}.`
+      : `Periodo curricular da turma ${classRow.nome} removido com sucesso.`,
+    submittedFormValues
+  );
 }
 
 export async function discardSemesterAction(formData: FormData) {

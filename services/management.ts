@@ -388,6 +388,22 @@ export interface ManagementProfessorListItem {
   areas: string[];
 }
 
+export interface ManagementClassListItem {
+  id: string;
+  code: string;
+  name: string;
+  semesterId: string;
+  semesterCode: string;
+  semesterName: string;
+  offerId: string | null;
+  unitId: string | null;
+  unitName: string | null;
+  areaName: string;
+  curricularPeriod: number | null;
+  isActive: boolean;
+  enrollmentCount: number;
+}
+
 export interface ManagementSecretaryListItem {
   id: string;
   name: string;
@@ -568,6 +584,7 @@ export interface ManagementPageData {
   isCourseManager: boolean;
   selectedUnitId: string | null;
   unitOptions: ManagementUnitOption[];
+  classes: ManagementClassListItem[];
   students: ManagementStudentListItem[];
   professors: ManagementProfessorListItem[];
   secretaries: ManagementSecretaryListItem[];
@@ -1016,6 +1033,65 @@ export async function getCoordinatorManagementPageData(
     .filter(Boolean)
     .sort((left, right) => left!.name.localeCompare(right!.name, "pt-BR")) as ManagementProfessorOption[];
 
+  const classes = visibleClassRows
+    .map((classGroup) => {
+      const semester = semesterMap.get(classGroup.semestre_id);
+
+      if (!semester) {
+        return null;
+      }
+
+      const offerRow =
+        (classGroup.oferta_curso_unidade_id
+          ? offersById.get(classGroup.oferta_curso_unidade_id) ?? null
+          : null) ??
+        (semester.oferta_curso_unidade_id
+          ? offersById.get(semester.oferta_curso_unidade_id) ?? null
+          : null);
+      const unitId = offerRow?.unidade_id ?? semester.unidade_id ?? null;
+
+      if (selectedUnitId && unitId !== selectedUnitId) {
+        return null;
+      }
+
+      const area = classGroup.area_estagio_id ? areaMap.get(classGroup.area_estagio_id) : null;
+      const enrollmentCount = enrollmentRows.filter(
+        (enrollment) => enrollment.turma_id === classGroup.id && enrollment.status === "ativa"
+      ).length;
+
+      return {
+        id: classGroup.id,
+        code: classGroup.codigo,
+        name: classGroup.nome,
+        semesterId: semester.id,
+        semesterCode: semester.codigo,
+        semesterName: semester.nome,
+        offerId: offerRow?.id ?? null,
+        unitId,
+        unitName: unitId ? unitsById.get(unitId)?.nome ?? null : null,
+        areaName: area?.nome ?? classGroup.area_estagio,
+        curricularPeriod: classGroup.periodo_curricular,
+        isActive: classGroup.ativa,
+        enrollmentCount
+      } satisfies ManagementClassListItem;
+    })
+    .filter((classEntry): classEntry is ManagementClassListItem => classEntry !== null)
+    .sort((left, right) => {
+      const semesterDifference = right.semesterCode.localeCompare(left.semesterCode, "pt-BR");
+
+      if (semesterDifference !== 0) {
+        return semesterDifference;
+      }
+
+      const areaDifference = left.areaName.localeCompare(right.areaName, "pt-BR");
+
+      if (areaDifference !== 0) {
+        return areaDifference;
+      }
+
+      return left.name.localeCompare(right.name, "pt-BR");
+    });
+
   const students = studentUsers
     .map((user) => {
       const student = studentMap.get(user.id);
@@ -1189,6 +1265,7 @@ export async function getCoordinatorManagementPageData(
       isCourseManager: scope.scopeKind === "course_manager",
       selectedUnitId,
       unitOptions,
+      classes,
       students,
       professors,
       secretaries: filteredSecretaries
