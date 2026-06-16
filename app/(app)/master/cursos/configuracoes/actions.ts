@@ -11,10 +11,12 @@ import type {
   CourseConfigurationCreateCriterionFormValues,
   CourseConfigurationCreateCriterionOptionFormValues,
   CourseConfigurationCreateGroupFormValues,
+  CourseConfigurationCreateModelFormValues,
   CourseConfigurationCreateModelApplicationRuleFormValues,
   CourseConfigurationCreateRequiredDocumentFormValues,
   CourseConfigurationDeleteCriterionFormValues,
   CourseConfigurationDeleteGroupFormValues,
+  CourseConfigurationDuplicateModelFormValues,
   CourseConfigurationDeleteRequiredDocumentFormValues,
   CourseConfigurationCriterionFormValues,
   CourseConfigurationCriterionOptionFormValues,
@@ -59,6 +61,38 @@ const copyConfigurationSchema = z.object({
 
 const initializeConfigurationSchema = z.object({
   course_id: z.string().uuid("Selecione um curso valido.")
+});
+
+const createModelConfigurationSchema = z.object({
+  course_id: z.string().uuid("Curso invalido."),
+  codigo: z
+    .string()
+    .trim()
+    .min(1, "Informe o codigo do modelo.")
+    .max(120, "O codigo do modelo deve ter no maximo 120 caracteres."),
+  nome: z
+    .string()
+    .trim()
+    .min(3, "Informe o nome do modelo.")
+    .max(160, "O nome do modelo deve ter no maximo 160 caracteres."),
+  descricao: z
+    .string()
+    .trim()
+    .max(2000, "A descricao deve ter no maximo 2000 caracteres."),
+  versao: z.coerce
+    .number({ message: "Informe uma versao valida." })
+    .int("A versao precisa ser um numero inteiro.")
+    .gt(0, "A versao precisa ser maior que zero."),
+  modalidade: z.enum(["descritiva", "rubrica"], {
+    message: "Selecione uma modalidade valida."
+  }),
+  ativo: z.enum(["true", "false"], {
+    message: "Selecione um status valido."
+  })
+});
+
+const duplicateModelConfigurationSchema = z.object({
+  model_id: z.string().uuid("Modelo invalido.")
 });
 
 const createGroupConfigurationSchema = z.object({
@@ -427,6 +461,29 @@ function buildCopyFormValues(formData: FormData): CourseConfigurationCopyFormVal
 function buildInitializeFormValues(formData: FormData): CourseConfigurationInitializeFormValues {
   return {
     course_id: readStringField(formData, "course_id")
+  };
+}
+
+function buildCreateModelFormValues(formData: FormData): CourseConfigurationCreateModelFormValues {
+  return {
+    course_id: readStringField(formData, "course_id"),
+    codigo: readStringField(formData, "codigo"),
+    nome: readStringField(formData, "nome"),
+    descricao: readStringField(formData, "descricao"),
+    versao: readStringField(formData, "versao"),
+    modalidade: readStringField(formData, "modalidade") as
+      | "descritiva"
+      | "rubrica"
+      | "",
+    ativo: readStringField(formData, "ativo")
+  };
+}
+
+function buildDuplicateModelFormValues(
+  formData: FormData
+): CourseConfigurationDuplicateModelFormValues {
+  return {
+    model_id: readStringField(formData, "model_id")
   };
 }
 
@@ -1012,6 +1069,15 @@ async function loadModel(modelId: string) {
   >;
 }
 
+async function resolveNextCourseModelVersion(courseId: string) {
+  const configurationSummary = await loadCourseConfigurationSummary(courseId);
+  const currentMaxVersion = configurationSummary.models.reduce((highestVersion, modelRow) => {
+    return modelRow.versao > highestVersion ? modelRow.versao : highestVersion;
+  }, 0);
+
+  return currentMaxVersion + 1;
+}
+
 function resolveLaunchDefaultModelId(modelRows: Pick<ModelRow, "id" | "ativo" | "padrao_lancamento">[]) {
   const explicitLaunchDefault = modelRows.find(
     (modelRow) => modelRow.ativo && modelRow.padrao_lancamento
@@ -1435,6 +1501,150 @@ export async function initializeCourseConfigurationAction(
   return buildActionState(
     "success",
     `Configuracao inicial criada para ${targetCourse.nome}. O curso agora possui um modelo base para continuar a parametrizacao.`,
+    {},
+    submittedFormValues
+  );
+}
+
+export async function createCourseConfigurationModelAction(
+  _previousState: CourseConfigurationActionState<CourseConfigurationCreateModelFormValues>,
+  formData: FormData
+): Promise<CourseConfigurationActionState<CourseConfigurationCreateModelFormValues>> {
+  await requireRole(["coordenador_master"]);
+  const submittedFormValues = buildCreateModelFormValues(formData);
+  const parsedData = createModelConfigurationSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return buildActionState(
+      "error",
+      "Revise os campos do novo modelo.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const targetCourse = await loadCourse(parsedData.data.course_id);
+
+  if (!targetCourse) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel localizar o curso informado.",
+      { course_id: "Selecione um curso valido." },
+      submittedFormValues
+    );
+  }
+
+  if (!targetCourse.ativo) {
+    return buildActionState(
+      "error",
+      "O curso precisa estar ativo para receber novos modelos.",
+      { course_id: "Ative o curso antes de criar outro modelo." },
+      submittedFormValues
+    );
+  }
+
+  const normalizedCode = normalizeCode(parsedData.data.codigo);
+
+  if (!normalizedCode) {
+    return buildActionState(
+      "error",
+      "Informe um codigo valido para o modelo.",
+      { codigo: "Use letras, numeros, hifen ou underline no codigo." },
+      submittedFormValues
+    );
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const [existingCodeResult, existingVersionResult, configurationSummary] = await Promise.all([
+    adminClient
+      .from("modelos_avaliacao_curso")
+      .select("id")
+      .eq("codigo", normalizedCode)
+      .maybeSingle(),
+    adminClient
+      .from("modelos_avaliacao_curso")
+      .select("id")
+      .eq("curso_id", targetCourse.id)
+      .eq("versao", parsedData.data.versao)
+      .maybeSingle(),
+    loadCourseConfigurationSummary(targetCourse.id)
+  ]);
+
+  if (existingCodeResult.error) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel validar a duplicidade do codigo do modelo.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  if (existingVersionResult.error) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel validar a duplicidade da versao do modelo.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  if (existingCodeResult.data) {
+    return buildActionState(
+      "error",
+      "Ja existe um modelo com este codigo.",
+      { codigo: "Escolha um codigo unico para o novo modelo." },
+      submittedFormValues
+    );
+  }
+
+  if (existingVersionResult.data) {
+    return buildActionState(
+      "error",
+      "Ja existe um modelo com esta versao neste curso.",
+      { versao: "Escolha uma versao ainda nao usada neste curso." },
+      submittedFormValues
+    );
+  }
+
+  const nextActive = toBooleanValue(parsedData.data.ativo);
+  const shouldBecomeLaunchDefault =
+    nextActive && !resolveLaunchDefaultModelId(configurationSummary.models);
+  const modelInsertPayload: ModelInsert = {
+    curso_id: targetCourse.id,
+    codigo: normalizedCode,
+    nome: parsedData.data.nome,
+    descricao: toNullableText(parsedData.data.descricao),
+    versao: parsedData.data.versao,
+    modalidade: parsedData.data.modalidade,
+    padrao_lancamento: shouldBecomeLaunchDefault,
+    ativo: nextActive,
+    metadata: {
+      origem: "createCourseConfigurationModelAction",
+      curso_codigo: targetCourse.codigo,
+      criado_em: new Date().toISOString()
+    }
+  };
+
+  const { error } = await adminClient
+    .from("modelos_avaliacao_curso")
+    .insert(modelInsertPayload as never);
+
+  if (error) {
+    return buildActionState(
+      "error",
+      error.message || "Nao foi possivel criar o novo modelo de avaliacao.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  revalidateCourseConfigurationPaths();
+
+  return buildActionState(
+    "success",
+    shouldBecomeLaunchDefault
+      ? `Modelo ${parsedData.data.nome} criado com sucesso e definido como padrao inicial do curso.`
+      : `Modelo ${parsedData.data.nome} criado com sucesso.`,
     {},
     submittedFormValues
   );
@@ -2210,6 +2420,281 @@ export async function updateCourseConfigurationModelAction(
   return buildActionState(
     "success",
     `Modelo ${parsedData.data.nome} atualizado com sucesso.`,
+    {},
+    submittedFormValues
+  );
+}
+
+export async function duplicateCourseConfigurationModelAction(
+  _previousState: CourseConfigurationActionState<CourseConfigurationDuplicateModelFormValues>,
+  formData: FormData
+): Promise<CourseConfigurationActionState<CourseConfigurationDuplicateModelFormValues>> {
+  await requireRole(["coordenador_master"]);
+  const submittedFormValues = buildDuplicateModelFormValues(formData);
+  const parsedData = duplicateModelConfigurationSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel identificar o modelo que sera duplicado.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const sourceModel = await loadModel(parsedData.data.model_id);
+
+  if (!sourceModel) {
+    return buildActionState(
+      "error",
+      "O modelo de avaliacao informado nao foi encontrado.",
+      { model_id: "Modelo invalido." },
+      submittedFormValues
+    );
+  }
+
+  const targetCourse = await loadCourse(sourceModel.curso_id);
+
+  if (!targetCourse) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel localizar o curso vinculado ao modelo original.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const sourceGroupsResult = await adminClient
+    .from("grupos_modelo_avaliacao")
+    .select("*")
+    .eq("modelo_avaliacao_curso_id", sourceModel.id)
+    .order("ordem", { ascending: true });
+
+  if (sourceGroupsResult.error) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel carregar os grupos do modelo original.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const sourceGroups = (sourceGroupsResult.data ?? []) as GroupRow[];
+  const sourceGroupIds = sourceGroups.map((groupRow) => groupRow.id);
+  const sourceCriteriaResult = sourceGroupIds.length
+    ? await adminClient
+        .from("criterios_modelo_avaliacao")
+        .select("*")
+        .in("grupo_modelo_avaliacao_id", sourceGroupIds)
+        .order("ordem", { ascending: true })
+    : { data: [], error: null };
+
+  if (sourceCriteriaResult.error) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel carregar os criterios do modelo original.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const sourceCriteria = (sourceCriteriaResult.data ?? []) as CriterionRow[];
+  const sourceCriterionIds = sourceCriteria.map((criterionRow) => criterionRow.id);
+  const sourceCriterionOptionsResult = sourceCriterionIds.length
+    ? await adminClient
+        .from("opcoes_criterio_modelo_avaliacao")
+        .select("*")
+        .in("criterio_modelo_avaliacao_id", sourceCriterionIds)
+        .order("ordem", { ascending: true })
+    : { data: [], error: null };
+
+  if (sourceCriterionOptionsResult.error) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel carregar as opcoes de rubrica do modelo original.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const sourceCriterionOptions =
+    (sourceCriterionOptionsResult.data ?? []) as CriterionOptionRow[];
+  const nextVersion = await resolveNextCourseModelVersion(targetCourse.id);
+  const duplicatedModelCode = await resolveAvailableModelCode(`${sourceModel.codigo}_COPIA`);
+  const createdGroupIds: string[] = [];
+  const createdCriterionIds: string[] = [];
+  let createdModelId: string | null = null;
+
+  try {
+    const duplicatedModelPayload: ModelInsert = {
+      curso_id: targetCourse.id,
+      codigo: duplicatedModelCode,
+      nome: `Copia de ${sourceModel.nome}`,
+      descricao: sourceModel.descricao,
+      versao: nextVersion,
+      modalidade: sourceModel.modalidade,
+      padrao_lancamento: false,
+      ativo: sourceModel.ativo,
+      metadata: mergeCopiedMetadata(sourceModel.metadata, {
+        source_model_id: sourceModel.id,
+        source_course_id: sourceModel.curso_id,
+        duplicated_at: new Date().toISOString(),
+        duplicated_by: "duplicateCourseConfigurationModelAction"
+      })
+    };
+
+    const insertedModelResult = await adminClient
+      .from("modelos_avaliacao_curso")
+      .insert(duplicatedModelPayload as never)
+      .select("id")
+      .single();
+    const insertedModelData = insertedModelResult.data as { id: string } | null;
+
+    if (insertedModelResult.error || !insertedModelData) {
+      throw new Error("Nao foi possivel criar o novo modelo duplicado.");
+    }
+
+    createdModelId = insertedModelData.id;
+    const sourceCriteriaByGroupId = new Map<string, CriterionRow[]>();
+    const sourceOptionsByCriterionId = new Map<string, CriterionOptionRow[]>();
+
+    for (const sourceCriterion of sourceCriteria) {
+      const currentCriteria = sourceCriteriaByGroupId.get(sourceCriterion.grupo_modelo_avaliacao_id);
+      if (currentCriteria) {
+        currentCriteria.push(sourceCriterion);
+      } else {
+        sourceCriteriaByGroupId.set(sourceCriterion.grupo_modelo_avaliacao_id, [sourceCriterion]);
+      }
+    }
+
+    for (const sourceCriterionOption of sourceCriterionOptions) {
+      const currentOptions = sourceOptionsByCriterionId.get(
+        sourceCriterionOption.criterio_modelo_avaliacao_id
+      );
+      if (currentOptions) {
+        currentOptions.push(sourceCriterionOption);
+      } else {
+        sourceOptionsByCriterionId.set(sourceCriterionOption.criterio_modelo_avaliacao_id, [
+          sourceCriterionOption
+        ]);
+      }
+    }
+
+    for (const sourceGroup of sourceGroups) {
+      const groupInsertPayload: GroupInsert = {
+        modelo_avaliacao_curso_id: createdModelId,
+        codigo: sourceGroup.codigo,
+        nome: sourceGroup.nome,
+        ordem: sourceGroup.ordem,
+        peso_percentual: sourceGroup.peso_percentual,
+        ativo: sourceGroup.ativo,
+        metadata: mergeCopiedMetadata(sourceGroup.metadata, {
+          source_group_id: sourceGroup.id,
+          source_model_id: sourceModel.id,
+          duplicated_at: new Date().toISOString(),
+          duplicated_by: "duplicateCourseConfigurationModelAction"
+        })
+      };
+
+      const insertedGroupResult = await adminClient
+        .from("grupos_modelo_avaliacao")
+        .insert(groupInsertPayload as never)
+        .select("id")
+        .single();
+      const insertedGroupData = insertedGroupResult.data as { id: string } | null;
+
+      if (insertedGroupResult.error || !insertedGroupData) {
+        throw new Error("Nao foi possivel copiar um dos grupos do modelo original.");
+      }
+
+      createdGroupIds.push(insertedGroupData.id);
+
+      for (const sourceCriterion of sourceCriteriaByGroupId.get(sourceGroup.id) ?? []) {
+        const criterionInsertPayload: CriterionInsert = {
+          grupo_modelo_avaliacao_id: insertedGroupData.id,
+          codigo: sourceCriterion.codigo,
+          nome: sourceCriterion.nome,
+          descricao: sourceCriterion.descricao,
+          ordem: sourceCriterion.ordem,
+          peso_percentual: sourceCriterion.peso_percentual,
+          escala_maxima: sourceCriterion.escala_maxima,
+          ativo: sourceCriterion.ativo,
+          metadata: mergeCopiedMetadata(sourceCriterion.metadata, {
+            source_criterion_id: sourceCriterion.id,
+            source_group_id: sourceGroup.id,
+            source_model_id: sourceModel.id,
+            duplicated_at: new Date().toISOString(),
+            duplicated_by: "duplicateCourseConfigurationModelAction"
+          })
+        };
+
+        const insertedCriterionResult = await adminClient
+          .from("criterios_modelo_avaliacao")
+          .insert(criterionInsertPayload as never)
+          .select("id")
+          .single();
+        const insertedCriterionData =
+          insertedCriterionResult.data as { id: string } | null;
+
+        if (insertedCriterionResult.error || !insertedCriterionData) {
+          throw new Error("Nao foi possivel copiar um dos criterios do modelo original.");
+        }
+
+        createdCriterionIds.push(insertedCriterionData.id);
+
+        for (const sourceCriterionOption of sourceOptionsByCriterionId.get(sourceCriterion.id) ?? []) {
+          const criterionOptionInsertPayload: CriterionOptionInsert = {
+            criterio_modelo_avaliacao_id: insertedCriterionData.id,
+            rotulo: sourceCriterionOption.rotulo,
+            descricao: sourceCriterionOption.descricao,
+            valor_nota: sourceCriterionOption.valor_nota,
+            ordem: sourceCriterionOption.ordem,
+            ativo: sourceCriterionOption.ativo
+          };
+
+          const insertedCriterionOptionResult = await adminClient
+            .from("opcoes_criterio_modelo_avaliacao")
+            .insert(criterionOptionInsertPayload as never)
+            .select("id")
+            .single();
+
+          if (insertedCriterionOptionResult.error || !insertedCriterionOptionResult.data) {
+            throw new Error(
+              "Nao foi possivel copiar as opcoes de rubrica do modelo original."
+            );
+          }
+        }
+      }
+    }
+  } catch (error) {
+    if (createdCriterionIds.length) {
+      await adminClient.from("criterios_modelo_avaliacao").delete().in("id", createdCriterionIds);
+    }
+
+    if (createdGroupIds.length) {
+      await adminClient.from("grupos_modelo_avaliacao").delete().in("id", createdGroupIds);
+    }
+
+    if (createdModelId) {
+      await adminClient.from("modelos_avaliacao_curso").delete().eq("id", createdModelId);
+    }
+
+    return buildActionState(
+      "error",
+      error instanceof Error
+        ? error.message
+        : "Nao foi possivel duplicar o modelo de avaliacao.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  revalidateCourseConfigurationPaths();
+
+  return buildActionState(
+    "success",
+    `Modelo ${sourceModel.nome} duplicado com sucesso. O clone foi criado sem regra de aplicacao e sem virar padrao automaticamente.`,
     {},
     submittedFormValues
   );

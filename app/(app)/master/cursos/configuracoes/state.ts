@@ -6,6 +6,20 @@ export interface CourseConfigurationInitializeFormValues {
   course_id: string;
 }
 
+export interface CourseConfigurationCreateModelFormValues {
+  course_id: string;
+  codigo: string;
+  nome: string;
+  descricao: string;
+  versao: string;
+  modalidade: "descritiva" | "rubrica" | "";
+  ativo: string;
+}
+
+export interface CourseConfigurationDuplicateModelFormValues {
+  model_id: string;
+}
+
 export interface CourseConfigurationCreateGroupFormValues {
   course_id: string;
   model_id: string;
@@ -161,6 +175,16 @@ export const initialCourseConfigurationInitializeActionState:
     ...createInitialCourseConfigurationActionState<CourseConfigurationInitializeFormValues>()
   };
 
+export const initialCourseConfigurationCreateModelActionState:
+  CourseConfigurationActionState<CourseConfigurationCreateModelFormValues> = {
+    ...createInitialCourseConfigurationActionState<CourseConfigurationCreateModelFormValues>()
+  };
+
+export const initialCourseConfigurationDuplicateModelActionState:
+  CourseConfigurationActionState<CourseConfigurationDuplicateModelFormValues> = {
+    ...createInitialCourseConfigurationActionState<CourseConfigurationDuplicateModelFormValues>()
+  };
+
 export const initialCourseConfigurationCreateGroupActionState:
   CourseConfigurationActionState<CourseConfigurationCreateGroupFormValues> = {
     ...createInitialCourseConfigurationActionState<CourseConfigurationCreateGroupFormValues>()
@@ -227,6 +251,29 @@ export function createEmptyCourseConfigurationInitializeFormValues():
   CourseConfigurationInitializeFormValues {
   return {
     course_id: ""
+  };
+}
+
+export function createEmptyCourseConfigurationCreateModelFormValues(
+  courseId = "",
+  version = "1"
+): CourseConfigurationCreateModelFormValues {
+  return {
+    course_id: courseId,
+    codigo: "",
+    nome: "",
+    descricao: "",
+    versao: version,
+    modalidade: "descritiva",
+    ativo: "true"
+  };
+}
+
+export function createEmptyCourseConfigurationDuplicateModelFormValues(
+  modelId = ""
+): CourseConfigurationDuplicateModelFormValues {
+  return {
+    model_id: modelId
   };
 }
 

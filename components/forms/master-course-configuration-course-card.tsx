@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import {
   copyFisioterapiaConfigurationAction,
   initializeCourseConfigurationAction
@@ -10,6 +10,7 @@ import {
   initialCourseConfigurationInitializeActionState
 } from "@/app/(app)/master/cursos/configuracoes/state";
 import {
+  MasterCourseConfigurationCreateModelForm,
   MasterCourseConfigurationCreateCriterionForm,
   MasterCourseConfigurationCreateGroupForm,
   MasterCourseConfigurationCreateRequiredDocumentForm,
@@ -110,6 +111,14 @@ function getPrimaryOpenLabel(status: CourseConfigurationStatus) {
   return "Ver configuracoes do curso";
 }
 
+function resolveFocusedModelId(course: CourseConfigurationCourseEntry) {
+  return (
+    course.models.find((model) => model.isLaunchDefault)?.id ??
+    course.models[0]?.id ??
+    ""
+  );
+}
+
 export function MasterCourseConfigurationCourseCard({
   course,
   documentTypeOptions
@@ -124,9 +133,11 @@ export function MasterCourseConfigurationCourseCard({
       )
   );
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isCreatingModel, setIsCreatingModel] = useState(false);
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [isCreatingCriterion, setIsCreatingCriterion] = useState(false);
   const [isCreatingRequiredDocument, setIsCreatingRequiredDocument] = useState(false);
+  const [focusedModelId, setFocusedModelId] = useState(() => resolveFocusedModelId(course));
   const [initializeState, initializeFormAction] = useActionState(
     initializeCourseConfigurationAction,
     initialCourseConfigurationInitializeActionState
@@ -137,6 +148,25 @@ export function MasterCourseConfigurationCourseCard({
   );
   const shouldShowInitializeAction = course.status === "Sem configuracao";
   const shouldShowCopyAction = course.canDuplicateFromFisioterapia;
+  const focusedModel =
+    course.models.find((model) => model.id === focusedModelId) ?? course.models[0] ?? null;
+  const visibleGroups = focusedModel
+    ? course.groups.filter((group) => group.modelId === focusedModel.id)
+    : course.groups;
+  const visibleGroupIds = new Set(visibleGroups.map((group) => group.id));
+  const visibleCriteria = focusedModel
+    ? course.criteria.filter((criterion) => visibleGroupIds.has(criterion.groupId))
+    : course.criteria;
+
+  useEffect(() => {
+    setFocusedModelId((currentFocusedModelId) => {
+      if (currentFocusedModelId && course.models.some((model) => model.id === currentFocusedModelId)) {
+        return currentFocusedModelId;
+      }
+
+      return resolveFocusedModelId(course);
+    });
+  }, [course]);
 
   return (
     <article className="management-block-card">
@@ -230,7 +260,30 @@ export function MasterCourseConfigurationCourseCard({
       {isExpanded ? (
         <div className="stack master-course-configuration-card-content">
           <div>
-            <h4>Modelos de avaliacao</h4>
+            <div className="management-block-header">
+              <div>
+                <h4>Modelos de avaliacao</h4>
+                <p className="field-help">
+                  Cada modelo tem modalidade, grupos, criterios e regras proprias. Use este
+                  bloco para criar um modelo novo do zero ou duplicar um modelo existente.
+                </p>
+              </div>
+              <button
+                className="button button-secondary"
+                type="button"
+                onClick={() => setIsCreatingModel((currentValue) => !currentValue)}
+              >
+                {course.models.length ? "Adicionar novo modelo" : "Adicionar modelo"}
+              </button>
+            </div>
+            {isCreatingModel ? (
+              <div className="master-inline-action-panel">
+                <MasterCourseConfigurationCreateModelForm
+                  courseId={course.id}
+                  models={course.models}
+                />
+              </div>
+            ) : null}
             {course.models.length ? (
               <div className="management-block-grid master-course-configuration-editor-grid">
                 {course.models.map((model) => (
@@ -262,9 +315,27 @@ export function MasterCourseConfigurationCourseCard({
               <div>
                 <h4>Grupos do modelo</h4>
                 <p className="field-help">
-                  Cadastre grupos diretamente no modelo inicial ou em outro modelo ja existente.
+                  {focusedModel
+                    ? `Edite apenas os grupos ligados ao modelo em foco: ${focusedModel.name}.`
+                    : "Selecione ou crie um modelo para começar a organizar grupos."}
                 </p>
               </div>
+              {course.models.length > 1 ? (
+                <label className="field">
+                  <span>Modelo em foco</span>
+                  <select
+                    className="input"
+                    value={focusedModelId}
+                    onChange={(event) => setFocusedModelId(event.currentTarget.value)}
+                  >
+                    {course.models.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name} ({model.code})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <button
                 className="button button-secondary"
                 type="button"
@@ -285,12 +356,13 @@ export function MasterCourseConfigurationCourseCard({
                   courseId={course.id}
                   models={course.models}
                   groups={course.groups}
+                  preferredModelId={focusedModel?.id}
                 />
               </div>
             ) : null}
-            {course.groups.length ? (
+            {visibleGroups.length ? (
               <div className="management-block-grid master-course-configuration-editor-grid">
-                {course.groups.map((group) => (
+                {visibleGroups.map((group) => (
                   <div key={group.id} className="management-block-card">
                     <div className="management-block-header">
                       <div>
@@ -311,7 +383,11 @@ export function MasterCourseConfigurationCourseCard({
                 ))}
               </div>
             ) : (
-              <p className="empty-message">Nenhum grupo cadastrado para este curso.</p>
+              <p className="empty-message">
+                {focusedModel
+                  ? "Nenhum grupo cadastrado para o modelo em foco."
+                  : "Nenhum grupo cadastrado para este curso."}
+              </p>
             )}
           </div>
 
@@ -320,35 +396,37 @@ export function MasterCourseConfigurationCourseCard({
               <div>
                 <h4>Criterios de avaliacao</h4>
                 <p className="field-help">
-                  Cada criterio precisa estar vinculado a um grupo existente do curso.
+                  {focusedModel
+                    ? `Cada criterio exibido aqui pertence somente ao modelo ${focusedModel.name}.`
+                    : "Cada criterio precisa estar vinculado a um grupo existente do curso."}
                 </p>
               </div>
               <button
                 className="button button-secondary"
                 type="button"
-                disabled={!course.groups.length}
+                disabled={!visibleGroups.length}
                 onClick={() => setIsCreatingCriterion((currentValue) => !currentValue)}
               >
-                {course.criteria.length ? "Adicionar novo criterio" : "Adicionar criterio"}
+                {visibleCriteria.length ? "Adicionar novo criterio" : "Adicionar criterio"}
               </button>
             </div>
-            {!course.groups.length ? (
+            {!visibleGroups.length ? (
               <p className="field-help">
-                Cadastre ao menos um grupo antes de adicionar criterios.
+                Cadastre ao menos um grupo no modelo em foco antes de adicionar criterios.
               </p>
             ) : null}
             {isCreatingCriterion ? (
               <div className="master-inline-action-panel">
                 <MasterCourseConfigurationCreateCriterionForm
                   courseId={course.id}
-                  groups={course.groups}
-                  criteria={course.criteria}
+                  groups={visibleGroups}
+                  criteria={visibleCriteria}
                 />
               </div>
             ) : null}
-            {course.criteria.length ? (
+            {visibleCriteria.length ? (
               <div className="management-block-grid master-course-configuration-editor-grid">
-                {course.criteria.map((criterion) => (
+                {visibleCriteria.map((criterion) => (
                   <div key={criterion.id} className="management-block-card">
                     <div className="management-block-header">
                       <div>
@@ -364,7 +442,11 @@ export function MasterCourseConfigurationCourseCard({
                 ))}
               </div>
             ) : (
-              <p className="empty-message">Nenhum criterio cadastrado para este curso.</p>
+              <p className="empty-message">
+                {focusedModel
+                  ? "Nenhum criterio cadastrado para o modelo em foco."
+                  : "Nenhum criterio cadastrado para este curso."}
+              </p>
             )}
           </div>
 

@@ -6,10 +6,12 @@ import {
   MasterCourseConfigurationModelApplicationRuleForm
 } from "@/components/forms/master-course-configuration-application-rule-forms";
 import {
+  createCourseConfigurationModelAction,
   createCourseConfigurationCriterionAction,
   createCourseConfigurationCriterionOptionAction,
   createCourseConfigurationGroupAction,
   createCourseRequiredDocumentAction,
+  duplicateCourseConfigurationModelAction,
   setCourseConfigurationModelLaunchDefaultAction,
   deleteCourseConfigurationCriterionAction,
   deleteCourseConfigurationGroupAction,
@@ -21,25 +23,31 @@ import {
   updateCourseConfigurationRequiredDocumentAction
 } from "@/app/(app)/master/cursos/configuracoes/actions";
 import {
+  createEmptyCourseConfigurationCreateModelFormValues,
+  createEmptyCourseConfigurationDuplicateModelFormValues,
   createEmptyCourseConfigurationCreateCriterionFormValues,
   createEmptyCourseConfigurationCreateCriterionOptionFormValues,
   createEmptyCourseConfigurationCreateGroupFormValues,
   createEmptyCourseConfigurationCreateRequiredDocumentFormValues,
   createInitialCourseConfigurationActionState,
+  initialCourseConfigurationCreateModelActionState,
   initialCourseConfigurationDeleteCriterionActionState,
   initialCourseConfigurationDeleteGroupActionState,
   initialCourseConfigurationDeleteRequiredDocumentActionState,
   initialCourseConfigurationCreateCriterionActionState,
   initialCourseConfigurationCreateCriterionOptionActionState,
   initialCourseConfigurationCreateGroupActionState,
+  initialCourseConfigurationDuplicateModelActionState,
   initialCourseConfigurationCreateRequiredDocumentActionState,
   initialCourseConfigurationSetLaunchDefaultActionState,
   type CourseConfigurationActionState,
+  type CourseConfigurationCreateModelFormValues,
   type CourseConfigurationCreateCriterionFormValues,
   type CourseConfigurationCreateCriterionOptionFormValues,
   type CourseConfigurationCreateGroupFormValues,
   type CourseConfigurationCreateRequiredDocumentFormValues,
   type CourseConfigurationDeleteCriterionFormValues,
+  type CourseConfigurationDuplicateModelFormValues,
   type CourseConfigurationDeleteGroupFormValues,
   type CourseConfigurationDeleteRequiredDocumentFormValues,
   type CourseConfigurationCriterionFormValues,
@@ -111,6 +119,20 @@ function getNextOrderValue(values: Array<number | null | undefined>) {
   return String(maxValue + 1);
 }
 
+function getNextModelVersionValue(models: CourseConfigurationModelEntry[]) {
+  return getNextOrderValue(models.map((model) => model.version));
+}
+
+function buildCreateModelDraft(
+  courseId: string,
+  models: CourseConfigurationModelEntry[]
+): CourseConfigurationCreateModelFormValues {
+  return createEmptyCourseConfigurationCreateModelFormValues(
+    courseId,
+    getNextModelVersionValue(models)
+  );
+}
+
 function buildModelDraft(model: CourseConfigurationModelEntry): CourseConfigurationModelFormValues {
   return {
     model_id: model.id,
@@ -123,6 +145,10 @@ function buildModelDraft(model: CourseConfigurationModelEntry): CourseConfigurat
 
 function getModelModalityLabel(modality: CourseConfigurationModelEntry["modality"]) {
   return modality === "rubrica" ? "Avaliacao por rubrica" : "Avaliacao descritiva";
+}
+
+function getCourseConfigurationModelBadgeTone(modality: CourseConfigurationModelEntry["modality"]) {
+  return modality === "rubrica" ? "status-bem" : "status-atencao";
 }
 
 function renderModelApplicationRuleSummary(
@@ -330,6 +356,10 @@ export function MasterCourseConfigurationModelForm({
   model: CourseConfigurationModelEntry;
   ruleOptions: CourseConfigurationModelApplicationRuleOptions;
 }) {
+  const [duplicateState, duplicateFormAction] = useActionState(
+    duplicateCourseConfigurationModelAction,
+    initialCourseConfigurationDuplicateModelActionState
+  );
   const [state, formAction] = useActionState(
     updateCourseConfigurationModelAction,
     createInitialCourseConfigurationActionState<CourseConfigurationModelFormValues>()
@@ -361,11 +391,16 @@ export function MasterCourseConfigurationModelForm({
         <input type="hidden" name="model_id" value={draft.model_id} />
         {renderNotice(safeState)}
         {renderNotice(setLaunchDefaultState)}
+        {renderNotice(duplicateState)}
 
         <div className="management-tag-list">
           <span className="badge badge-muted">Codigo fixo: {model.code}</span>
           <span className="badge badge-muted">Versao fixa: {model.version}</span>
-          <span className="badge badge-muted">{getModelModalityLabel(model.modality)}</span>
+          <span
+            className={`status-pill ${getCourseConfigurationModelBadgeTone(model.modality)}`}
+          >
+            {getModelModalityLabel(model.modality)}
+          </span>
           {model.isLaunchDefault ? (
             <span className="status-pill status-bem">Padrao para lancamento</span>
           ) : (
@@ -464,6 +499,17 @@ export function MasterCourseConfigurationModelForm({
         </div>
       </form>
 
+      <form action={duplicateFormAction} className="actions-row">
+        <input type="hidden" name="model_id" value={model.id} />
+        <button className="button button-secondary button-small" type="submit">
+          Duplicar modelo
+        </button>
+        <span className="field-help">
+          O clone copia grupos, criterios e opcoes de rubrica, mas nasce sem regra de
+          aplicacao e sem virar padrao automaticamente.
+        </span>
+      </form>
+
       <div className="stack">
         <div>
           <strong>Regras de aplicacao</strong>
@@ -501,23 +547,21 @@ export function MasterCourseConfigurationModelForm({
   );
 }
 
-export function MasterCourseConfigurationCreateGroupForm({
+export function MasterCourseConfigurationCreateModelForm({
   courseId,
-  models,
-  groups
+  models
 }: {
   courseId: string;
   models: CourseConfigurationModelEntry[];
-  groups: CourseConfigurationGroupEntry[];
 }) {
   const [state, formAction] = useActionState(
-    createCourseConfigurationGroupAction,
-    initialCourseConfigurationCreateGroupActionState
+    createCourseConfigurationModelAction,
+    initialCourseConfigurationCreateModelActionState
   );
-  const safeState = state ?? initialCourseConfigurationCreateGroupActionState;
+  const safeState = state ?? initialCourseConfigurationCreateModelActionState;
   const fieldErrors = safeState.fieldErrors ?? {};
-  const [draft, setDraft] = useState<CourseConfigurationCreateGroupFormValues>(() =>
-    buildCreateGroupDraft(courseId, models, groups)
+  const [draft, setDraft] = useState<CourseConfigurationCreateModelFormValues>(() =>
+    buildCreateModelDraft(courseId, models)
   );
 
   useEffect(() => {
@@ -526,11 +570,157 @@ export function MasterCourseConfigurationCreateGroupForm({
       return;
     }
 
-    setDraft(buildCreateGroupDraft(courseId, models, groups, draft.model_id));
+    setDraft(buildCreateModelDraft(courseId, models));
+  }, [courseId, models, safeState.formValues, safeState.status, safeState.submittedAt]);
+
+  function updateDraft(field: keyof CourseConfigurationCreateModelFormValues, value: string) {
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value
+    }));
+  }
+
+  return (
+    <form action={formAction} className="form-stack master-course-configuration-edit-form">
+      <input type="hidden" name="course_id" value={draft.course_id} />
+      {renderNotice(safeState)}
+
+      <div className="form-grid">
+        <label className={getFieldClassName(fieldErrors, "codigo")}>
+          <span>Codigo</span>
+          <input
+            className={getInputClassName(fieldErrors, "codigo")}
+            name="codigo"
+            value={draft.codigo}
+            onChange={(event) => updateDraft("codigo", normalizeCodeInput(event.currentTarget.value))}
+          />
+          {fieldErrors.codigo ? <span className="field-error">{fieldErrors.codigo}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "nome")}>
+          <span>Nome</span>
+          <input
+            className={getInputClassName(fieldErrors, "nome")}
+            name="nome"
+            value={draft.nome}
+            onChange={(event) => updateDraft("nome", event.currentTarget.value)}
+          />
+          {fieldErrors.nome ? <span className="field-error">{fieldErrors.nome}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "versao")}>
+          <span>Versao</span>
+          <input
+            className={getInputClassName(fieldErrors, "versao")}
+            name="versao"
+            type="number"
+            min="1"
+            step="1"
+            value={draft.versao}
+            onChange={(event) => updateDraft("versao", event.currentTarget.value)}
+          />
+          {fieldErrors.versao ? <span className="field-error">{fieldErrors.versao}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "modalidade")}>
+          <span>Modalidade</span>
+          <select
+            className={getInputClassName(fieldErrors, "modalidade")}
+            name="modalidade"
+            value={draft.modalidade}
+            onChange={(event) =>
+              updateDraft(
+                "modalidade",
+                event.currentTarget.value as CourseConfigurationCreateModelFormValues["modalidade"]
+              )
+            }
+          >
+            <option value="descritiva">Avaliacao descritiva</option>
+            <option value="rubrica">Avaliacao por rubrica</option>
+          </select>
+          {fieldErrors.modalidade ? (
+            <span className="field-error">{fieldErrors.modalidade}</span>
+          ) : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "ativo")}>
+          <span>Status</span>
+          <select
+            className={getInputClassName(fieldErrors, "ativo")}
+            name="ativo"
+            value={draft.ativo}
+            onChange={(event) => updateDraft("ativo", event.currentTarget.value)}
+          >
+            <option value="true">Ativo</option>
+            <option value="false">Inativo</option>
+          </select>
+          {fieldErrors.ativo ? <span className="field-error">{fieldErrors.ativo}</span> : null}
+        </label>
+      </div>
+
+      <label className={getFieldClassName(fieldErrors, "descricao")}>
+        <span>Descricao</span>
+        <textarea
+          className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
+          name="descricao"
+          rows={3}
+          value={draft.descricao}
+          onChange={(event) => updateDraft("descricao", event.currentTarget.value)}
+        />
+        {fieldErrors.descricao ? (
+          <span className="field-error">{fieldErrors.descricao}</span>
+        ) : null}
+      </label>
+
+      <div className="actions-row">
+        <button className="button button-secondary" type="submit">
+          Salvar novo modelo
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function MasterCourseConfigurationCreateGroupForm({
+  courseId,
+  models,
+  groups,
+  preferredModelId
+}: {
+  courseId: string;
+  models: CourseConfigurationModelEntry[];
+  groups: CourseConfigurationGroupEntry[];
+  preferredModelId?: string;
+}) {
+  const [state, formAction] = useActionState(
+    createCourseConfigurationGroupAction,
+    initialCourseConfigurationCreateGroupActionState
+  );
+  const safeState = state ?? initialCourseConfigurationCreateGroupActionState;
+  const fieldErrors = safeState.fieldErrors ?? {};
+  const [draft, setDraft] = useState<CourseConfigurationCreateGroupFormValues>(() =>
+    buildCreateGroupDraft(courseId, models, groups, preferredModelId)
+  );
+
+  useEffect(() => {
+    if (safeState.status === "error" && safeState.formValues) {
+      setDraft({ ...safeState.formValues });
+      return;
+    }
+
+    setDraft(
+      buildCreateGroupDraft(
+        courseId,
+        models,
+        groups,
+        draft.model_id || preferredModelId
+      )
+    );
   }, [
     courseId,
     groups,
     models,
+    preferredModelId,
     safeState.formValues,
     safeState.status,
     safeState.submittedAt
