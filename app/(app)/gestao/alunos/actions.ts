@@ -4759,9 +4759,6 @@ export async function updateCoordinatorClassCurricularPeriodAction(
   _previousState: ClassCurricularPeriodActionState,
   formData: FormData
 ): Promise<ClassCurricularPeriodActionState> {
-  const currentUser = await requireRole(["coordenador"]);
-  assertOperationalMutationAllowed(currentUser);
-  const operationalScope = await resolveOperationalScopeForCurrentCoordinator(currentUser);
   const submittedFormValues = buildClassCurricularPeriodFormValues(formData);
   const parsedData = classCurricularPeriodSchema.safeParse(submittedFormValues);
 
@@ -4773,104 +4770,129 @@ export async function updateCoordinatorClassCurricularPeriodAction(
     );
   }
 
-  const supabase = await createSupabaseServerClient();
-  const scope = await resolveScopedDataAccess(currentUser, {
-    supabase
-  });
-  const { data: classData, error: classError } = await supabase
-    .from("turmas")
-    .select("id, nome, oferta_curso_unidade_id, semestre_id")
-    .eq("id", parsedData.data.turma_id)
-    .maybeSingle();
+  try {
+    const currentUser = await requireRole(["coordenador"]);
+    assertOperationalMutationAllowed(currentUser);
+    const operationalScope = await resolveOperationalScopeForCurrentCoordinator(currentUser);
+    const supabase = await createSupabaseServerClient();
+    const scope = await resolveScopedDataAccess(currentUser, {
+      supabase
+    });
+    const { data: classData, error: classError } = await supabase
+      .from("turmas")
+      .select("id, nome, oferta_curso_unidade_id, semestre_id")
+      .eq("id", parsedData.data.turma_id)
+      .maybeSingle();
 
-  const classRow = (classData ?? null) as Pick<
-    ClassRow,
-    "id" | "nome" | "oferta_curso_unidade_id" | "semestre_id"
-  > | null;
+    const classRow = (classData ?? null) as Pick<
+      ClassRow,
+      "id" | "nome" | "oferta_curso_unidade_id" | "semestre_id"
+    > | null;
 
-  if (classError || !classRow) {
-    return buildClassCurricularPeriodErrorState(
-      "Nao foi possivel localizar a turma informada.",
-      {},
-      submittedFormValues
-    );
-  }
-
-  const { data: semesterData, error: semesterError } = await supabase
-    .from("semestres")
-    .select("id, unidade_id, oferta_curso_unidade_id")
-    .eq("id", classRow.semestre_id)
-    .maybeSingle();
-
-  const semesterRow = (semesterData ?? null) as Pick<
-    SemesterRow,
-    "id" | "unidade_id" | "oferta_curso_unidade_id"
-  > | null;
-
-  if (semesterError || !semesterRow) {
-    return buildClassCurricularPeriodErrorState(
-      "Nao foi possivel validar o semestre vinculado a esta turma.",
-      {},
-      submittedFormValues
-    );
-  }
-
-  const resolvedOfferId =
-    classRow.oferta_curso_unidade_id ?? semesterRow.oferta_curso_unidade_id ?? null;
-  const resolvedUnitId = semesterRow.unidade_id ?? operationalScope.unitId;
-
-  if (scope.offerIds.length > 0) {
-    if (!resolvedOfferId || !scope.offerIds.includes(resolvedOfferId)) {
+    if (classError || !classRow) {
       return buildClassCurricularPeriodErrorState(
-        "Voce nao pode editar o periodo curricular de turmas fora do escopo institucional ativo.",
+        "Nao foi possivel localizar a turma informada.",
         {},
         submittedFormValues
       );
     }
-  }
 
-  if (operationalScope.offerId) {
-    if (!resolvedOfferId || resolvedOfferId !== operationalScope.offerId) {
+    const { data: semesterData, error: semesterError } = await supabase
+      .from("semestres")
+      .select("id, unidade_id, oferta_curso_unidade_id")
+      .eq("id", classRow.semestre_id)
+      .maybeSingle();
+
+    const semesterRow = (semesterData ?? null) as Pick<
+      SemesterRow,
+      "id" | "unidade_id" | "oferta_curso_unidade_id"
+    > | null;
+
+    if (semesterError || !semesterRow) {
       return buildClassCurricularPeriodErrorState(
-        "Voce nao pode editar o periodo curricular de turmas fora da oferta ativa.",
+        "Nao foi possivel validar o semestre vinculado a esta turma.",
         {},
         submittedFormValues
       );
     }
-  } else if (resolvedUnitId !== operationalScope.unitId) {
+
+    const resolvedOfferId =
+      classRow.oferta_curso_unidade_id ?? semesterRow.oferta_curso_unidade_id ?? null;
+    const resolvedUnitId = semesterRow.unidade_id ?? operationalScope.unitId;
+
+    if (scope.offerIds.length > 0) {
+      if (!resolvedOfferId || !scope.offerIds.includes(resolvedOfferId)) {
+        return buildClassCurricularPeriodErrorState(
+          "Voce nao pode editar o periodo curricular de turmas fora do escopo institucional ativo.",
+          {},
+          submittedFormValues
+        );
+      }
+    }
+
+    if (operationalScope.offerId) {
+      if (!resolvedOfferId || resolvedOfferId !== operationalScope.offerId) {
+        return buildClassCurricularPeriodErrorState(
+          "Voce nao pode editar o periodo curricular de turmas fora da oferta ativa.",
+          {},
+          submittedFormValues
+        );
+      }
+    } else if (resolvedUnitId !== operationalScope.unitId) {
+      return buildClassCurricularPeriodErrorState(
+        "Voce nao pode editar o periodo curricular de turmas fora da unidade ativa.",
+        {},
+        submittedFormValues
+      );
+    }
+
+    const nextCurricularPeriod = parsedData.data.periodo_curricular
+      ? Number(parsedData.data.periodo_curricular)
+      : null;
+    const { error: updateError } = await (supabase
+      .from("turmas") as any)
+      .update({
+        periodo_curricular: nextCurricularPeriod
+      })
+      .eq("id", classRow.id);
+
+    if (updateError) {
+      return buildClassCurricularPeriodErrorState(
+        updateError.message || "Nao foi possivel atualizar o periodo curricular da turma.",
+        {},
+        submittedFormValues
+      );
+    }
+
+    try {
+      revalidateAcademicViews();
+    } catch (error) {
+      console.error("Falha ao revalidar as telas academicas apos atualizar periodo curricular", {
+        turmaId: classRow.id,
+        error
+      });
+    }
+
+    return buildClassCurricularPeriodSuccessState(
+      nextCurricularPeriod
+        ? `Periodo curricular da turma ${classRow.nome} atualizado para ${nextCurricularPeriod}.`
+        : `Periodo curricular da turma ${classRow.nome} removido com sucesso.`,
+      submittedFormValues
+    );
+  } catch (error) {
+    console.error("Falha ao atualizar o periodo curricular da turma no painel do coordenador", {
+      turmaId: submittedFormValues.turma_id,
+      error
+    });
+
     return buildClassCurricularPeriodErrorState(
-      "Voce nao pode editar o periodo curricular de turmas fora da unidade ativa.",
+      error instanceof Error
+        ? error.message
+        : "Nao foi possivel atualizar o periodo curricular desta turma.",
       {},
       submittedFormValues
     );
   }
-
-  const nextCurricularPeriod = parsedData.data.periodo_curricular
-    ? Number(parsedData.data.periodo_curricular)
-    : null;
-  const { error: updateError } = await (supabase
-    .from("turmas") as any)
-    .update({
-      periodo_curricular: nextCurricularPeriod
-    })
-    .eq("id", classRow.id);
-
-  if (updateError) {
-    return buildClassCurricularPeriodErrorState(
-      updateError.message || "Nao foi possivel atualizar o periodo curricular da turma.",
-      {},
-      submittedFormValues
-    );
-  }
-
-  revalidateAcademicViews();
-
-  return buildClassCurricularPeriodSuccessState(
-    nextCurricularPeriod
-      ? `Periodo curricular da turma ${classRow.nome} atualizado para ${nextCurricularPeriod}.`
-      : `Periodo curricular da turma ${classRow.nome} removido com sucesso.`,
-    submittedFormValues
-  );
 }
 
 export async function discardSemesterAction(formData: FormData) {
