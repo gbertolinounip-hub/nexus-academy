@@ -120,7 +120,12 @@ async function validateSemesterCreation(input: {
   const adminClient = createSupabaseAdminClient();
   const [offerRow, duplicateCodeResult] = await Promise.all([
     loadOffer(input.offerId),
-    adminClient.from("semestres").select("id").eq("codigo", input.code).limit(1)
+    adminClient
+      .from("semestres")
+      .select("id")
+      .eq("oferta_curso_unidade_id", input.offerId)
+      .eq("codigo", input.code)
+      .limit(1)
   ]);
 
   if (duplicateCodeResult.error) {
@@ -147,7 +152,7 @@ async function validateSemesterCreation(input: {
   }
 
   if ((duplicateCodeResult.data ?? []).length > 0) {
-    fieldErrors.codigo = "Ja existe um semestre cadastrado com este codigo.";
+    fieldErrors.codigo = "Ja existe um semestre cadastrado com este codigo nesta oferta.";
   }
 
   return {
@@ -209,9 +214,11 @@ export async function createMasterSemesterAction(
     return buildActionState(
       "error",
       isDuplicateCode
-        ? "Ja existe um semestre cadastrado com este codigo."
+        ? "Ja existe um semestre cadastrado com este codigo nesta oferta."
         : error.message,
-      isDuplicateCode ? { codigo: "Use um codigo de semestre ainda nao cadastrado." } : {},
+      isDuplicateCode
+        ? { codigo: "Use um codigo de semestre ainda nao cadastrado nesta oferta." }
+        : {},
       submittedFormValues
     );
   }

@@ -4220,6 +4220,67 @@ export async function createSemesterAction(
 
   const supabase = await createSupabaseServerClient();
   const operationalScope = await resolveOperationalScopeForCurrentCoordinator(currentUser);
+  const scope = await resolveScopedDataAccess(currentUser, {
+    supabase
+  });
+
+  if (!operationalScope.offerId && scope.offerIds.length > 1) {
+    return buildSemesterErrorState(
+      "Nao foi possivel identificar a oferta ativa para criar o semestre neste contexto.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  if (
+    operationalScope.offerId &&
+    scope.offerIds.length > 0 &&
+    !scope.offerIds.includes(operationalScope.offerId)
+  ) {
+    return buildSemesterErrorState(
+      "Voce nao pode criar semestres fora do contexto institucional ativo.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const duplicateSemesterQuery = operationalScope.offerId
+    ? (supabase
+        .from("semestres")
+        .select("id")
+        .eq("oferta_curso_unidade_id", operationalScope.offerId)
+        .eq("codigo", parsedData.data.codigo))
+    : (supabase
+        .from("semestres")
+        .select("id")
+        .eq("unidade_id", coordinatorUnitId)
+        .is("oferta_curso_unidade_id", null)
+        .eq("codigo", parsedData.data.codigo));
+
+  const { data: duplicateSemesterRows, error: duplicateSemesterError } =
+    await duplicateSemesterQuery.limit(1);
+
+  if (duplicateSemesterError) {
+    return buildSemesterErrorState(
+      "Nao foi possivel validar a criacao do semestre neste contexto.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  if ((duplicateSemesterRows ?? []).length > 0) {
+    return buildSemesterErrorState(
+      operationalScope.offerId
+        ? "Ja existe um semestre cadastrado com este codigo nesta oferta."
+        : "Ja existe um semestre cadastrado com este codigo nesta unidade.",
+      {
+        codigo: operationalScope.offerId
+          ? "Use um codigo de semestre ainda nao cadastrado nesta oferta."
+          : "Use um codigo de semestre ainda nao cadastrado nesta unidade."
+      },
+      submittedFormValues
+    );
+  }
 
   const { error } = await (supabase.from("semestres") as any).insert({
     unidade_id: coordinatorUnitId,
@@ -4237,9 +4298,17 @@ export async function createSemesterAction(
 
     return buildSemesterErrorState(
       isDuplicateCode
-        ? "Já existe um semestre cadastrado com este codigo."
+        ? operationalScope.offerId
+          ? "Ja existe um semestre cadastrado com este codigo nesta oferta."
+          : "Ja existe um semestre cadastrado com este codigo nesta unidade."
         : error.message,
-      isDuplicateCode ? { codigo: "Use um codigo de semestre ainda nao cadastrado." } : {},
+      isDuplicateCode
+        ? {
+            codigo: operationalScope.offerId
+              ? "Use um codigo de semestre ainda nao cadastrado nesta oferta."
+              : "Use um codigo de semestre ainda nao cadastrado nesta unidade."
+          }
+        : {},
       submittedFormValues
     );
   }
