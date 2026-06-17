@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth/session";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getCourseConfigurationImportBaseSourceData } from "@/services/course-configurations";
 import type { Database } from "@/types/database";
 import type {
   CourseConfigurationActionState,
@@ -2788,8 +2789,7 @@ export async function importCourseConfigurationModelFromBaseAction(
     );
   }
 
-  const sourceResolution = await loadPreferredFisioterapiaSourceCourse(
-    destinationCourse.instituicao_id,
+  const sourceResolution = await getCourseConfigurationImportBaseSourceData(
     destinationCourse.id
   );
 
@@ -2804,6 +2804,11 @@ export async function importCourseConfigurationModelFromBaseAction(
       submittedFormValues
     );
   }
+
+  const selectedSourceModelOption =
+    sourceResolution.sourceModels.find(
+      (sourceModelOption) => sourceModelOption.id === parsedData.data.source_model_id
+    ) ?? null;
 
   const sourceModel = await loadModel(parsedData.data.source_model_id);
 
@@ -2825,7 +2830,19 @@ export async function importCourseConfigurationModelFromBaseAction(
     );
   }
 
-  if (sourceModel.curso_id !== sourceResolution.course.id) {
+  if (!selectedSourceModelOption) {
+    return buildActionState(
+      "error",
+      "O modelo selecionado nao pertence a base padrao disponivel para este curso.",
+      {
+        source_model_id:
+          "Selecione um modelo da base indicada nesta tela."
+      },
+      submittedFormValues
+    );
+  }
+
+  if (sourceModel.curso_id !== selectedSourceModelOption.sourceCourseId) {
     return buildActionState(
       "error",
       "O modelo selecionado nao pertence a base padrao disponivel para este curso.",
@@ -3000,7 +3017,7 @@ export async function importCourseConfigurationModelFromBaseAction(
         source_course_id: sourceCourse.id,
         source_course_code: sourceCourse.codigo,
         source_model_id: sourceModel.id,
-        source_label: sourceResolution.label,
+        source_label: sourceResolution.sourceLabel,
         imported_at: new Date().toISOString(),
         imported_by: "importCourseConfigurationModelFromBaseAction",
         copied_portable_rules: shouldCopyPortableRules

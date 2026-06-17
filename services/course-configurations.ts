@@ -221,6 +221,13 @@ export interface CourseConfigurationPageData {
   fisioterapiaBaseSourceLabel: string | null;
 }
 
+export interface CourseConfigurationImportBaseSourceData {
+  destinationCourseId: string;
+  sourceCourseId: string;
+  sourceLabel: string;
+  sourceModels: CourseConfigurationImportableModelOption[];
+}
+
 function formatSupabaseErrorMessage(context: string, error: PostgrestError | null) {
   if (!error) {
     return context;
@@ -1329,5 +1336,34 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
         name: documentTypeRow.nome
       })),
     fisioterapiaBaseSourceLabel: globalFisioterapiaSourceLabel
+  };
+}
+
+export async function getCourseConfigurationImportBaseSourceData(
+  destinationCourseId: string
+): Promise<CourseConfigurationImportBaseSourceData | null> {
+  const pageData = await getCourseConfigurationPageData();
+  const destinationCourse =
+    pageData.courses.find((course) => course.id === destinationCourseId) ?? null;
+
+  if (
+    !destinationCourse ||
+    !destinationCourse.importBaseSourceLabel ||
+    !destinationCourse.importBaseModelOptions.length
+  ) {
+    return null;
+  }
+
+  const sourceCourseId = destinationCourse.importBaseModelOptions[0]?.sourceCourseId ?? null;
+
+  if (!sourceCourseId) {
+    return null;
+  }
+
+  return {
+    destinationCourseId,
+    sourceCourseId,
+    sourceLabel: destinationCourse.importBaseSourceLabel,
+    sourceModels: destinationCourse.importBaseModelOptions
   };
 }

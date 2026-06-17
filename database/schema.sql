@@ -395,6 +395,23 @@ end;
 $$;
 
 drop index if exists public.idx_semestres_unidade_codigo_uk;
+drop index if exists public.semestres_unidade_id_codigo_key;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'semestres_unidade_id_codigo_key'
+      and conrelid = 'public.semestres'::regclass
+  ) then
+    alter table public.semestres
+      drop constraint semestres_unidade_id_codigo_key;
+  end if;
+end;
+$$;
+
+drop index if exists public.semestres_unidade_id_codigo_key;
 
 create unique index if not exists idx_semestres_oferta_codigo_uk
   on public.semestres (oferta_curso_unidade_id, codigo)
