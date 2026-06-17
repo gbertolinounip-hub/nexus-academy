@@ -1,11 +1,9 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState } from "react";
 import { updateCoordinatorClassCurricularPeriodAction } from "@/app/(app)/gestao/alunos/actions";
 import {
-  createInitialClassCurricularPeriodFormValues,
-  initialClassCurricularPeriodActionState,
-  type ClassCurricularPeriodFormValues
+  initialClassCurricularPeriodActionState
 } from "@/app/(app)/gestao/alunos/state";
 import type { ManagementCurricularPeriodOption } from "@/services/management";
 
@@ -30,28 +28,6 @@ export function CoordinatorClassCurricularPeriodForm({
   );
   const safeState = state ?? initialClassCurricularPeriodActionState;
   const fieldErrors = safeState.fieldErrors ?? {};
-  const [draft, setDraft] = useState<ClassCurricularPeriodFormValues>(() =>
-    createInitialClassCurricularPeriodFormValues(
-      classId,
-      curricularPeriod ? String(curricularPeriod) : ""
-    )
-  );
-
-  useEffect(() => {
-    setDraft(
-      createInitialClassCurricularPeriodFormValues(
-        classId,
-        curricularPeriod ? String(curricularPeriod) : ""
-      )
-    );
-  }, [classId, curricularPeriod]);
-
-  useEffect(() => {
-    if (safeState.formValues) {
-      setDraft({ ...safeState.formValues });
-    }
-  }, [safeState.formValues, safeState.status, safeState.submittedAt]);
-
   const currentValue = curricularPeriod ? String(curricularPeriod) : "";
   const currentValueIsAllowed = !currentValue
     ? true
@@ -71,18 +47,12 @@ export function CoordinatorClassCurricularPeriodForm({
 
   return (
     <form action={formAction} className="form-stack" style={{ gap: "0.4rem" }}>
-      <input type="hidden" name="turma_id" value={draft.turma_id} />
+      <input type="hidden" name="turma_id" value={classId} />
       <select
         className={fieldErrors.periodo_curricular ? "input input-invalid" : "input"}
         name="periodo_curricular"
         aria-label={`Periodo curricular da turma ${className}`}
-        value={draft.periodo_curricular}
-        onChange={(event) =>
-          setDraft((currentDraft) => ({
-            ...currentDraft,
-            periodo_curricular: event.currentTarget.value
-          }))
-        }
+        defaultValue={currentValue}
         disabled={isSelectionDisabled}
       >
         <option value="">Selecione o periodo curricular</option>
