@@ -10,6 +10,7 @@ import {
   resolveScopedDataAccess
 } from "@/lib/auth/data-scope";
 import { loadVisibleStageAreaCatalog } from "@/services/stage-areas";
+import { loadAvailableCurricularPeriodCatalogs } from "@/services/management";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
@@ -4819,6 +4820,7 @@ export async function updateCoordinatorClassCurricularPeriodAction(
     const resolvedOfferId =
       classRow.oferta_curso_unidade_id ?? semesterRow.oferta_curso_unidade_id ?? null;
     const resolvedUnitId = semesterRow.unidade_id ?? operationalScope.unitId;
+    const resolvedCourseId = scope.cursoId ?? operationalScope.courseId ?? null;
 
     if (scope.offerIds.length > 0) {
       if (!resolvedOfferId || !scope.offerIds.includes(resolvedOfferId)) {
@@ -4842,6 +4844,33 @@ export async function updateCoordinatorClassCurricularPeriodAction(
       return buildClassCurricularPeriodErrorState(
         "Voce nao pode editar o periodo curricular de turmas fora da unidade ativa.",
         {},
+        submittedFormValues
+      );
+    }
+
+    const curricularPeriodCatalogs = await loadAvailableCurricularPeriodCatalogs({
+      supabase,
+      courseId: resolvedCourseId,
+      offerIds: resolvedOfferId ? [resolvedOfferId] : []
+    });
+    const availableCurricularPeriodOptions = resolvedOfferId
+      ? curricularPeriodCatalogs.catalogsByOfferId.get(resolvedOfferId)?.options ??
+        curricularPeriodCatalogs.defaultCatalog.options
+      : curricularPeriodCatalogs.defaultCatalog.options;
+
+    if (
+      parsedData.data.periodo_curricular &&
+      !availableCurricularPeriodOptions.some(
+        (option) => String(option.value) === parsedData.data.periodo_curricular
+      )
+    ) {
+      return buildClassCurricularPeriodErrorState(
+        availableCurricularPeriodOptions.length
+          ? "Selecione um periodo curricular liberado pelas regras ativas do Master para esta oferta."
+          : "Nenhuma regra por periodo curricular foi configurada para este curso. Configure as regras no Master antes de vincular o periodo da turma.",
+        {
+          periodo_curricular: "Selecione um periodo curricular valido para esta turma."
+        },
         submittedFormValues
       );
     }

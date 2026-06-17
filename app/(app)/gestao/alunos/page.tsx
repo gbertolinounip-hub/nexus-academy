@@ -294,6 +294,9 @@ export default async function AcademicManagementPage(props: {
                                 classId={classEntry.id}
                                 className={classEntry.name}
                                 curricularPeriod={classEntry.curricularPeriod}
+                                options={classEntry.curricularPeriodOptions}
+                                selectionMessage={classEntry.curricularPeriodSelectionMessage}
+                                selectionBlocked={classEntry.curricularPeriodSelectionBlocked}
                               />
                             </td>
                             <td>{classEntry.enrollmentCount}</td>

@@ -21,6 +21,10 @@ type SemesterRow = Database["public"]["Tables"]["semestres"]["Row"];
 type BlockRow = Database["public"]["Tables"]["blocos_estagio"]["Row"];
 type AreaRow = Database["public"]["Tables"]["areas_estagio"]["Row"];
 type ClassRow = Database["public"]["Tables"]["turmas"]["Row"];
+type EvaluationModelRow =
+  Database["public"]["Tables"]["modelos_avaliacao_curso"]["Row"];
+type EvaluationModelApplicationRuleRow =
+  Database["public"]["Tables"]["regras_aplicacao_modelo_avaliacao"]["Row"];
 type EnrollmentRow = Database["public"]["Tables"]["matriculas_turma"]["Row"];
 type ProfessorAreaRow = Database["public"]["Tables"]["professor_areas_estagio"]["Row"];
 type ProfessorLinkRow = Database["public"]["Tables"]["vinculos_professor_aluno"]["Row"];
@@ -400,8 +404,18 @@ export interface ManagementClassListItem {
   unitName: string | null;
   areaName: string;
   curricularPeriod: number | null;
+  curricularPeriodOptions: ManagementCurricularPeriodOption[];
+  curricularPeriodSelectionMessage: string | null;
+  curricularPeriodSelectionBlocked: boolean;
   isActive: boolean;
   enrollmentCount: number;
+}
+
+export interface ManagementCurricularPeriodOption {
+  value: number;
+  label: string;
+  modelNames: string[];
+  hasMultipleModels: boolean;
 }
 
 export interface ManagementSecretaryListItem {
@@ -642,6 +656,189 @@ export interface ManagementPageLoadResult {
   } | null;
 }
 
+interface CurricularPeriodCatalog {
+  options: ManagementCurricularPeriodOption[];
+  warning: string | null;
+}
+
+function sortByNumericValue(left: number, right: number) {
+  return left - right;
+}
+
+function buildCurricularPeriodSelectionMessage() {
+  return "Nenhuma regra por periodo curricular foi configurada para este curso. Configure as regras no Master antes de vincular o periodo da turma.";
+}
+
+function buildCurricularPeriodOptionsFromModelNames(
+  periodModelNamesMap: Map<number, Set<string>>
+) {
+  return [...periodModelNamesMap.entries()]
+    .sort(([leftPeriod], [rightPeriod]) => sortByNumericValue(leftPeriod, rightPeriod))
+    .map(([periodValue, modelNamesSet]) => {
+      const modelNames = [...modelNamesSet].sort((left, right) =>
+        left.localeCompare(right, "pt-BR")
+      );
+
+      return {
+        value: periodValue,
+        label:
+          modelNames.length > 1
+            ? `${periodValue}º periodo - multiplos modelos configurados`
+            : `${periodValue}º periodo - ${modelNames[0] ?? "Modelo nao identificado"}`,
+        modelNames,
+        hasMultipleModels: modelNames.length > 1
+      } satisfies ManagementCurricularPeriodOption;
+    });
+}
+
+export async function loadAvailableCurricularPeriodCatalogs(input: {
+  supabase?: SupabaseServerClient;
+  courseId: string | null;
+  offerIds: string[];
+}) {
+  const supabase = input.supabase ?? (await createSupabaseServerClient());
+  const normalizedOfferIds = uniqueStringValues(input.offerIds);
+  const emptyCatalog: CurricularPeriodCatalog = {
+    options: [],
+    warning: buildCurricularPeriodSelectionMessage()
+  };
+
+  if (!input.courseId) {
+    return {
+      defaultCatalog: emptyCatalog,
+      catalogsByOfferId: new Map<string, CurricularPeriodCatalog>()
+    };
+  }
+
+  const { data: modelData, error: modelError } = await supabase
+    .from("modelos_avaliacao_curso")
+    .select("id, nome, ativo")
+    .eq("curso_id", input.courseId)
+    .eq("ativo", true);
+
+  if (modelError) {
+    throw new Error(
+      "Houve um problema ao consultar os modelos ativos usados para liberar os periodos curriculares."
+    );
+  }
+
+  const activeModels = (modelData ?? []) as Pick<EvaluationModelRow, "id" | "nome" | "ativo">[];
+
+  if (!activeModels.length) {
+    return {
+      defaultCatalog: emptyCatalog,
+      catalogsByOfferId: new Map<string, CurricularPeriodCatalog>(
+        normalizedOfferIds.map((offerId) => [offerId, emptyCatalog])
+      )
+    };
+  }
+
+  const activeModelIds = activeModels.map((modelRow) => modelRow.id);
+  const modelNamesById = new Map(activeModels.map((modelRow) => [modelRow.id, modelRow.nome]));
+  const { data: ruleData, error: ruleError } = await supabase
+    .from("regras_aplicacao_modelo_avaliacao")
+    .select(
+      "id, modelo_avaliacao_curso_id, oferta_curso_unidade_id, periodo_curricular, semestre_id, turma_id, area_estagio_id, ativo"
+    )
+    .in("modelo_avaliacao_curso_id", activeModelIds)
+    .eq("ativo", true)
+    .not("periodo_curricular", "is", null);
+
+  if (ruleError) {
+    throw new Error(
+      "Houve um problema ao consultar as regras de periodo curricular liberadas pelo Master."
+    );
+  }
+
+  const generalPeriodModelNames = new Map<number, Set<string>>();
+  const periodModelNamesByOfferId = new Map<string, Map<number, Set<string>>>(
+    normalizedOfferIds.map((offerId) => [offerId, new Map<number, Set<string>>()])
+  );
+
+  for (const ruleRow of (ruleData ?? []) as Array<
+    Pick<
+      EvaluationModelApplicationRuleRow,
+      | "id"
+      | "modelo_avaliacao_curso_id"
+      | "oferta_curso_unidade_id"
+      | "periodo_curricular"
+      | "semestre_id"
+      | "turma_id"
+      | "area_estagio_id"
+      | "ativo"
+    >
+  >) {
+    if (
+      ruleRow.periodo_curricular === null ||
+      ruleRow.semestre_id !== null ||
+      ruleRow.turma_id !== null ||
+      ruleRow.area_estagio_id !== null
+    ) {
+      continue;
+    }
+
+    const modelName =
+      modelNamesById.get(ruleRow.modelo_avaliacao_curso_id) ?? "Modelo nao identificado";
+
+    if (!ruleRow.oferta_curso_unidade_id) {
+      const currentModelNames =
+        generalPeriodModelNames.get(ruleRow.periodo_curricular) ?? new Set<string>();
+      currentModelNames.add(modelName);
+      generalPeriodModelNames.set(ruleRow.periodo_curricular, currentModelNames);
+
+      for (const offerId of normalizedOfferIds) {
+        const offerPeriodModelNames =
+          periodModelNamesByOfferId.get(offerId) ?? new Map<number, Set<string>>();
+        const currentOfferModelNames =
+          offerPeriodModelNames.get(ruleRow.periodo_curricular) ?? new Set<string>();
+        currentOfferModelNames.add(modelName);
+        offerPeriodModelNames.set(ruleRow.periodo_curricular, currentOfferModelNames);
+        periodModelNamesByOfferId.set(offerId, offerPeriodModelNames);
+      }
+
+      continue;
+    }
+
+    if (!normalizedOfferIds.includes(ruleRow.oferta_curso_unidade_id)) {
+      continue;
+    }
+
+    const offerPeriodModelNames =
+      periodModelNamesByOfferId.get(ruleRow.oferta_curso_unidade_id) ?? new Map<number, Set<string>>();
+    const currentOfferModelNames =
+      offerPeriodModelNames.get(ruleRow.periodo_curricular) ?? new Set<string>();
+    currentOfferModelNames.add(modelName);
+    offerPeriodModelNames.set(ruleRow.periodo_curricular, currentOfferModelNames);
+    periodModelNamesByOfferId.set(ruleRow.oferta_curso_unidade_id, offerPeriodModelNames);
+  }
+
+  const defaultCatalogOptions = buildCurricularPeriodOptionsFromModelNames(generalPeriodModelNames);
+  const defaultCatalog: CurricularPeriodCatalog = {
+    options: defaultCatalogOptions,
+    warning: defaultCatalogOptions.length ? null : buildCurricularPeriodSelectionMessage()
+  };
+  const catalogsByOfferId = new Map<string, CurricularPeriodCatalog>(
+    normalizedOfferIds.map((offerId) => {
+      const offerOptions = buildCurricularPeriodOptionsFromModelNames(
+        periodModelNamesByOfferId.get(offerId) ?? new Map<number, Set<string>>()
+      );
+
+      return [
+        offerId,
+        {
+          options: offerOptions,
+          warning: offerOptions.length ? null : buildCurricularPeriodSelectionMessage()
+        } satisfies CurricularPeriodCatalog
+      ];
+    })
+  );
+
+  return {
+    defaultCatalog,
+    catalogsByOfferId
+  };
+}
+
 export interface StudentManagementDetailLoadResult {
   studentData: StudentManagementDetailData | null;
   emptyState: {
@@ -782,6 +979,22 @@ export async function getCoordinatorManagementPageData(
   const unitRows = (unitRowsResult.data ?? []) as UnitRow[];
   const offersById = new Map(offerRows.map((offer) => [offer.id, offer]));
   const unitsById = new Map(unitRows.map((unit) => [unit.id, unit]));
+  let curricularPeriodCatalogs: Awaited<
+    ReturnType<typeof loadAvailableCurricularPeriodCatalogs>
+  >;
+
+  try {
+    curricularPeriodCatalogs = await loadAvailableCurricularPeriodCatalogs({
+      supabase,
+      courseId: scope.cursoId,
+      offerIds: scope.offerIds
+    });
+  } catch {
+    return buildEmptyState(
+      "Não foi possível carregar a gestao academica",
+      "Houve um problema ao consultar os periodos curriculares liberados pelas regras de avaliacao do curso."
+    );
+  }
   const unitOptions = unitRows
     .map((unit) => ({
       id: unit.id,
@@ -1058,6 +1271,10 @@ export async function getCoordinatorManagementPageData(
       const enrollmentCount = enrollmentRows.filter(
         (enrollment) => enrollment.turma_id === classGroup.id && enrollment.status === "ativa"
       ).length;
+      const curricularPeriodCatalog = offerRow?.id
+        ? curricularPeriodCatalogs.catalogsByOfferId.get(offerRow.id) ??
+          curricularPeriodCatalogs.defaultCatalog
+        : curricularPeriodCatalogs.defaultCatalog;
 
       return {
         id: classGroup.id,
@@ -1071,6 +1288,9 @@ export async function getCoordinatorManagementPageData(
         unitName: unitId ? unitsById.get(unitId)?.nome ?? null : null,
         areaName: area?.nome ?? classGroup.area_estagio,
         curricularPeriod: classGroup.periodo_curricular,
+        curricularPeriodOptions: curricularPeriodCatalog.options,
+        curricularPeriodSelectionMessage: curricularPeriodCatalog.warning,
+        curricularPeriodSelectionBlocked: curricularPeriodCatalog.options.length === 0,
         isActive: classGroup.ativa,
         enrollmentCount
       } satisfies ManagementClassListItem;
