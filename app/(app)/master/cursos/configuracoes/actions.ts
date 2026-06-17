@@ -915,7 +915,10 @@ function buildFisioterapiaSourceLabel(
   return `${institutionName} / ${courseName} (${suffix})`;
 }
 
-async function loadPreferredFisioterapiaSourceCourse(institutionId: string) {
+async function loadPreferredFisioterapiaSourceCourse(
+  institutionId: string,
+  excludedCourseId?: string | null
+) {
   const adminClient = createSupabaseAdminClient();
   const candidatesResult = await adminClient
     .from("cursos")
@@ -967,7 +970,9 @@ async function loadPreferredFisioterapiaSourceCourse(institutionId: string) {
   }
 
   const sameInstitutionSource = configuredCandidates.find(
-    (candidate) => candidate.instituicao_id === institutionId
+    (candidate) =>
+      candidate.instituicao_id === institutionId &&
+      candidate.id !== excludedCourseId
   );
 
   if (sameInstitutionSource) {
@@ -982,7 +987,9 @@ async function loadPreferredFisioterapiaSourceCourse(institutionId: string) {
     };
   }
 
-  const globalSource = [...configuredCandidates].sort(compareFisioterapiaSourceCandidates)[0];
+  const globalSource = [...configuredCandidates]
+    .filter((candidate) => candidate.id !== excludedCourseId)
+    .sort(compareFisioterapiaSourceCandidates)[0];
 
   return globalSource
     ? {
@@ -2782,7 +2789,8 @@ export async function importCourseConfigurationModelFromBaseAction(
   }
 
   const sourceResolution = await loadPreferredFisioterapiaSourceCourse(
-    destinationCourse.instituicao_id
+    destinationCourse.instituicao_id,
+    destinationCourse.id
   );
 
   if (!sourceResolution) {
@@ -2804,6 +2812,15 @@ export async function importCourseConfigurationModelFromBaseAction(
       "error",
       "O modelo de origem selecionado nao foi encontrado.",
       { source_model_id: "Selecione um modelo valido." },
+      submittedFormValues
+    );
+  }
+
+  if (!sourceModel.ativo) {
+    return buildActionState(
+      "error",
+      "Somente modelos ativos da base padrao podem ser importados.",
+      { source_model_id: "Selecione um modelo ativo da base padrao." },
       submittedFormValues
     );
   }
@@ -3780,7 +3797,8 @@ export async function copyFisioterapiaConfigurationAction(
   }
 
   const sourceResolution = await loadPreferredFisioterapiaSourceCourse(
-    destinationCourse.instituicao_id
+    destinationCourse.instituicao_id,
+    destinationCourse.id
   );
 
   if (!sourceResolution) {

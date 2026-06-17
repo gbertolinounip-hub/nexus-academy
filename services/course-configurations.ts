@@ -1240,6 +1240,7 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
       resolvedCopySource && resolvedCopySource.course.id !== course.id ? resolvedCopySource : null;
     const importBaseModelOptions = resolvedImportSource
       ? [...resolvedImportSource.course.models]
+          .filter((sourceModel) => sourceModel.isActive)
           .sort((left, right) => {
             const nameComparison = compareByLocale(left.name, right.name);
 
