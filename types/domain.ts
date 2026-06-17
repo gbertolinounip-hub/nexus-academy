@@ -368,6 +368,7 @@ export interface StudentDashboardData {
   finalPercentage: number;
   finalGradeOutOfTen: number;
   completionRate: number;
+  finalObservations: string | null;
   groups: StudentGroupSnapshot[];
   progress: StudentProgressPoint[];
   absences: AbsenceRecord[];

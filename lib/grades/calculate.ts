@@ -201,6 +201,13 @@ function buildProgress(
   });
 }
 
+function resolveLatestFinalObservations(evaluations: EvaluationLaunch[]) {
+  const latestEvaluation = [...evaluations].sort(compareEvaluationLaunches).at(-1);
+  const notes = latestEvaluation?.notes?.trim();
+
+  return notes ? notes : null;
+}
+
 export function buildStudentDashboardData(input: {
   student: StudentRecord;
   semester: StudentDashboardData["semester"];
@@ -231,6 +238,7 @@ export function buildStudentDashboardData(input: {
     finalPercentage,
     finalGradeOutOfTen: round(finalPercentage / 10),
     completionRate: countCompletion(flatCriteria),
+    finalObservations: resolveLatestFinalObservations(effectiveEvaluations),
     groups,
     progress: buildProgress(input.evaluations, input.absences),
     absences: [...input.absences].sort((left, right) =>

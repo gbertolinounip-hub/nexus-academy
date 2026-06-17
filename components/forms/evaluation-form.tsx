@@ -202,9 +202,6 @@ function DescriptiveCriterionField({
         defaultValue={feedbackValue ?? ""}
         disabled={disabled}
       />
-      <span className="field-help">
-        Campo opcional. Use para explicar de forma resumida a perda de ponto neste item.
-      </span>
       {feedbackError ? <span className="field-error">{feedbackError}</span> : null}
     </label>
   );
@@ -305,9 +302,6 @@ function RubricCriterionField({
         defaultValue={feedbackValue ?? ""}
         disabled={disabled}
       />
-      <span className="field-help">
-        Campo opcional. Use para complementar a observação deste critério.
-      </span>
       {feedbackError ? <span className="field-error">{feedbackError}</span> : null}
     </label>
   );
@@ -602,11 +596,11 @@ export function EvaluationForm({
       ) : null}
 
       <label className={getFieldClassName("observacoes")}>
-        <span>Observações</span>
+        <span>Observações finais</span>
         <textarea
           className={`${getInputClassName("observacoes")} textarea`}
           name="observacoes"
-          placeholder="Comentários clínicos, pedagógicos e orientações."
+          placeholder="Registre observações finais sobre o desempenho do aluno, orientações e encaminhamentos."
           rows={5}
           defaultValue={resolvedFormValues.observacoes}
           disabled={isReadOnly}

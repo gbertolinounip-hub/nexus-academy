@@ -16,7 +16,7 @@ import {
 function renderAreaDashboard(dashboard: StudentDashboardData) {
   const professorNames = dashboard.professors.length
     ? dashboard.professors.map((professor) => professor.name).join(", ")
-    : "Professor responsável ainda não vinculado";
+    : "Professor responsavel ainda nao vinculado";
 
   return (
     <>
@@ -24,17 +24,17 @@ function renderAreaDashboard(dashboard: StudentDashboardData) {
         <MetricCard
           label="Subtotal"
           value={formatPercentage(dashboard.subtotalPercentage)}
-          hint="Soma ponderada dos critérios com base no último lançamento real de cada subitem."
+          hint="Soma ponderada dos criterios com base no ultimo lancamento real de cada subitem."
           tone="positive"
         />
         <MetricCard
-          label="Desconto por ausência"
+          label="Desconto por ausencia"
           value={formatPercentage(dashboard.absencePenaltyPercentage)}
-          hint="1 ponto percentual por hora não justificada."
+          hint="1 ponto percentual por hora nao justificada."
           tone="alert"
         />
         <MetricCard
-          label="Média atual"
+          label="Media atual"
           value={formatPercentage(dashboard.finalPercentage)}
           hint={`Equivalente a ${formatGradeOutOfTen(
             dashboard.finalGradeOutOfTen
@@ -42,16 +42,16 @@ function renderAreaDashboard(dashboard: StudentDashboardData) {
           tone="positive"
         />
         <MetricCard
-          label="Conclusão dos critérios"
+          label="Conclusao dos criterios"
           value={formatPercentage(dashboard.completionRate)}
-          hint="Percentual de critérios que já receberam ao menos um lançamento."
+          hint="Percentual de criterios que ja receberam ao menos um lancamento."
         />
       </div>
 
       <div className="split-grid">
         <SectionCard
-          title="Evolução por bloco"
-          description="Pontuação acumulada por grupo de avaliação com base nos dados reais desta área."
+          title="Evolucao por bloco"
+          description="Pontuacao acumulada por grupo de avaliacao com base nos dados reais desta area."
         >
           <ProgressBars
             items={dashboard.groups.map((group) => ({
@@ -64,7 +64,7 @@ function renderAreaDashboard(dashboard: StudentDashboardData) {
 
         <SectionCard
           title="Linha do tempo"
-          description="Evolução da média a cada lançamento publicado nesta área."
+          description="Evolucao da media a cada lancamento publicado nesta area."
         >
           {dashboard.progress.length ? (
             <div className="timeline">
@@ -82,24 +82,17 @@ function renderAreaDashboard(dashboard: StudentDashboardData) {
                     ) : null}
                   </div>
                   <div className="timeline-metrics">
-                    <span>
-                      Subtotal: {formatPercentage(point.subtotalPercentage)}
-                    </span>
-                    <span>
-                      Desconto: {formatPercentage(point.absencePenaltyPercentage)}
-                    </span>
+                    <span>Subtotal: {formatPercentage(point.subtotalPercentage)}</span>
+                    <span>Desconto: {formatPercentage(point.absencePenaltyPercentage)}</span>
                     <span>Total: {formatPercentage(point.finalPercentage)}</span>
-                    <span>
-                      Conclusão: {formatPercentage(point.completionRate)}
-                    </span>
+                    <span>Conclusao: {formatPercentage(point.completionRate)}</span>
                   </div>
                 </article>
               ))}
             </div>
           ) : (
             <p className="empty-message">
-              Ainda não há lançamentos publicados para compor a linha do tempo
-              desta área.
+              Ainda nao ha lancamentos publicados para compor a linha do tempo desta area.
             </p>
           )}
         </SectionCard>
@@ -107,14 +100,25 @@ function renderAreaDashboard(dashboard: StudentDashboardData) {
 
       <SectionCard
         title="Detalhamento por subitem"
-        description="Cada critério mostra a nota mais recente, a pontuação real da área e as justificativas do supervisor quando houver."
+        description="Cada criterio mostra a nota mais recente, a pontuacao real da area e as justificativas do supervisor quando houver."
       >
         <CriteriaTable groups={dashboard.groups} collapsibleFeedback />
       </SectionCard>
 
+      {dashboard.finalObservations ? (
+        <SectionCard
+          title="Observações finais"
+          description="Sintese geral registrada pelo supervisor na avaliacao mais recente desta area."
+        >
+          <div className="management-block-card">
+            <p style={{ whiteSpace: "pre-line", margin: 0 }}>{dashboard.finalObservations}</p>
+          </div>
+        </SectionCard>
+      ) : null}
+
       <SectionCard
-        title="Ausências registradas"
-        description={`Responsáveis vinculados a esta área: ${professorNames}.`}
+        title="Ausencias registradas"
+        description={`Responsaveis vinculados a esta area: ${professorNames}.`}
       >
         {dashboard.absences.length ? (
           <ul className="detail-list">
@@ -122,15 +126,14 @@ function renderAreaDashboard(dashboard: StudentDashboardData) {
               <li key={absence.id} className="detail-item">
                 <span>{formatDate(absence.date)}</span>
                 <span>
-                  {absence.hours}h ·{" "}
-                  {absence.justified ? "Justificada" : "Não justificada"}
+                  {absence.hours}h · {absence.justified ? "Justificada" : "Nao justificada"}
                 </span>
               </li>
             ))}
           </ul>
         ) : (
           <p className="empty-message">
-            Não há ausências registradas para esta área no semestre.
+            Nao ha ausencias registradas para esta area no semestre.
           </p>
         )}
       </SectionCard>
@@ -146,14 +149,11 @@ export default async function StudentDashboardPage(props: {
   const currentUser = await requireRole(["aluno"]);
   const searchParams = (await props.searchParams) ?? {};
   const requestedEnrollmentId =
-    typeof searchParams.matricula === "string"
-      ? searchParams.matricula.trim()
-      : "";
-  const { pageData, emptyState } =
-    await getAuthenticatedStudentDashboardPageData(
-      currentUser,
-      requestedEnrollmentId || null
-    );
+    typeof searchParams.matricula === "string" ? searchParams.matricula.trim() : "";
+  const { pageData, emptyState } = await getAuthenticatedStudentDashboardPageData(
+    currentUser,
+    requestedEnrollmentId || null
+  );
 
   if (!pageData || emptyState) {
     return (
@@ -162,21 +162,21 @@ export default async function StudentDashboardPage(props: {
           <p className="eyebrow">Dashboard do aluno</p>
           <h1>{currentUser.name}</h1>
           <p>
-            Seu acesso está ativo, mas ainda não foi possível montar o painel
-            com dados acadêmicos reais.
+            Seu acesso esta ativo, mas ainda nao foi possivel montar o painel com dados
+            academicos reais.
           </p>
         </section>
 
         <SectionCard
-          title={emptyState?.title ?? "Dados acadêmicos indisponíveis"}
+          title={emptyState?.title ?? "Dados academicos indisponiveis"}
           description={
             emptyState?.description ??
-            "Ainda não encontramos dados suficientes para exibir o dashboard."
+            "Ainda nao encontramos dados suficientes para exibir o dashboard."
           }
         >
           <p className="empty-message">
-            Assim que suas matrículas, áreas e vínculos forem cadastrados no
-            sistema, este painel passará a exibir notas, evolução e ausências.
+            Assim que suas matriculas, areas e vinculos forem cadastrados no sistema, este
+            painel passara a exibir notas, evolucao e ausencias.
           </p>
         </SectionCard>
       </div>
@@ -185,8 +185,7 @@ export default async function StudentDashboardPage(props: {
 
   const isOverview = pageData.navigation.currentView === "overview";
   const selectedAreaDashboard = pageData.selectedAreaDashboard;
-  const selectedArea =
-    pageData.navigation.areas.find((area) => area.isSelected) ?? null;
+  const selectedArea = pageData.navigation.areas.find((area) => area.isSelected) ?? null;
 
   return (
     <div className="stack student-dashboard">
@@ -195,18 +194,16 @@ export default async function StudentDashboardPage(props: {
         <h1>{pageData.student.name}</h1>
         {isOverview ? (
           <p>
-            Visão consolidada do semestre {pageData.semester.code}. Escolha uma
-            área na sidebar para ver seu desempenho isolado em cada estágio.
+            Visao consolidada do semestre {pageData.semester.code}. Escolha uma area na
+            sidebar para ver seu desempenho isolado em cada estagio.
           </p>
         ) : (
           <p>
             {selectedArea?.areaName ?? selectedAreaDashboard?.classGroup.internshipArea}
-            {" · "}Semestre {pageData.semester.code} · Responsável:{" "}
+            {" · "}Semestre {pageData.semester.code} · Responsavel:{" "}
             {selectedAreaDashboard?.professors.length
-              ? selectedAreaDashboard.professors
-                  .map((professor) => professor.name)
-                  .join(", ")
-              : "Professor responsável ainda não vinculado"}
+              ? selectedAreaDashboard.professors.map((professor) => professor.name).join(", ")
+              : "Professor responsavel ainda nao vinculado"}
           </p>
         )}
       </section>
@@ -215,34 +212,34 @@ export default async function StudentDashboardPage(props: {
         <>
           <div className="metrics-grid">
             <MetricCard
-              label="Áreas no semestre"
+              label="Areas no semestre"
               value={String(pageData.overview.totalAreas)}
-              hint="Quantidade de áreas de estágio vinculadas a você no semestre principal."
+              hint="Quantidade de areas de estagio vinculadas a voce no semestre principal."
             />
             <MetricCard
-              label="Média geral"
+              label="Media geral"
               value={formatPercentage(pageData.overview.averageFinalPercentage)}
-              hint="Média das notas finais das áreas cadastradas neste semestre."
+              hint="Media das notas finais das areas cadastradas neste semestre."
               tone="positive"
             />
             <MetricCard
-              label="Conclusão média"
+              label="Conclusao media"
               value={formatPercentage(pageData.overview.averageCompletionRate)}
-              hint="Média da cobertura de critérios entre as áreas do semestre."
+              hint="Media da cobertura de criterios entre as areas do semestre."
             />
             <MetricCard
-              label="Faltas não justificadas"
+              label="Faltas nao justificadas"
               value={`${pageData.overview.totalUnjustifiedAbsenceHours
                 .toFixed(2)
                 .replace(".", ",")}h`}
-              hint={`Total de ${pageData.overview.totalPublishedLaunches} lançamentos publicados nas áreas do semestre.`}
+              hint={`Total de ${pageData.overview.totalPublishedLaunches} lancamentos publicados nas areas do semestre.`}
               tone="alert"
             />
           </div>
 
           <SectionCard
-            title="Áreas do semestre"
-            description="Cada card resume uma área de estágio. Use o botão para abrir a visão detalhada daquela matrícula."
+            title="Areas do semestre"
+            description="Cada card resume uma area de estagio. Use o botao para abrir a visao detalhada daquela matricula."
           >
             <StudentOverviewAreaCards
               currentUserId={currentUser.id}
