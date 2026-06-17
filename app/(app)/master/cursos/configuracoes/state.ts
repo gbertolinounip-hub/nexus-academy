@@ -20,6 +20,14 @@ export interface CourseConfigurationDuplicateModelFormValues {
   model_id: string;
 }
 
+export interface CourseConfigurationImportModelFormValues {
+  destination_course_id: string;
+  source_model_id: string;
+  nome: string;
+  codigo: string;
+  copiar_regras_portateis: string;
+}
+
 export interface CourseConfigurationCreateGroupFormValues {
   course_id: string;
   model_id: string;
@@ -185,6 +193,11 @@ export const initialCourseConfigurationDuplicateModelActionState:
     ...createInitialCourseConfigurationActionState<CourseConfigurationDuplicateModelFormValues>()
   };
 
+export const initialCourseConfigurationImportModelActionState:
+  CourseConfigurationActionState<CourseConfigurationImportModelFormValues> = {
+    ...createInitialCourseConfigurationActionState<CourseConfigurationImportModelFormValues>()
+  };
+
 export const initialCourseConfigurationCreateGroupActionState:
   CourseConfigurationActionState<CourseConfigurationCreateGroupFormValues> = {
     ...createInitialCourseConfigurationActionState<CourseConfigurationCreateGroupFormValues>()
@@ -274,6 +287,22 @@ export function createEmptyCourseConfigurationDuplicateModelFormValues(
 ): CourseConfigurationDuplicateModelFormValues {
   return {
     model_id: modelId
+  };
+}
+
+export function createEmptyCourseConfigurationImportModelFormValues(
+  destinationCourseId = "",
+  sourceModelId = "",
+  name = "",
+  code = "",
+  copyPortableRules = "true"
+): CourseConfigurationImportModelFormValues {
+  return {
+    destination_course_id: destinationCourseId,
+    source_model_id: sourceModelId,
+    nome: name,
+    codigo: code,
+    copiar_regras_portateis: copyPortableRules
   };
 }
 

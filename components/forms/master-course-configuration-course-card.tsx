@@ -11,6 +11,7 @@ import {
 } from "@/app/(app)/master/cursos/configuracoes/state";
 import {
   MasterCourseConfigurationCreateModelForm,
+  MasterCourseConfigurationImportModelForm,
   MasterCourseConfigurationCreateCriterionForm,
   MasterCourseConfigurationCreateGroupForm,
   MasterCourseConfigurationCreateRequiredDocumentForm,
@@ -134,6 +135,7 @@ export function MasterCourseConfigurationCourseCard({
   );
   const [isExpanded, setIsExpanded] = useState(false);
   const [isCreatingModel, setIsCreatingModel] = useState(false);
+  const [isImportingModel, setIsImportingModel] = useState(false);
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [isCreatingCriterion, setIsCreatingCriterion] = useState(false);
   const [isCreatingRequiredDocument, setIsCreatingRequiredDocument] = useState(false);
@@ -265,22 +267,51 @@ export function MasterCourseConfigurationCourseCard({
                 <h4>Modelos de avaliacao</h4>
                 <p className="field-help">
                   Cada modelo tem modalidade, grupos, criterios e regras proprias. Use este
-                  bloco para criar um modelo novo do zero ou duplicar um modelo existente.
+                  bloco para criar um modelo novo do zero, importar um modelo da base padrao
+                  ou duplicar um modelo local existente.
                 </p>
               </div>
-              <button
-                className="button button-secondary"
-                type="button"
-                onClick={() => setIsCreatingModel((currentValue) => !currentValue)}
-              >
-                {course.models.length ? "Adicionar novo modelo" : "Adicionar modelo"}
-              </button>
+              <div className="actions-row">
+                {course.importBaseModelOptions.length ? (
+                  <button
+                    className="button button-secondary"
+                    type="button"
+                    onClick={() => {
+                      setIsImportingModel((currentValue) => !currentValue);
+                      setIsCreatingModel(false);
+                    }}
+                  >
+                    Importar modelo da base padrao
+                  </button>
+                ) : null}
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  onClick={() => {
+                    setIsCreatingModel((currentValue) => !currentValue);
+                    setIsImportingModel(false);
+                  }}
+                >
+                  {course.models.length ? "Adicionar novo modelo" : "Adicionar modelo"}
+                </button>
+              </div>
             </div>
             {isCreatingModel ? (
               <div className="master-inline-action-panel">
                 <MasterCourseConfigurationCreateModelForm
                   courseId={course.id}
                   models={course.models}
+                />
+              </div>
+            ) : null}
+            {isImportingModel &&
+            course.importBaseSourceLabel &&
+            course.importBaseModelOptions.length ? (
+              <div className="master-inline-action-panel">
+                <MasterCourseConfigurationImportModelForm
+                  courseId={course.id}
+                  sourceLabel={course.importBaseSourceLabel}
+                  sourceModels={course.importBaseModelOptions}
                 />
               </div>
             ) : null}

@@ -17,6 +17,7 @@ import type {
   CourseConfigurationDeleteCriterionFormValues,
   CourseConfigurationDeleteGroupFormValues,
   CourseConfigurationDuplicateModelFormValues,
+  CourseConfigurationImportModelFormValues,
   CourseConfigurationDeleteRequiredDocumentFormValues,
   CourseConfigurationCriterionFormValues,
   CourseConfigurationCriterionOptionFormValues,
@@ -93,6 +94,24 @@ const createModelConfigurationSchema = z.object({
 
 const duplicateModelConfigurationSchema = z.object({
   model_id: z.string().uuid("Modelo invalido.")
+});
+
+const importModelConfigurationSchema = z.object({
+  destination_course_id: z.string().uuid("Curso destino invalido."),
+  source_model_id: z.string().uuid("Modelo de origem invalido."),
+  nome: z
+    .string()
+    .trim()
+    .min(3, "Informe o nome do modelo importado.")
+    .max(160, "O nome do modelo importado deve ter no maximo 160 caracteres."),
+  codigo: z
+    .string()
+    .trim()
+    .min(1, "Informe o codigo do modelo importado.")
+    .max(120, "O codigo do modelo importado deve ter no maximo 120 caracteres."),
+  copiar_regras_portateis: z.enum(["true", "false"], {
+    message: "Selecione se as regras portaveis devem ser copiadas."
+  })
 });
 
 const createGroupConfigurationSchema = z.object({
@@ -484,6 +503,16 @@ function buildDuplicateModelFormValues(
 ): CourseConfigurationDuplicateModelFormValues {
   return {
     model_id: readStringField(formData, "model_id")
+  };
+}
+
+function buildImportModelFormValues(formData: FormData): CourseConfigurationImportModelFormValues {
+  return {
+    destination_course_id: readStringField(formData, "destination_course_id"),
+    source_model_id: readStringField(formData, "source_model_id"),
+    nome: readStringField(formData, "nome"),
+    codigo: readStringField(formData, "codigo"),
+    copiar_regras_portateis: readStringField(formData, "copiar_regras_portateis")
   };
 }
 
@@ -1187,6 +1216,21 @@ function hasAnyModelApplicationScope(input: {
       input.semesterId ??
       input.classId ??
       input.stageAreaId
+  );
+}
+
+function isPortableCurricularModelApplicationRule(
+  rule: Pick<
+    ModelApplicationRuleRow,
+    "oferta_curso_unidade_id" | "periodo_curricular" | "semestre_id" | "turma_id" | "area_estagio_id"
+  >
+) {
+  return (
+    rule.periodo_curricular !== null &&
+    !rule.oferta_curso_unidade_id &&
+    !rule.semestre_id &&
+    !rule.turma_id &&
+    !rule.area_estagio_id
   );
 }
 
@@ -2695,6 +2739,436 @@ export async function duplicateCourseConfigurationModelAction(
   return buildActionState(
     "success",
     `Modelo ${sourceModel.nome} duplicado com sucesso. O clone foi criado sem regra de aplicacao e sem virar padrao automaticamente.`,
+    {},
+    submittedFormValues
+  );
+}
+
+export async function importCourseConfigurationModelFromBaseAction(
+  _previousState: CourseConfigurationActionState<CourseConfigurationImportModelFormValues>,
+  formData: FormData
+): Promise<CourseConfigurationActionState<CourseConfigurationImportModelFormValues>> {
+  await requireRole(["coordenador_master"]);
+  const submittedFormValues = buildImportModelFormValues(formData);
+  const parsedData = importModelConfigurationSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return buildActionState(
+      "error",
+      "Revise os campos da importacao do modelo.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const destinationCourse = await loadCourse(parsedData.data.destination_course_id);
+
+  if (!destinationCourse) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel localizar o curso destino.",
+      { destination_course_id: "Selecione um curso valido." },
+      submittedFormValues
+    );
+  }
+
+  if (!destinationCourse.ativo) {
+    return buildActionState(
+      "error",
+      "O curso destino precisa estar ativo para receber modelos importados.",
+      { destination_course_id: "Ative o curso antes de importar um modelo." },
+      submittedFormValues
+    );
+  }
+
+  const sourceResolution = await loadPreferredFisioterapiaSourceCourse(
+    destinationCourse.instituicao_id
+  );
+
+  if (!sourceResolution) {
+    return buildActionState(
+      "error",
+      "Nenhuma base padrao de Fisioterapia configurada foi encontrada para importar modelos.",
+      {
+        destination_course_id:
+          "Nao existe base padrao disponivel para esta importacao."
+      },
+      submittedFormValues
+    );
+  }
+
+  const sourceModel = await loadModel(parsedData.data.source_model_id);
+
+  if (!sourceModel) {
+    return buildActionState(
+      "error",
+      "O modelo de origem selecionado nao foi encontrado.",
+      { source_model_id: "Selecione um modelo valido." },
+      submittedFormValues
+    );
+  }
+
+  if (sourceModel.curso_id !== sourceResolution.course.id) {
+    return buildActionState(
+      "error",
+      "O modelo selecionado nao pertence a base padrao disponivel para este curso.",
+      {
+        source_model_id:
+          "Selecione um modelo da base indicada nesta tela."
+      },
+      submittedFormValues
+    );
+  }
+
+  if (sourceModel.curso_id === destinationCourse.id) {
+    return buildActionState(
+      "error",
+      "Este curso ja e a origem do modelo informado. Use a acao local de duplicar modelo para criar uma variacao interna.",
+      {
+        source_model_id:
+          "Escolha um modelo de outra base ou use Duplicar modelo."
+      },
+      submittedFormValues
+    );
+  }
+
+  const sourceCourse = await loadCourse(sourceModel.curso_id);
+
+  if (!sourceCourse) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel localizar o curso de origem do modelo selecionado.",
+      { source_model_id: "Origem do modelo indisponivel." },
+      submittedFormValues
+    );
+  }
+
+  const normalizedCode = normalizeCode(parsedData.data.codigo);
+
+  if (!normalizedCode) {
+    return buildActionState(
+      "error",
+      "Informe um codigo valido para o modelo importado.",
+      { codigo: "Use letras, numeros, hifen ou underline no codigo." },
+      submittedFormValues
+    );
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const sourceGroupsResult = await adminClient
+    .from("grupos_modelo_avaliacao")
+    .select("*")
+    .eq("modelo_avaliacao_curso_id", sourceModel.id)
+    .order("ordem", { ascending: true });
+
+  if (sourceGroupsResult.error) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel carregar os grupos do modelo de origem.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const sourceGroups = (sourceGroupsResult.data ?? []) as GroupRow[];
+  const sourceGroupIds = sourceGroups.map((groupRow) => groupRow.id);
+  const sourceCriteriaResult = sourceGroupIds.length
+    ? await adminClient
+        .from("criterios_modelo_avaliacao")
+        .select("*")
+        .in("grupo_modelo_avaliacao_id", sourceGroupIds)
+        .order("ordem", { ascending: true })
+    : { data: [], error: null };
+
+  if (sourceCriteriaResult.error) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel carregar os criterios do modelo de origem.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const sourceCriteria = (sourceCriteriaResult.data ?? []) as CriterionRow[];
+  const sourceCriterionIds = sourceCriteria.map((criterionRow) => criterionRow.id);
+  const sourceCriterionOptionsResult = sourceCriterionIds.length
+    ? await adminClient
+        .from("opcoes_criterio_modelo_avaliacao")
+        .select("*")
+        .in("criterio_modelo_avaliacao_id", sourceCriterionIds)
+        .order("ordem", { ascending: true })
+    : { data: [], error: null };
+
+  if (sourceCriterionOptionsResult.error) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel carregar as opcoes de rubrica do modelo de origem.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const shouldCopyPortableRules = toBooleanValue(parsedData.data.copiar_regras_portateis);
+  const sourceApplicationRulesResult = shouldCopyPortableRules
+    ? await adminClient
+        .from("regras_aplicacao_modelo_avaliacao")
+        .select("*")
+        .eq("modelo_avaliacao_curso_id", sourceModel.id)
+        .order("prioridade", { ascending: false })
+    : { data: [], error: null };
+
+  if (sourceApplicationRulesResult.error) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel carregar as regras de aplicacao do modelo de origem.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const sourceCriterionOptions =
+    (sourceCriterionOptionsResult.data ?? []) as CriterionOptionRow[];
+  const sourcePortableRules = ((sourceApplicationRulesResult.data ?? []) as ModelApplicationRuleRow[])
+    .filter(isPortableCurricularModelApplicationRule);
+  const sourceCriteriaByGroupId = new Map<string, CriterionRow[]>();
+  const sourceOptionsByCriterionId = new Map<string, CriterionOptionRow[]>();
+
+  for (const sourceCriterion of sourceCriteria) {
+    const currentCriteria = sourceCriteriaByGroupId.get(sourceCriterion.grupo_modelo_avaliacao_id);
+
+    if (currentCriteria) {
+      currentCriteria.push(sourceCriterion);
+    } else {
+      sourceCriteriaByGroupId.set(sourceCriterion.grupo_modelo_avaliacao_id, [sourceCriterion]);
+    }
+  }
+
+  for (const sourceCriterionOption of sourceCriterionOptions) {
+    const currentOptions = sourceOptionsByCriterionId.get(
+      sourceCriterionOption.criterio_modelo_avaliacao_id
+    );
+
+    if (currentOptions) {
+      currentOptions.push(sourceCriterionOption);
+    } else {
+      sourceOptionsByCriterionId.set(sourceCriterionOption.criterio_modelo_avaliacao_id, [
+        sourceCriterionOption
+      ]);
+    }
+  }
+
+  const nextVersion = await resolveNextCourseModelVersion(destinationCourse.id);
+  const importedModelCode = await resolveAvailableModelCode(normalizedCode);
+  const importedDescription = replaceCourseNameInText(
+    sourceModel.descricao,
+    sourceCourse.nome,
+    destinationCourse.nome
+  );
+  const createdGroupIds: string[] = [];
+  const createdCriterionIds: string[] = [];
+  const createdRuleIds: string[] = [];
+  let createdModelId: string | null = null;
+
+  try {
+    const importedModelPayload: ModelInsert = {
+      curso_id: destinationCourse.id,
+      codigo: importedModelCode,
+      nome: parsedData.data.nome,
+      descricao: importedDescription,
+      versao: nextVersion,
+      modalidade: sourceModel.modalidade,
+      padrao_lancamento: false,
+      ativo: sourceModel.ativo,
+      metadata: mergeCopiedMetadata(sourceModel.metadata, {
+        source_course_id: sourceCourse.id,
+        source_course_code: sourceCourse.codigo,
+        source_model_id: sourceModel.id,
+        source_label: sourceResolution.label,
+        imported_at: new Date().toISOString(),
+        imported_by: "importCourseConfigurationModelFromBaseAction",
+        copied_portable_rules: shouldCopyPortableRules
+      })
+    };
+
+    const insertedModelResult = await adminClient
+      .from("modelos_avaliacao_curso")
+      .insert(importedModelPayload as never)
+      .select("id")
+      .single();
+    const insertedModelData = insertedModelResult.data as { id: string } | null;
+
+    if (insertedModelResult.error || !insertedModelData) {
+      throw new Error("Nao foi possivel criar o modelo importado no curso destino.");
+    }
+
+    createdModelId = insertedModelData.id;
+
+    for (const sourceGroup of sourceGroups) {
+      const groupInsertPayload: GroupInsert = {
+        modelo_avaliacao_curso_id: createdModelId,
+        codigo: sourceGroup.codigo,
+        nome: sourceGroup.nome,
+        ordem: sourceGroup.ordem,
+        peso_percentual: sourceGroup.peso_percentual,
+        ativo: sourceGroup.ativo,
+        metadata: mergeCopiedMetadata(sourceGroup.metadata, {
+          source_course_id: sourceCourse.id,
+          source_course_code: sourceCourse.codigo,
+          source_group_id: sourceGroup.id,
+          source_model_id: sourceModel.id,
+          imported_at: new Date().toISOString(),
+          imported_by: "importCourseConfigurationModelFromBaseAction"
+        })
+      };
+
+      const insertedGroupResult = await adminClient
+        .from("grupos_modelo_avaliacao")
+        .insert(groupInsertPayload as never)
+        .select("id")
+        .single();
+      const insertedGroupData = insertedGroupResult.data as { id: string } | null;
+
+      if (insertedGroupResult.error || !insertedGroupData) {
+        throw new Error("Nao foi possivel copiar um dos grupos do modelo importado.");
+      }
+
+      createdGroupIds.push(insertedGroupData.id);
+
+      for (const sourceCriterion of sourceCriteriaByGroupId.get(sourceGroup.id) ?? []) {
+        const criterionInsertPayload: CriterionInsert = {
+          grupo_modelo_avaliacao_id: insertedGroupData.id,
+          codigo: sourceCriterion.codigo,
+          nome: sourceCriterion.nome,
+          descricao: sourceCriterion.descricao,
+          ordem: sourceCriterion.ordem,
+          peso_percentual: sourceCriterion.peso_percentual,
+          escala_maxima: sourceCriterion.escala_maxima,
+          ativo: sourceCriterion.ativo,
+          metadata: mergeCopiedMetadata(sourceCriterion.metadata, {
+            source_course_id: sourceCourse.id,
+            source_course_code: sourceCourse.codigo,
+            source_group_id: sourceGroup.id,
+            source_criterion_id: sourceCriterion.id,
+            source_model_id: sourceModel.id,
+            imported_at: new Date().toISOString(),
+            imported_by: "importCourseConfigurationModelFromBaseAction"
+          })
+        };
+
+        const insertedCriterionResult = await adminClient
+          .from("criterios_modelo_avaliacao")
+          .insert(criterionInsertPayload as never)
+          .select("id")
+          .single();
+        const insertedCriterionData =
+          insertedCriterionResult.data as { id: string } | null;
+
+        if (insertedCriterionResult.error || !insertedCriterionData) {
+          throw new Error("Nao foi possivel copiar um dos criterios do modelo importado.");
+        }
+
+        createdCriterionIds.push(insertedCriterionData.id);
+
+        for (const sourceCriterionOption of sourceOptionsByCriterionId.get(sourceCriterion.id) ?? []) {
+          const criterionOptionInsertPayload: CriterionOptionInsert = {
+            criterio_modelo_avaliacao_id: insertedCriterionData.id,
+            rotulo: sourceCriterionOption.rotulo,
+            descricao: sourceCriterionOption.descricao,
+            valor_nota: sourceCriterionOption.valor_nota,
+            ordem: sourceCriterionOption.ordem,
+            ativo: sourceCriterionOption.ativo
+          };
+
+          const insertedCriterionOptionResult = await adminClient
+            .from("opcoes_criterio_modelo_avaliacao")
+            .insert(criterionOptionInsertPayload as never)
+            .select("id")
+            .single();
+
+          if (insertedCriterionOptionResult.error || !insertedCriterionOptionResult.data) {
+            throw new Error(
+              "Nao foi possivel copiar as opcoes de rubrica do modelo importado."
+            );
+          }
+        }
+      }
+    }
+
+    if (shouldCopyPortableRules) {
+      for (const sourceRule of sourcePortableRules) {
+        const portableRulePayload: ModelApplicationRuleInsert = {
+          modelo_avaliacao_curso_id: createdModelId,
+          oferta_curso_unidade_id: null,
+          periodo_curricular: sourceRule.periodo_curricular,
+          semestre_id: null,
+          turma_id: null,
+          area_estagio_id: null,
+          prioridade: sourceRule.prioridade,
+          ativo: sourceRule.ativo,
+          metadata: mergeCopiedMetadata(sourceRule.metadata, {
+            source_course_id: sourceCourse.id,
+            source_course_code: sourceCourse.codigo,
+            source_model_id: sourceModel.id,
+            source_rule_id: sourceRule.id,
+            imported_at: new Date().toISOString(),
+            imported_by: "importCourseConfigurationModelFromBaseAction",
+            portability_scope: "periodo_curricular"
+          })
+        };
+
+        const insertedRuleResult = await adminClient
+          .from("regras_aplicacao_modelo_avaliacao")
+          .insert(portableRulePayload as never)
+          .select("id")
+          .single();
+        const insertedRuleData = insertedRuleResult.data as { id: string } | null;
+
+        if (insertedRuleResult.error || !insertedRuleData) {
+          throw new Error(
+            "Nao foi possivel copiar uma das regras portaveis por periodo curricular."
+          );
+        }
+
+        createdRuleIds.push(insertedRuleData.id);
+      }
+    }
+  } catch (error) {
+    if (createdRuleIds.length) {
+      await adminClient
+        .from("regras_aplicacao_modelo_avaliacao")
+        .delete()
+        .in("id", createdRuleIds);
+    }
+
+    if (createdCriterionIds.length) {
+      await adminClient.from("criterios_modelo_avaliacao").delete().in("id", createdCriterionIds);
+    }
+
+    if (createdGroupIds.length) {
+      await adminClient.from("grupos_modelo_avaliacao").delete().in("id", createdGroupIds);
+    }
+
+    if (createdModelId) {
+      await adminClient.from("modelos_avaliacao_curso").delete().eq("id", createdModelId);
+    }
+
+    return buildActionState(
+      "error",
+      error instanceof Error
+        ? error.message
+        : "Nao foi possivel importar o modelo da base padrao.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  revalidateCourseConfigurationPaths();
+
+  return buildActionState(
+    "success",
+    shouldCopyPortableRules
+      ? "Modelo importado com sucesso. Grupos, criterios, opcoes de rubrica e regras portaveis por periodo curricular foram copiados para este curso."
+      : "Modelo importado com sucesso. Grupos, criterios e opcoes de rubrica foram copiados para este curso.",
     {},
     submittedFormValues
   );

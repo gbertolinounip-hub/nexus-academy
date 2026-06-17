@@ -163,6 +163,19 @@ export interface CourseConfigurationModelApplicationRuleOptions {
   areas: CourseConfigurationModelApplicationAreaOption[];
 }
 
+export interface CourseConfigurationImportableModelOption {
+  id: string;
+  sourceCourseId: string;
+  code: string;
+  name: string;
+  modality: ModelRow["modalidade"];
+  version: number;
+  groupCount: number;
+  criterionCount: number;
+  rubricOptionCount: number;
+  portableCurricularRuleCount: number;
+}
+
 export interface CourseConfigurationCourseEntry {
   id: string;
   institutionId: string;
@@ -180,6 +193,8 @@ export interface CourseConfigurationCourseEntry {
   canDuplicateFromFisioterapia: boolean;
   duplicateBaseBlockedReason: string | null;
   duplicateBaseSourceLabel: string | null;
+  importBaseSourceLabel: string | null;
+  importBaseModelOptions: CourseConfigurationImportableModelOption[];
   hasReusableInitialModel: boolean;
   models: CourseConfigurationModelEntry[];
   groups: CourseConfigurationGroupEntry[];
@@ -598,6 +613,22 @@ function resolveFisioterapiaSourceForCourse(
     scope: "global_default" as const,
     label: buildFisioterapiaSourceLabel(globalSource, "global_default")
   };
+}
+
+function isPortableCurricularApplicationRule(rule: {
+  offerId: string | null;
+  curricularPeriod: number | null;
+  semesterId: string | null;
+  classId: string | null;
+  stageAreaId: string | null;
+}) {
+  return (
+    rule.curricularPeriod !== null &&
+    !rule.offerId &&
+    !rule.semesterId &&
+    !rule.classId &&
+    !rule.stageAreaId
+  );
 }
 
 export async function getCourseConfigurationPageData(): Promise<CourseConfigurationPageData> {
@@ -1058,6 +1089,8 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
         canDuplicateFromFisioterapia: false,
         duplicateBaseBlockedReason: null,
         duplicateBaseSourceLabel: null,
+        importBaseSourceLabel: null,
+        importBaseModelOptions: [],
         hasReusableInitialModel: false,
         applicationRuleOptions,
         models: sourceModels.map((modelRow) => {
@@ -1203,11 +1236,54 @@ export async function getCourseConfigurationPageData(): Promise<CourseConfigurat
       course,
       configuredFisioterapiaCourses
     );
+    const resolvedImportSource =
+      resolvedCopySource && resolvedCopySource.course.id !== course.id ? resolvedCopySource : null;
+    const importBaseModelOptions = resolvedImportSource
+      ? [...resolvedImportSource.course.models]
+          .sort((left, right) => {
+            const nameComparison = compareByLocale(left.name, right.name);
+
+            if (nameComparison !== 0) {
+              return nameComparison;
+            }
+
+            return left.version - right.version;
+          })
+          .map((sourceModel) => {
+            const modelGroups = resolvedImportSource.course.groups.filter(
+              (group) => group.modelId === sourceModel.id
+            );
+            const modelGroupIds = new Set(modelGroups.map((group) => group.id));
+            const modelCriteria = resolvedImportSource.course.criteria.filter((criterion) =>
+              modelGroupIds.has(criterion.groupId)
+            );
+
+            return {
+              id: sourceModel.id,
+              sourceCourseId: resolvedImportSource.course.id,
+              code: sourceModel.code,
+              name: sourceModel.name,
+              modality: sourceModel.modality,
+              version: sourceModel.version,
+              groupCount: modelGroups.length,
+              criterionCount: modelCriteria.length,
+              rubricOptionCount: modelCriteria.reduce(
+                (total, criterion) => total + criterion.rubricOptions.length,
+                0
+              ),
+              portableCurricularRuleCount: sourceModel.applicationRules.filter(
+                isPortableCurricularApplicationRule
+              ).length
+            } satisfies CourseConfigurationImportableModelOption;
+          })
+      : [];
 
     return {
       ...course,
       sourceConfigurationAvailable: Boolean(resolvedCopySource),
       duplicateBaseSourceLabel: resolvedCopySource?.label ?? null,
+      importBaseSourceLabel: resolvedImportSource?.label ?? null,
+      importBaseModelOptions,
       ...resolveDuplicateBaseState({
         courseId: course.id,
         sourceCourseId: resolvedCopySource?.course.id ?? null,

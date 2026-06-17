@@ -12,6 +12,7 @@ import {
   createCourseConfigurationGroupAction,
   createCourseRequiredDocumentAction,
   duplicateCourseConfigurationModelAction,
+  importCourseConfigurationModelFromBaseAction,
   setCourseConfigurationModelLaunchDefaultAction,
   deleteCourseConfigurationCriterionAction,
   deleteCourseConfigurationGroupAction,
@@ -25,6 +26,7 @@ import {
 import {
   createEmptyCourseConfigurationCreateModelFormValues,
   createEmptyCourseConfigurationDuplicateModelFormValues,
+  createEmptyCourseConfigurationImportModelFormValues,
   createEmptyCourseConfigurationCreateCriterionFormValues,
   createEmptyCourseConfigurationCreateCriterionOptionFormValues,
   createEmptyCourseConfigurationCreateGroupFormValues,
@@ -38,6 +40,7 @@ import {
   initialCourseConfigurationCreateCriterionOptionActionState,
   initialCourseConfigurationCreateGroupActionState,
   initialCourseConfigurationDuplicateModelActionState,
+  initialCourseConfigurationImportModelActionState,
   initialCourseConfigurationCreateRequiredDocumentActionState,
   initialCourseConfigurationSetLaunchDefaultActionState,
   type CourseConfigurationActionState,
@@ -45,6 +48,7 @@ import {
   type CourseConfigurationCreateCriterionFormValues,
   type CourseConfigurationCreateCriterionOptionFormValues,
   type CourseConfigurationCreateGroupFormValues,
+  type CourseConfigurationImportModelFormValues,
   type CourseConfigurationCreateRequiredDocumentFormValues,
   type CourseConfigurationDeleteCriterionFormValues,
   type CourseConfigurationDuplicateModelFormValues,
@@ -61,6 +65,7 @@ import type {
   CourseConfigurationCriterionOptionEntry,
   CourseConfigurationDocumentTypeOption,
   CourseConfigurationGroupEntry,
+  CourseConfigurationImportableModelOption,
   CourseConfigurationModelApplicationRuleEntry,
   CourseConfigurationModelEntry,
   CourseConfigurationModelApplicationRuleOptions,
@@ -130,6 +135,31 @@ function buildCreateModelDraft(
   return createEmptyCourseConfigurationCreateModelFormValues(
     courseId,
     getNextModelVersionValue(models)
+  );
+}
+
+function buildImportedModelCode(sourceModel: CourseConfigurationImportableModelOption) {
+  return normalizeCodeInput(`${sourceModel.code}_IMP`);
+}
+
+function buildImportModelDraft(
+  courseId: string,
+  sourceModels: CourseConfigurationImportableModelOption[],
+  preferredSourceModelId?: string
+): CourseConfigurationImportModelFormValues {
+  const fallbackSourceModel =
+    (preferredSourceModelId
+      ? sourceModels.find((sourceModel) => sourceModel.id === preferredSourceModelId)
+      : null) ??
+    sourceModels[0] ??
+    null;
+
+  return createEmptyCourseConfigurationImportModelFormValues(
+    courseId,
+    fallbackSourceModel?.id ?? "",
+    fallbackSourceModel?.name ?? "",
+    fallbackSourceModel ? buildImportedModelCode(fallbackSourceModel) : "",
+    "true"
   );
 }
 
@@ -675,6 +705,183 @@ export function MasterCourseConfigurationCreateModelForm({
       <div className="actions-row">
         <button className="button button-secondary" type="submit">
           Salvar novo modelo
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function MasterCourseConfigurationImportModelForm({
+  courseId,
+  sourceLabel,
+  sourceModels
+}: {
+  courseId: string;
+  sourceLabel: string;
+  sourceModels: CourseConfigurationImportableModelOption[];
+}) {
+  const [state, formAction] = useActionState(
+    importCourseConfigurationModelFromBaseAction,
+    initialCourseConfigurationImportModelActionState
+  );
+  const safeState = state ?? initialCourseConfigurationImportModelActionState;
+  const fieldErrors = safeState.fieldErrors ?? {};
+  const [draft, setDraft] = useState<CourseConfigurationImportModelFormValues>(() =>
+    buildImportModelDraft(courseId, sourceModels)
+  );
+
+  useEffect(() => {
+    if (safeState.status === "error" && safeState.formValues) {
+      setDraft({ ...safeState.formValues });
+      return;
+    }
+
+    setDraft(buildImportModelDraft(courseId, sourceModels, draft.source_model_id));
+  }, [
+    courseId,
+    draft.source_model_id,
+    safeState.formValues,
+    safeState.status,
+    safeState.submittedAt,
+    sourceModels
+  ]);
+
+  function updateDraft(field: keyof CourseConfigurationImportModelFormValues, value: string) {
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value
+    }));
+  }
+
+  function handleSourceModelChange(nextSourceModelId: string) {
+    const nextDraft = buildImportModelDraft(courseId, sourceModels, nextSourceModelId);
+
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      source_model_id: nextDraft.source_model_id,
+      nome: nextDraft.nome,
+      codigo: nextDraft.codigo
+    }));
+  }
+
+  const selectedSourceModel =
+    sourceModels.find((sourceModel) => sourceModel.id === draft.source_model_id) ??
+    sourceModels[0] ??
+    null;
+
+  return (
+    <form action={formAction} className="form-stack master-course-configuration-edit-form">
+      <input type="hidden" name="destination_course_id" value={draft.destination_course_id} />
+      {renderNotice(safeState)}
+
+      <div className="form-notice">
+        <strong>Origem da base padrao</strong>
+        <p className="field-help">{sourceLabel}</p>
+      </div>
+
+      <div className="form-grid">
+        <label className={getFieldClassName(fieldErrors, "source_model_id")}>
+          <span>Modelo de origem</span>
+          <select
+            className={getInputClassName(fieldErrors, "source_model_id")}
+            name="source_model_id"
+            value={draft.source_model_id}
+            onChange={(event) => handleSourceModelChange(event.currentTarget.value)}
+          >
+            {sourceModels.map((sourceModel) => (
+              <option key={sourceModel.id} value={sourceModel.id}>
+                {sourceModel.name} ({sourceModel.code})
+              </option>
+            ))}
+          </select>
+          {fieldErrors.source_model_id ? (
+            <span className="field-error">{fieldErrors.source_model_id}</span>
+          ) : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "nome")}>
+          <span>Nome do novo modelo</span>
+          <input
+            className={getInputClassName(fieldErrors, "nome")}
+            name="nome"
+            value={draft.nome}
+            onChange={(event) => updateDraft("nome", event.currentTarget.value)}
+          />
+          {fieldErrors.nome ? <span className="field-error">{fieldErrors.nome}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "codigo")}>
+          <span>Codigo sugerido</span>
+          <input
+            className={getInputClassName(fieldErrors, "codigo")}
+            name="codigo"
+            value={draft.codigo}
+            onChange={(event) => updateDraft("codigo", normalizeCodeInput(event.currentTarget.value))}
+          />
+          {fieldErrors.codigo ? <span className="field-error">{fieldErrors.codigo}</span> : null}
+        </label>
+
+        <label className={getFieldClassName(fieldErrors, "copiar_regras_portateis")}>
+          <span>Regras por periodo curricular</span>
+          <select
+            className={getInputClassName(fieldErrors, "copiar_regras_portateis")}
+            name="copiar_regras_portateis"
+            value={draft.copiar_regras_portateis}
+            onChange={(event) =>
+              updateDraft("copiar_regras_portateis", event.currentTarget.value)
+            }
+          >
+            <option value="true">Copiar regras portaveis</option>
+            <option value="false">Nao copiar regras</option>
+          </select>
+          {fieldErrors.copiar_regras_portateis ? (
+            <span className="field-error">{fieldErrors.copiar_regras_portateis}</span>
+          ) : null}
+        </label>
+      </div>
+
+      {selectedSourceModel ? (
+        <div className="management-block-card">
+          <div className="management-block-header">
+            <div>
+              <strong>{selectedSourceModel.name}</strong>
+              <p className="field-help">
+                {getModelModalityLabel(selectedSourceModel.modality)} · versao{" "}
+                {selectedSourceModel.version}
+              </p>
+            </div>
+            <span
+              className={`status-pill ${getCourseConfigurationModelBadgeTone(selectedSourceModel.modality)}`}
+            >
+              {getModelModalityLabel(selectedSourceModel.modality)}
+            </span>
+          </div>
+          <div className="management-tag-list">
+            <span className="badge badge-muted">
+              {selectedSourceModel.groupCount} grupo(s)
+            </span>
+            <span className="badge badge-muted">
+              {selectedSourceModel.criterionCount} criterio(s)
+            </span>
+            <span className="badge badge-muted">
+              {selectedSourceModel.rubricOptionCount} opcao(oes) de rubrica
+            </span>
+            <span className="badge badge-muted">
+              {selectedSourceModel.portableCurricularRuleCount} regra(s) portavel(is)
+            </span>
+          </div>
+          <p className="field-help">
+            A importacao cria um novo modelo local com grupos, criterios e opcoes de rubrica
+            remapeados. Regras com turma, semestre, area ou oferta nao sao copiadas
+            automaticamente. O modelo importado nasce como complementar e nao vira padrao
+            para lancamento sozinho.
+          </p>
+        </div>
+      ) : null}
+
+      <div className="actions-row">
+        <button className="button button-secondary" type="submit" disabled={!sourceModels.length}>
+          Importar modelo da base padrao
         </button>
       </div>
     </form>
