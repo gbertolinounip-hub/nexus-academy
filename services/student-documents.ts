@@ -1919,6 +1919,32 @@ export async function getStudentDocumentUnreadNotificationCount(
   return count ?? 0;
 }
 
+export async function getProfessorPendingStudentDocumentCount(
+  currentUser: SessionUser
+): Promise<number> {
+  if (currentUser.role !== "professor") {
+    return 0;
+  }
+
+  try {
+    const { studentIds } = await loadStudentUsersByScope({
+      currentUser,
+      viewerRole: "professor"
+    });
+
+    if (!studentIds.length) {
+      return 0;
+    }
+
+    const context = await loadStudentDocumentScopeByStudentIds(studentIds);
+    const entries = buildDirectoryEntries(context, "professor");
+
+    return entries.reduce((sum, entry) => sum + entry.pendingCount, 0);
+  } catch {
+    return 0;
+  }
+}
+
 export async function getStudentDocumentScopeForCurrentStudent(
   currentUser: SessionUser
 ) {

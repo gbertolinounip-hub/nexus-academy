@@ -4,7 +4,10 @@ import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { joinDisplayParts } from "@/lib/utils/format";
 import { getAuthenticatedStudentDashboardPageData } from "@/services/dashboard";
 import { getClinicalUnreadNotificationCount } from "@/services/clinical-supervision";
-import { getStudentDocumentUnreadNotificationCount } from "@/services/student-documents";
+import {
+  getProfessorPendingStudentDocumentCount,
+  getStudentDocumentUnreadNotificationCount
+} from "@/services/student-documents";
 
 export default async function AppLayout({
   children
@@ -21,6 +24,10 @@ export default async function AppLayout({
   const studentDocumentUnreadNotificationCount =
     currentUser.role === "aluno"
       ? await getStudentDocumentUnreadNotificationCount(currentUser)
+      : 0;
+  const professorPendingStudentDocumentCount =
+    currentUser.role === "professor"
+      ? await getProfessorPendingStudentDocumentCount(currentUser)
       : 0;
   const studentSecondaryNavigationItems =
     currentUser.role === "aluno"
@@ -54,6 +61,14 @@ export default async function AppLayout({
                 ? studentDocumentUnreadNotificationCount
                 : undefined
           }
+        : String(item.href) === "/professor/documentos"
+          ? {
+              ...item,
+              badgeCount:
+                professorPendingStudentDocumentCount > 0
+                  ? professorPendingStudentDocumentCount
+                  : undefined
+            }
         : item
   );
 
