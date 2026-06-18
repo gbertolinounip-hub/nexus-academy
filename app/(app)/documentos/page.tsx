@@ -83,19 +83,6 @@ export default async function StudentDocumentsPage() {
         </div>
       </SectionCard>
 
-      {pageData.additionalRequiredDocuments.length ? (
-        <SectionCard
-          title="Documentos obrigatorios adicionais"
-          description="Documentos ativos configurados pelo curso para este aluno. Mesmo sem envio, eles ja aparecem aqui para acompanhamento e upload."
-        >
-          <StudentRequiredDocumentList
-            entries={pageData.additionalRequiredDocuments}
-            emptyMessage="Nao ha documentos obrigatorios adicionais ativos para este curso."
-            allowUpload
-          />
-        </SectionCard>
-      ) : null}
-
       <SectionCard
         title="Pendencias e notificacoes"
         description="Acompanhe reprovacoes, justificativas e devolutivas documentais antes de reenviar uma nova versao."
@@ -136,6 +123,19 @@ export default async function StudentDocumentsPage() {
           </div>
         </div>
       </SectionCard>
+
+      {pageData.additionalRequiredDocuments.length ? (
+        <SectionCard
+          title="Documentos obrigatorios adicionais"
+          description="Documentos ativos configurados pelo curso para este aluno. Mesmo sem envio, eles ja aparecem aqui para acompanhamento e upload."
+        >
+          <StudentRequiredDocumentList
+            entries={pageData.additionalRequiredDocuments}
+            emptyMessage="Nao ha documentos obrigatorios adicionais ativos para este curso."
+            allowUpload
+          />
+        </SectionCard>
+      ) : null}
 
       <SectionCard
         title="Carteira de vacinacao"
