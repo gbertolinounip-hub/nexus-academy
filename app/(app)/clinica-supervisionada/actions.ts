@@ -1143,7 +1143,7 @@ export async function createOrUpdateClinicalCaseAction(
       `/clinica-supervisionada/${createdCaseId}`,
       "success",
       appendExceptionalReleaseNotice(
-        "Novo caso clinico criado com sucesso a partir do cadastro-base do paciente.",
+        "Novo caso clínico criado com sucesso a partir do cadastro-base do paciente.",
         exceptionalReleaseGate.noticeMessage
       )
     ) as Route
