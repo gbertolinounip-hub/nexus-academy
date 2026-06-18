@@ -319,6 +319,45 @@ function buildRequiredDocumentDraft(
   };
 }
 
+function normalizeDocumentLabelComparison(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function resolveRequiredDocumentDisplayNameWarning(
+  displayName: string,
+  documentTypeName: string | null
+) {
+  const normalizedDisplayName = normalizeDocumentLabelComparison(displayName);
+  const normalizedDocumentTypeName = normalizeDocumentLabelComparison(documentTypeName ?? "");
+
+  if (!normalizedDisplayName || !normalizedDocumentTypeName) {
+    return null;
+  }
+
+  if (
+    normalizedDisplayName === normalizedDocumentTypeName ||
+    normalizedDisplayName.includes(normalizedDocumentTypeName) ||
+    normalizedDocumentTypeName.includes(normalizedDisplayName)
+  ) {
+    return null;
+  }
+
+  const displayTokens = new Set(normalizedDisplayName.split(/\s+/).filter(Boolean));
+  const documentTypeTokens = normalizedDocumentTypeName.split(/\s+/).filter(Boolean);
+  const sharedTokenCount = documentTypeTokens.filter((token) => displayTokens.has(token)).length;
+
+  if (sharedTokenCount > 0) {
+    return null;
+  }
+
+  return "Atencao: o nome de exibicao esta diferente do tipo documental selecionado. Confirme se esta diferenca e intencional.";
+}
+
 function buildCreateGroupDraft(
   courseId: string,
   models: CourseConfigurationModelEntry[],
@@ -375,7 +414,8 @@ function buildCreateRequiredDocumentDraft(
   return createEmptyCourseConfigurationCreateRequiredDocumentFormValues(
     courseId,
     fallbackDocumentTypeId,
-    getNextOrderValue(requiredDocuments.map((requiredDocument) => requiredDocument.order))
+    getNextOrderValue(requiredDocuments.map((requiredDocument) => requiredDocument.order)),
+    fallbackDocumentTypeId ? "existente" : "novo"
   );
 }
 
@@ -1888,75 +1928,341 @@ export function MasterCourseConfigurationCreateRequiredDocumentForm({
   );
   const safeState = state ?? initialCourseConfigurationCreateRequiredDocumentActionState;
   const fieldErrors = safeState.fieldErrors ?? {};
+  const activeUsedTypeIds = useMemo(
+    () =>
+      new Set(
+        requiredDocuments
+          .filter((requiredDocument) => requiredDocument.isActive)
+          .map((requiredDocument) => requiredDocument.typeId)
+      ),
+    [requiredDocuments]
+  );
   const availableDocumentTypes = useMemo(() => {
-    const usedTypeIds = new Set(requiredDocuments.map((requiredDocument) => requiredDocument.typeId));
-
-    return documentTypeOptions.filter((documentType) => !usedTypeIds.has(documentType.id));
-  }, [documentTypeOptions, requiredDocuments]);
+    return documentTypeOptions.filter(
+      (documentType) => !activeUsedTypeIds.has(documentType.id)
+    );
+  }, [activeUsedTypeIds, documentTypeOptions]);
+  const documentTypesById = useMemo(
+    () => new Map(documentTypeOptions.map((documentType) => [documentType.id, documentType])),
+    [documentTypeOptions]
+  );
   const [draft, setDraft] = useState<CourseConfigurationCreateRequiredDocumentFormValues>(() =>
     buildCreateRequiredDocumentDraft(courseId, availableDocumentTypes, requiredDocuments)
+  );
+  const [documentTypeSearch, setDocumentTypeSearch] = useState("");
+
+  const filteredAvailableDocumentTypes = useMemo(() => {
+    const normalizedSearch = normalizeDocumentLabelComparison(documentTypeSearch);
+
+    if (!normalizedSearch) {
+      return availableDocumentTypes;
+    }
+
+    const filteredDocumentTypes = availableDocumentTypes.filter((documentType) => {
+      const searchableText = `${documentType.name} ${documentType.code}`;
+
+      return normalizeDocumentLabelComparison(searchableText).includes(normalizedSearch);
+    });
+
+    if (
+      draft.tipo_documento_id &&
+      !filteredDocumentTypes.some((documentType) => documentType.id === draft.tipo_documento_id)
+    ) {
+      const selectedDocumentType = availableDocumentTypes.find(
+        (documentType) => documentType.id === draft.tipo_documento_id
+      );
+
+      if (selectedDocumentType) {
+        return [selectedDocumentType, ...filteredDocumentTypes];
+      }
+    }
+
+    return filteredDocumentTypes;
+  }, [availableDocumentTypes, documentTypeSearch, draft.tipo_documento_id]);
+
+  function resolveSuggestedDisplayName(
+    formValues: CourseConfigurationCreateRequiredDocumentFormValues
+  ) {
+    if (formValues.tipo_documental_modo === "novo") {
+      return formValues.novo_tipo_documental_nome.trim();
+    }
+
+    return documentTypesById.get(formValues.tipo_documento_id)?.name ?? "";
+  }
+
+  function syncDisplayNameWithType(
+    currentDraft: CourseConfigurationCreateRequiredDocumentFormValues,
+    nextDraft: CourseConfigurationCreateRequiredDocumentFormValues,
+    forceSync = false
+  ) {
+    const currentSuggestedDisplayName = resolveSuggestedDisplayName(currentDraft);
+    const shouldSyncDisplayName =
+      forceSync ||
+      !currentDraft.nome_exibicao.trim() ||
+      normalizeDocumentLabelComparison(currentDraft.nome_exibicao) ===
+        normalizeDocumentLabelComparison(currentSuggestedDisplayName);
+
+    if (!shouldSyncDisplayName) {
+      return nextDraft;
+    }
+
+    return {
+      ...nextDraft,
+      nome_exibicao: resolveSuggestedDisplayName(nextDraft)
+    };
+  }
+
+  const selectedDocumentTypeName =
+    draft.tipo_documental_modo === "novo"
+      ? draft.novo_tipo_documental_nome.trim()
+      : (documentTypesById.get(draft.tipo_documento_id)?.name ?? "");
+  const newDocumentTypeCodePreview =
+    draft.tipo_documental_modo === "novo" && draft.novo_tipo_documental_nome.trim()
+      ? normalizeCodeInput(draft.novo_tipo_documental_nome)
+      : "";
+  const displayNameWarning = resolveRequiredDocumentDisplayNameWarning(
+    draft.nome_exibicao,
+    selectedDocumentTypeName || null
   );
 
   useEffect(() => {
     if (safeState.status === "error" && safeState.formValues) {
       setDraft({ ...safeState.formValues });
+
+      if (safeState.formValues.tipo_documental_modo === "existente") {
+        setDocumentTypeSearch(
+          documentTypesById.get(safeState.formValues.tipo_documento_id)?.name ?? ""
+        );
+      }
+
       return;
     }
 
-    setDraft(
-      buildCreateRequiredDocumentDraft(
+    if (safeState.status === "success") {
+      const resetDraft = buildCreateRequiredDocumentDraft(
+        courseId,
+        availableDocumentTypes,
+        requiredDocuments
+      );
+
+      setDraft(syncDisplayNameWithType(resetDraft, resetDraft, true));
+      setDocumentTypeSearch("");
+      return;
+    }
+
+    setDraft((currentDraft) => {
+      const fallbackDraft = buildCreateRequiredDocumentDraft(
         courseId,
         availableDocumentTypes,
         requiredDocuments,
-        draft.tipo_documento_id
-      )
-    );
+        currentDraft.tipo_documento_id
+      );
+      const resolvedMode =
+        currentDraft.tipo_documental_modo === "novo" || !availableDocumentTypes.length
+          ? "novo"
+          : "existente";
+      const nextDraft: CourseConfigurationCreateRequiredDocumentFormValues = {
+        ...currentDraft,
+        course_id: courseId,
+        tipo_documental_modo: resolvedMode,
+        tipo_documento_id:
+          resolvedMode === "existente" ? fallbackDraft.tipo_documento_id : "",
+        novo_tipo_documental_nome:
+          resolvedMode === "novo" ? currentDraft.novo_tipo_documental_nome : "",
+        ordem: fallbackDraft.ordem
+      };
+
+      return syncDisplayNameWithType(currentDraft, nextDraft);
+    });
   }, [
     availableDocumentTypes,
     courseId,
-    draft.tipo_documento_id,
+    documentTypesById,
     requiredDocuments,
     safeState.formValues,
     safeState.status,
     safeState.submittedAt
   ]);
 
-  function updateDraft(
-    field: keyof CourseConfigurationCreateRequiredDocumentFormValues,
-    value: string
-  ) {
+  function updateDraft(field: keyof CourseConfigurationCreateRequiredDocumentFormValues, value: string) {
     setDraft((currentDraft) => ({
       ...currentDraft,
       [field]: value
     }));
   }
 
+  function handleDocumentTypeModeChange(value: "existente" | "novo") {
+    setDraft((currentDraft) => {
+      const nextDraft = {
+        ...currentDraft,
+        tipo_documental_modo: value,
+        tipo_documento_id:
+          value === "existente"
+            ? currentDraft.tipo_documento_id || availableDocumentTypes[0]?.id || ""
+            : "",
+        novo_tipo_documental_nome: value === "novo" ? currentDraft.novo_tipo_documental_nome : ""
+      };
+
+      return syncDisplayNameWithType(currentDraft, nextDraft, true);
+    });
+
+    if (value === "existente") {
+      setDocumentTypeSearch("");
+    }
+  }
+
+  function handleExistingDocumentTypeChange(value: string) {
+    setDraft((currentDraft) => {
+      const nextDraft = {
+        ...currentDraft,
+        tipo_documental_modo: "existente" as const,
+        tipo_documento_id: value,
+        novo_tipo_documental_nome: ""
+      };
+
+      return syncDisplayNameWithType(currentDraft, nextDraft, true);
+    });
+
+    setDocumentTypeSearch(documentTypesById.get(value)?.name ?? "");
+  }
+
+  function handleNewDocumentTypeNameChange(value: string) {
+    setDraft((currentDraft) => {
+      const nextDraft = {
+        ...currentDraft,
+        tipo_documental_modo: "novo" as const,
+        tipo_documento_id: "",
+        novo_tipo_documental_nome: value
+      };
+
+      return syncDisplayNameWithType(currentDraft, nextDraft);
+    });
+  }
+
   return (
     <form action={formAction} className="form-stack master-course-configuration-edit-form">
       <input type="hidden" name="course_id" value={draft.course_id} />
+      <input type="hidden" name="tipo_documental_modo" value={draft.tipo_documental_modo} />
       {renderNotice(safeState)}
 
-      <div className="form-grid">
-        <label className={getFieldClassName(fieldErrors, "tipo_documento_id")}>
-          <span>Tipo documental</span>
-          <select
-            className={getInputClassName(fieldErrors, "tipo_documento_id")}
-            name="tipo_documento_id"
-            value={draft.tipo_documento_id}
-            onChange={(event) => updateDraft("tipo_documento_id", event.currentTarget.value)}
-          >
-            <option value="">Selecione</option>
-            {availableDocumentTypes.map((documentType) => (
-              <option key={documentType.id} value={documentType.id}>
-                {documentType.name} ({documentType.code})
-              </option>
-            ))}
-          </select>
-          {fieldErrors.tipo_documento_id ? (
-            <span className="field-error">{fieldErrors.tipo_documento_id}</span>
-          ) : null}
-        </label>
+      <div className="form-stack management-block-card">
+        <div className="management-block-header">
+          <div>
+            <h6>Tipo documental</h6>
+            <p className="field-help">
+              Selecione um tipo existente ou crie rapidamente um novo tipo documental para este curso.
+            </p>
+          </div>
+        </div>
 
+        <div className="actions-row">
+          <button
+            className={`button button-small ${
+              draft.tipo_documental_modo === "existente" ? "" : "button-secondary"
+            }`}
+            type="button"
+            onClick={() => handleDocumentTypeModeChange("existente")}
+            disabled={!availableDocumentTypes.length}
+          >
+            Usar tipo existente
+          </button>
+          <button
+            className={`button button-small ${
+              draft.tipo_documental_modo === "novo" ? "" : "button-secondary"
+            }`}
+            type="button"
+            onClick={() => handleDocumentTypeModeChange("novo")}
+          >
+            Criar novo tipo
+          </button>
+        </div>
+
+        {draft.tipo_documental_modo === "existente" ? (
+          <div className="form-grid">
+            <label className="field">
+              <span>Pesquisar tipo documental</span>
+              <input
+                className="input"
+                type="search"
+                value={documentTypeSearch}
+                onChange={(event) => setDocumentTypeSearch(event.currentTarget.value)}
+                placeholder="Busque por nome ou codigo"
+                disabled={!availableDocumentTypes.length}
+              />
+              {!availableDocumentTypes.length ? (
+                <span className="field-help">
+                  Todos os tipos ativos ja estao vinculados. Voce ainda pode criar um novo tipo documental.
+                </span>
+              ) : (
+                <span className="field-help">
+                  Pesquise por nome ou codigo para localizar um tipo documental existente.
+                </span>
+              )}
+            </label>
+
+            <label className={getFieldClassName(fieldErrors, "tipo_documento_id")}>
+              <span>Tipo documental existente</span>
+              <select
+                className={getInputClassName(fieldErrors, "tipo_documento_id")}
+                name="tipo_documento_id"
+                value={draft.tipo_documento_id}
+                onChange={(event) => handleExistingDocumentTypeChange(event.currentTarget.value)}
+                disabled={!availableDocumentTypes.length}
+              >
+                <option value="">Selecione</option>
+                {filteredAvailableDocumentTypes.map((documentType) => (
+                  <option key={documentType.id} value={documentType.id}>
+                    {documentType.name} ({documentType.code})
+                  </option>
+                ))}
+              </select>
+              {fieldErrors.tipo_documento_id ? (
+                <span className="field-error">{fieldErrors.tipo_documento_id}</span>
+              ) : filteredAvailableDocumentTypes.length ? (
+                <span className="field-help">
+                  Nao encontrou? Troque para &quot;Criar novo tipo&quot; e cadastre rapidamente.
+                </span>
+              ) : (
+                <span className="field-help">
+                  Nenhum tipo existente corresponde ao filtro atual.
+                </span>
+              )}
+            </label>
+          </div>
+        ) : (
+          <div className="form-grid">
+            <label className={getFieldClassName(fieldErrors, "novo_tipo_documental_nome")}>
+              <span>Novo tipo documental</span>
+              <input
+                className={getInputClassName(fieldErrors, "novo_tipo_documental_nome")}
+                name="novo_tipo_documental_nome"
+                value={draft.novo_tipo_documental_nome}
+                onChange={(event) => handleNewDocumentTypeNameChange(event.currentTarget.value)}
+                placeholder="Ex.: Identidade"
+              />
+              {fieldErrors.novo_tipo_documental_nome ? (
+                <span className="field-error">{fieldErrors.novo_tipo_documental_nome}</span>
+              ) : (
+                <span className="field-help">
+                  O codigo sera gerado automaticamente a partir do nome informado.
+                </span>
+              )}
+            </label>
+
+            <label className="field">
+              <span>Codigo gerado</span>
+              <input
+                className="input"
+                value={newDocumentTypeCodePreview}
+                readOnly
+                placeholder="Sera gerado automaticamente"
+              />
+            </label>
+          </div>
+        )}
+      </div>
+
+      <div className="form-grid">
         <label className={getFieldClassName(fieldErrors, "nome_exibicao")}>
           <span>Nome de exibicao</span>
           <input
@@ -1967,6 +2273,10 @@ export function MasterCourseConfigurationCreateRequiredDocumentForm({
           />
           {fieldErrors.nome_exibicao ? (
             <span className="field-error">{fieldErrors.nome_exibicao}</span>
+          ) : selectedDocumentTypeName ? (
+            <span className="field-help">
+              Sugestao baseada no tipo documental: {selectedDocumentTypeName}
+            </span>
           ) : null}
         </label>
 
@@ -2016,6 +2326,8 @@ export function MasterCourseConfigurationCreateRequiredDocumentForm({
         </label>
       </div>
 
+      {displayNameWarning ? <div className="form-notice">{displayNameWarning}</div> : null}
+
       <label className={getFieldClassName(fieldErrors, "descricao")}>
         <span>Descricao</span>
         <textarea
@@ -2031,11 +2343,7 @@ export function MasterCourseConfigurationCreateRequiredDocumentForm({
       </label>
 
       <div className="actions-row">
-        <button
-          className="button button-secondary"
-          type="submit"
-          disabled={!availableDocumentTypes.length}
-        >
+        <button className="button button-secondary" type="submit">
           Salvar novo documento
         </button>
       </div>
@@ -2064,6 +2372,10 @@ export function MasterCourseConfigurationRequiredDocumentForm({
   const fieldErrors = safeState.fieldErrors ?? {};
   const [draft, setDraft] = useState<CourseConfigurationRequiredDocumentFormValues>(() =>
     buildRequiredDocumentDraft(requiredDocument)
+  );
+  const displayNameWarning = resolveRequiredDocumentDisplayNameWarning(
+    draft.nome_exibicao,
+    requiredDocument.typeName
   );
 
   useEffect(() => {
@@ -2110,7 +2422,11 @@ export function MasterCourseConfigurationRequiredDocumentForm({
             />
             {fieldErrors.nome_exibicao ? (
               <span className="field-error">{fieldErrors.nome_exibicao}</span>
-            ) : null}
+            ) : (
+              <span className="field-help">
+                Tipo documental vinculado: {requiredDocument.typeName}
+              </span>
+            )}
           </label>
 
           <label className={getFieldClassName(fieldErrors, "ordem")}>
@@ -2173,6 +2489,8 @@ export function MasterCourseConfigurationRequiredDocumentForm({
             {fieldErrors.ativo ? <span className="field-error">{fieldErrors.ativo}</span> : null}
           </label>
         </div>
+
+        {displayNameWarning ? <div className="form-notice">{displayNameWarning}</div> : null}
 
         <label className={getFieldClassName(fieldErrors, "descricao")}>
           <span>Descricao</span>

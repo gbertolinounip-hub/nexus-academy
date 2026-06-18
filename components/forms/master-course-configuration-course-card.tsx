@@ -130,7 +130,8 @@ export function MasterCourseConfigurationCourseCard({
   const availableDocumentTypeOptions = documentTypeOptions.filter(
     (documentTypeOption) =>
       !course.requiredDocuments.some(
-        (requiredDocument) => requiredDocument.typeId === documentTypeOption.id
+        (requiredDocument) =>
+          requiredDocument.typeId === documentTypeOption.id && requiredDocument.isActive
       )
   );
   const [isExpanded, setIsExpanded] = useState(false);
@@ -486,13 +487,12 @@ export function MasterCourseConfigurationCourseCard({
               <div>
                 <h4>Documentos obrigatorios</h4>
                 <p className="field-help">
-                  Selecione apenas tipos documentais ja cadastrados para iniciar a base do curso.
+                  Selecione um tipo documental existente ou crie um novo tipo para expandir a base do curso sem perder o vinculo estruturado.
                 </p>
               </div>
               <button
                 className="button button-secondary"
                 type="button"
-                disabled={!availableDocumentTypeOptions.length}
                 onClick={() => setIsCreatingRequiredDocument((currentValue) => !currentValue)}
               >
                 {course.requiredDocuments.length
@@ -502,7 +502,7 @@ export function MasterCourseConfigurationCourseCard({
             </div>
             {!availableDocumentTypeOptions.length ? (
               <p className="field-help">
-                Nenhum tipo documental adicional esta disponivel para criar documentos obrigatorios neste curso.
+                Todos os tipos documentais ativos ja estao em uso neste curso. Ainda assim, voce pode criar um novo tipo documental rapidamente nesta etapa.
               </p>
             ) : null}
             {isCreatingRequiredDocument ? (
@@ -521,6 +521,9 @@ export function MasterCourseConfigurationCourseCard({
                     <div className="management-block-header">
                       <div>
                         <h5>{requiredDocument.displayName ?? requiredDocument.typeName}</h5>
+                        <p className="field-help">
+                          Tipo documental: {requiredDocument.typeName} ({requiredDocument.typeCode})
+                        </p>
                         <p className="field-help">
                           O curso, o tipo documental e o codigo ficam bloqueados nesta etapa.
                         </p>

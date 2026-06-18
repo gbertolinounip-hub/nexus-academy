@@ -61,7 +61,9 @@ export interface CourseConfigurationCreateCriterionOptionFormValues {
 
 export interface CourseConfigurationCreateRequiredDocumentFormValues {
   course_id: string;
+  tipo_documental_modo: "existente" | "novo" | "";
   tipo_documento_id: string;
+  novo_tipo_documental_nome: string;
   nome_exibicao: string;
   descricao: string;
   obrigatorio: string;
@@ -403,11 +405,14 @@ export function createEmptyCourseConfigurationCreateCriterionOptionFormValues(
 export function createEmptyCourseConfigurationCreateRequiredDocumentFormValues(
   courseId = "",
   documentTypeId = "",
-  order = ""
+  order = "",
+  mode: "existente" | "novo" = documentTypeId ? "existente" : "novo"
 ): CourseConfigurationCreateRequiredDocumentFormValues {
   return {
     course_id: courseId,
+    tipo_documental_modo: mode,
     tipo_documento_id: documentTypeId,
+    novo_tipo_documental_nome: "",
     nome_exibicao: "",
     descricao: "",
     obrigatorio: "true",

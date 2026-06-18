@@ -46,6 +46,7 @@ type ModelApplicationRuleRow =
 type DocumentTypeRow = Database["public"]["Tables"]["tipos_documento"]["Row"];
 type RequiredDocumentRow =
   Database["public"]["Tables"]["documentos_obrigatorios_curso"]["Row"];
+type DocumentTypeInsert = Database["public"]["Tables"]["tipos_documento"]["Insert"];
 type ModelInsert = Database["public"]["Tables"]["modelos_avaliacao_curso"]["Insert"];
 type GroupInsert = Database["public"]["Tables"]["grupos_modelo_avaliacao"]["Insert"];
 type CriterionInsert = Database["public"]["Tables"]["criterios_modelo_avaliacao"]["Insert"];
@@ -198,43 +199,80 @@ const createCriterionOptionConfigurationSchema = z.object({
   })
 });
 
-const createRequiredDocumentConfigurationSchema = z.object({
-  course_id: z.string().uuid("Curso invalido."),
-  tipo_documento_id: z.string().uuid("Tipo documental invalido."),
-  nome_exibicao: z
-    .string()
-    .trim()
-    .min(3, "Informe o nome de exibicao.")
-    .max(160, "O nome de exibicao deve ter no maximo 160 caracteres."),
-  descricao: z
-    .string()
-    .trim()
-    .max(2000, "A descricao deve ter no maximo 2000 caracteres."),
-  obrigatorio: z.enum(["true", "false"], {
-    message: "Selecione se o documento e obrigatorio."
-  }),
-  ordem: z.preprocess(
-    (value) => {
-      if (typeof value === "string" && value.trim() === "") {
-        return null;
-      }
+const createRequiredDocumentConfigurationSchema = z
+  .object({
+    course_id: z.string().uuid("Curso invalido."),
+    tipo_documental_modo: z.enum(["existente", "novo"], {
+      message: "Selecione como deseja definir o tipo documental."
+    }),
+    tipo_documento_id: z.preprocess(
+      (value) => {
+        if (typeof value === "string" && value.trim() === "") {
+          return null;
+        }
 
-      return value;
-    },
-    z
-      .union([
-        z.coerce
-          .number({ message: "Informe uma ordem valida." })
-          .int("A ordem precisa ser um numero inteiro.")
-          .gt(0, "A ordem precisa ser maior que zero."),
-        z.null()
-      ])
-      .nullable()
-  ),
-  ativo: z.enum(["true", "false"], {
-    message: "Selecione um status valido."
+        return value;
+      },
+      z.union([z.string().uuid("Tipo documental invalido."), z.null()])
+    ),
+    novo_tipo_documental_nome: z
+      .string()
+      .trim()
+      .max(160, "O nome do novo tipo documental deve ter no maximo 160 caracteres."),
+    nome_exibicao: z
+      .string()
+      .trim()
+      .min(3, "Informe o nome de exibicao.")
+      .max(160, "O nome de exibicao deve ter no maximo 160 caracteres."),
+    descricao: z
+      .string()
+      .trim()
+      .max(2000, "A descricao deve ter no maximo 2000 caracteres."),
+    obrigatorio: z.enum(["true", "false"], {
+      message: "Selecione se o documento e obrigatorio."
+    }),
+    ordem: z.preprocess(
+      (value) => {
+        if (typeof value === "string" && value.trim() === "") {
+          return null;
+        }
+
+        return value;
+      },
+      z
+        .union([
+          z.coerce
+            .number({ message: "Informe uma ordem valida." })
+            .int("A ordem precisa ser um numero inteiro.")
+            .gt(0, "A ordem precisa ser maior que zero."),
+          z.null()
+        ])
+        .nullable()
+    ),
+    ativo: z.enum(["true", "false"], {
+      message: "Selecione um status valido."
+    })
   })
-});
+  .superRefine((value, context) => {
+    if (value.tipo_documental_modo === "existente" && !value.tipo_documento_id) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["tipo_documento_id"],
+        message: "Selecione um tipo documental existente."
+      });
+    }
+
+    if (
+      value.tipo_documental_modo === "novo" &&
+      value.novo_tipo_documental_nome.trim().length < 3
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["novo_tipo_documental_nome"],
+        message: "Informe o nome do novo tipo documental."
+      });
+    }
+  });
 
 const deleteGroupConfigurationSchema = z.object({
   group_id: z.string().uuid("Grupo invalido.")
@@ -563,7 +601,12 @@ function buildCreateRequiredDocumentFormValues(
 ): CourseConfigurationCreateRequiredDocumentFormValues {
   return {
     course_id: readStringField(formData, "course_id"),
+    tipo_documental_modo: readStringField(formData, "tipo_documental_modo") as
+      | "existente"
+      | "novo"
+      | "",
     tipo_documento_id: readStringField(formData, "tipo_documento_id"),
+    novo_tipo_documental_nome: readStringField(formData, "novo_tipo_documental_nome"),
     nome_exibicao: readStringField(formData, "nome_exibicao"),
     descricao: readStringField(formData, "descricao"),
     obrigatorio: readStringField(formData, "obrigatorio"),
@@ -2055,31 +2098,130 @@ export async function createCourseRequiredDocumentAction(
     );
   }
 
-  const targetDocumentType = await loadDocumentType(parsedData.data.tipo_documento_id);
+  const adminClient = createSupabaseAdminClient();
+  let targetDocumentType: Pick<DocumentTypeRow, "id" | "codigo" | "nome" | "ativo"> | null =
+    null;
+
+  if (parsedData.data.tipo_documental_modo === "existente") {
+    targetDocumentType = parsedData.data.tipo_documento_id
+      ? await loadDocumentType(parsedData.data.tipo_documento_id)
+      : null;
+
+    if (!targetDocumentType) {
+      return buildActionState(
+        "error",
+        "Nao foi possivel localizar o tipo documental informado.",
+        { tipo_documento_id: "Selecione um tipo documental valido." },
+        submittedFormValues
+      );
+    }
+
+    if (!targetDocumentType.ativo) {
+      return buildActionState(
+        "error",
+        "O tipo documental selecionado esta inativo.",
+        { tipo_documento_id: "Selecione um tipo documental ativo." },
+        submittedFormValues
+      );
+    }
+  } else {
+    const newDocumentTypeName = parsedData.data.novo_tipo_documental_nome.trim();
+    const generatedDocumentTypeCode = normalizeCode(newDocumentTypeName);
+
+    if (!generatedDocumentTypeCode) {
+      return buildActionState(
+        "error",
+        "Nao foi possivel gerar um codigo valido para o novo tipo documental.",
+        {
+          novo_tipo_documental_nome:
+            "Informe um nome com letras ou numeros para criar o tipo documental."
+        },
+        submittedFormValues
+      );
+    }
+
+    const { data: existingDocumentTypeByCode, error: existingDocumentTypeByCodeError } =
+      await adminClient
+        .from("tipos_documento")
+        .select("id, codigo, nome, ativo")
+        .eq("codigo", generatedDocumentTypeCode)
+        .maybeSingle();
+
+    if (existingDocumentTypeByCodeError) {
+      return buildActionState(
+        "error",
+        "Nao foi possivel validar o novo tipo documental informado.",
+        {},
+        submittedFormValues
+      );
+    }
+
+    if (existingDocumentTypeByCode) {
+      targetDocumentType = existingDocumentTypeByCode as Pick<
+        DocumentTypeRow,
+        "id" | "codigo" | "nome" | "ativo"
+      >;
+
+      if (!targetDocumentType.ativo) {
+        return buildActionState(
+          "error",
+          "Ja existe um tipo documental com este codigo, mas ele esta inativo.",
+          {
+            novo_tipo_documental_nome:
+              "Use outro nome ou reative o tipo documental existente antes de reutiliza-lo."
+          },
+          submittedFormValues
+        );
+      }
+    } else {
+      const documentTypeInsertPayload: DocumentTypeInsert = {
+        codigo: generatedDocumentTypeCode,
+        nome: newDocumentTypeName,
+        ativo: true,
+        metadata: {
+          origem: "createCourseRequiredDocumentAction",
+          criado_rapidamente_em: new Date().toISOString(),
+          criado_para_curso_id: targetCourse.id
+        }
+      };
+
+      const { data: insertedDocumentType, error: insertedDocumentTypeError } =
+        await adminClient
+          .from("tipos_documento")
+          .insert(documentTypeInsertPayload as never)
+          .select("id, codigo, nome, ativo")
+          .single();
+
+      if (insertedDocumentTypeError || !insertedDocumentType) {
+        return buildActionState(
+          "error",
+          insertedDocumentTypeError?.message ||
+            "Nao foi possivel criar o novo tipo documental.",
+          {},
+          submittedFormValues
+        );
+      }
+
+      targetDocumentType = insertedDocumentType as Pick<
+        DocumentTypeRow,
+        "id" | "codigo" | "nome" | "ativo"
+      >;
+    }
+  }
 
   if (!targetDocumentType) {
     return buildActionState(
       "error",
-      "Nao foi possivel localizar o tipo documental informado.",
-      { tipo_documento_id: "Selecione um tipo documental valido." },
+      "Nao foi possivel resolver o tipo documental informado.",
+      {},
       submittedFormValues
     );
   }
 
-  if (!targetDocumentType.ativo) {
-    return buildActionState(
-      "error",
-      "O tipo documental selecionado esta inativo.",
-      { tipo_documento_id: "Selecione um tipo documental ativo." },
-      submittedFormValues
-    );
-  }
-
-  const adminClient = createSupabaseAdminClient();
   const { data: existingRequiredDocument, error: existingRequiredDocumentError } =
     await adminClient
       .from("documentos_obrigatorios_curso")
-      .select("id")
+      .select("id, ativo, nome_exibicao, codigo")
       .eq("curso_id", targetCourse.id)
       .eq("tipo_documento_id", targetDocumentType.id)
       .maybeSingle();
@@ -2094,6 +2236,50 @@ export async function createCourseRequiredDocumentAction(
   }
 
   if (existingRequiredDocument) {
+    const existingRequiredDocumentRow = existingRequiredDocument as Pick<
+      RequiredDocumentRow,
+      "id" | "ativo" | "nome_exibicao" | "codigo"
+    >;
+
+    if (!existingRequiredDocumentRow.ativo) {
+      const { error } = await adminClient
+        .from("documentos_obrigatorios_curso")
+        .update({
+          codigo: normalizeCode(`${targetCourse.codigo}_${targetDocumentType.codigo}`),
+          nome_exibicao: parsedData.data.nome_exibicao,
+          descricao: toNullableText(parsedData.data.descricao),
+          obrigatorio: toBooleanValue(parsedData.data.obrigatorio),
+          ordem: parsedData.data.ordem,
+          ativo: toBooleanValue(parsedData.data.ativo),
+          metadata: {
+            origem: "createCourseRequiredDocumentAction",
+            curso_id: targetCourse.id,
+            tipo_documento_id: targetDocumentType.id,
+            reativado_em: new Date().toISOString()
+          }
+        } satisfies Partial<RequiredDocumentRow> as never)
+        .eq("id", existingRequiredDocumentRow.id);
+
+      if (error) {
+        return buildActionState(
+          "error",
+          error.message ||
+            "Nao foi possivel reativar o documento obrigatorio ja existente para este tipo.",
+          {},
+          submittedFormValues
+        );
+      }
+
+      revalidateCourseConfigurationPaths();
+
+      return buildActionState(
+        "success",
+        `Documento obrigatorio ${parsedData.data.nome_exibicao} reativado com sucesso.`,
+        {},
+        submittedFormValues
+      );
+    }
+
     return buildActionState(
       "error",
       "Este curso ja possui um documento obrigatorio para o tipo documental selecionado.",
