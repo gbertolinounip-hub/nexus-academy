@@ -27,7 +27,9 @@ function buildResolvedValues(
   return {
     case_id: submittedValues?.case_id ?? caseId,
     record_id: submittedValues?.record_id ?? recordId,
-    status: submittedValues?.status || initialStatus,
+    status:
+      submittedValues?.status ||
+      (initialStatus === "enviado" ? "" : initialStatus),
     supervisor_feedback: submittedValues?.supervisor_feedback ?? initialFeedback ?? ""
   };
 }
@@ -82,31 +84,40 @@ export function ClinicalEvolutionReviewForm({
         </p>
       ) : null}
 
-      <div className="form-grid clinical-evaluation-form-grid">
-        <label className={fieldErrors.status ? "field field-invalid" : "field"}>
-          <span>Status do registro</span>
-          <select
-            className={fieldErrors.status ? "input input-invalid" : "input"}
-            name="status"
-            defaultValue={resolvedValues.status}
-          >
-            <option value="rascunho">Rascunho</option>
-            <option value="enviado">Enviado</option>
-            <option value="aprovado">Aprovado</option>
-            <option value="ajustes_solicitados">Ajustes solicitados</option>
-          </select>
-          {fieldErrors.status ? (
-            <span className="field-error">{fieldErrors.status}</span>
-          ) : null}
-        </label>
+      <div className="clinical-review-status-panel">
+        <div className="clinical-review-status-panel-copy">
+          <strong>Status do registro</strong>
+          <p>Selecione a decisão da supervisão antes de salvar o parecer.</p>
+        </div>
 
-        <label className="field">
-          <span>Fluxo de supervisão</span>
-          <input className="input" value="Professor supervisor" readOnly disabled />
-          <span className="field-help">
-            Use o parecer para orientar o aluno e registrar a decisão desta revisão.
-          </span>
-        </label>
+        <div className="form-grid clinical-evaluation-form-grid">
+          <label className={fieldErrors.status ? "field field-invalid" : "field"}>
+            <span>Status do registro</span>
+            <select
+              className={fieldErrors.status ? "input input-invalid" : "input"}
+              name="status"
+              defaultValue={resolvedValues.status}
+            >
+              <option value="" disabled>
+                Selecione uma decisão
+              </option>
+              <option value="rascunho">Rascunho</option>
+              <option value="aprovado">Aprovado</option>
+              <option value="ajustes_solicitados">Ajustes solicitados</option>
+            </select>
+            {fieldErrors.status ? (
+              <span className="field-error">{fieldErrors.status}</span>
+            ) : null}
+          </label>
+
+          <label className="field">
+            <span>Fluxo de supervisão</span>
+            <input className="input" value="Professor supervisor" readOnly disabled />
+            <span className="field-help">
+              Use o parecer para orientar o aluno e registrar a decisão desta revisão.
+            </span>
+          </label>
+        </div>
       </div>
 
       <label

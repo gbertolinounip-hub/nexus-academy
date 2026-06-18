@@ -5383,6 +5383,33 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
   align-items: start;
 }
 
+.clinical-review-status-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 20px;
+  border: 1px solid rgba(var(--brand-rgb), 0.18);
+  background:
+    linear-gradient(180deg, rgba(var(--brand-rgb), 0.08), rgba(var(--brand-rgb), 0.03)),
+    var(--card);
+}
+
+.clinical-review-status-panel-copy {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.clinical-review-status-panel-copy strong {
+  font-size: 0.98rem;
+  color: var(--foreground-strong);
+}
+
+.clinical-review-status-panel-copy p {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--muted-foreground);
+}
+
 .clinical-evaluation-field-wide {
   grid-column: 1 / -1;
 }
