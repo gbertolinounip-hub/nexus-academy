@@ -23,22 +23,43 @@ function renderVaccinationStatus(entry: StudentDocumentDirectoryEntry) {
       <span className={`status-pill status-${entry.currentVaccination.status}`}>
         {entry.currentVaccination.statusLabel}
       </span>
-      <span className="table-helper">v{entry.currentVaccination.version}</span>
     </div>
   );
 }
 
 function renderTceSummary(entry: StudentDocumentDirectoryEntry) {
   if (!entry.currentTces.length) {
-    return <span className="table-helper">Nenhum TCE ativo</span>;
+    return <span className="table-helper">Sem envio</span>;
   }
+
+  const approvedDocuments = entry.currentTces.filter(
+    (document) => document.status === "aprovado"
+  );
+  const pendingDocuments = entry.currentTces.filter(
+    (document) => document.status === "enviado"
+  );
+  const rejectedDocuments = entry.currentTces.filter(
+    (document) => document.status === "reprovado"
+  );
+  const approvedLabel = approvedDocuments[0]?.statusLabel ?? null;
+  const rejectedLabel = rejectedDocuments[0]?.statusLabel ?? null;
+  const pendingLabel =
+    pendingDocuments.length === entry.currentTces.length
+      ? "Pendente de análise"
+      : `${pendingDocuments.length} pendente(s)`;
 
   return (
     <div className="student-document-directory-status-stack">
       <strong>{entry.currentTces.length} TCE(s)</strong>
-      <span className="table-helper">
-        {entry.currentTces.filter((document) => document.status === "enviado").length} pendente(s)
-      </span>
+      {approvedLabel ? (
+        <span className="status-pill status-aprovado">{approvedLabel}</span>
+      ) : null}
+      {pendingDocuments.length ? (
+        <span className="status-pill status-enviado">{pendingLabel}</span>
+      ) : null}
+      {rejectedLabel ? (
+        <span className="status-pill status-reprovado">{rejectedLabel}</span>
+      ) : null}
     </div>
   );
 }
@@ -161,15 +182,11 @@ export function StudentDocumentDirectory({
             <dl className="student-document-directory-mobile-metrics">
               <div>
                 <dt>Carteira</dt>
-                <dd>
-                  {entry.currentVaccination
-                    ? entry.currentVaccination.statusLabel
-                    : "Sem envio"}
-                </dd>
+                <dd>{renderVaccinationStatus(entry)}</dd>
               </div>
               <div>
                 <dt>TCEs ativos</dt>
-                <dd>{entry.currentTces.length}</dd>
+                <dd>{renderTceSummary(entry)}</dd>
               </div>
               <div>
                 <dt>Pendencias</dt>
