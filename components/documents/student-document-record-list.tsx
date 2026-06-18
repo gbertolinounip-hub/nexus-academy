@@ -20,6 +20,10 @@ function buildDocumentSubtitle(document: StudentDocumentSummary) {
     return "Documento geral obrigatorio do aluno.";
   }
 
+  if (document.type === "obrigatorio_generico") {
+    return "Documento obrigatorio configurado dinamicamente para o curso.";
+  }
+
   const scopeLabel = joinDisplayParts([document.areaName, document.semesterCode]);
 
   return scopeLabel || "Documento vinculado a area operacional do TCE.";

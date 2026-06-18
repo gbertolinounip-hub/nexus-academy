@@ -47,7 +47,10 @@ export interface SessionUser {
   passwordChangeRecommended?: boolean;
 }
 
-export type StudentDocumentType = "carteira_vacinacao" | "tce";
+export type StudentDocumentType =
+  | "carteira_vacinacao"
+  | "tce"
+  | "obrigatorio_generico";
 export type StudentDocumentStatus = "enviado" | "aprovado" | "reprovado";
 export type StudentDocumentReviewerRole = "professor" | "coordenador";
 export type EvaluationModelMode = "descritiva" | "rubrica";
@@ -160,6 +163,11 @@ export interface StudentDocumentSummary {
   registration: string;
   type: StudentDocumentType;
   typeLabel: string;
+  requiredCourseDocumentId: string | null;
+  requiredCourseDocumentDisplayName: string | null;
+  documentTypeId: string | null;
+  documentTypeCode: string | null;
+  documentTypeName: string | null;
   status: StudentDocumentStatus;
   statusLabel: string;
   reviewerRole: StudentDocumentReviewerRole | null;
@@ -182,6 +190,19 @@ export interface StudentDocumentSummary {
   className: string | null;
   semesterCode: string | null;
   enrollmentId: string | null;
+}
+
+export interface StudentRequiredDocumentEntry {
+  requiredCourseDocumentId: string;
+  documentTypeId: string;
+  documentTypeCode: string | null;
+  documentTypeName: string;
+  displayName: string;
+  description: string | null;
+  required: boolean;
+  order: number | null;
+  currentDocument: StudentDocumentSummary | null;
+  history: StudentDocumentSummary[];
 }
 
 export interface StudentDocumentNotificationSummary {

@@ -119,6 +119,8 @@ export function formatStudentDocumentType(value: string) {
       return "Carteira de vacinação";
     case "tce":
       return "TCE";
+    case "obrigatorio_generico":
+      return "Documento obrigatório";
     default:
       return value;
   }

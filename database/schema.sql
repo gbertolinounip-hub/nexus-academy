@@ -1083,6 +1083,8 @@ create table if not exists public.documentos_aluno (
   unidade_id uuid references public.unidades (id) on delete restrict,
   aluno_id uuid not null references public.alunos (usuario_id) on delete restrict,
   matricula_turma_id uuid references public.matriculas_turma (id) on delete restrict,
+  oferta_curso_unidade_id uuid references public.ofertas_curso_unidade (id) on delete restrict,
+  documento_obrigatorio_curso_id uuid references public.documentos_obrigatorios_curso (id) on delete restrict,
   area_estagio_id uuid references public.areas_estagio (id) on delete restrict,
   tipo text not null,
   status text not null default 'enviado',
@@ -1101,7 +1103,7 @@ create table if not exists public.documentos_aluno (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint documentos_aluno_tipo_check
-    check (tipo in ('carteira_vacinacao', 'tce')),
+    check (tipo in ('carteira_vacinacao', 'tce', 'obrigatorio_generico')),
   constraint documentos_aluno_status_check
     check (status in ('enviado', 'aprovado', 'reprovado')),
   constraint documentos_aluno_validador_papel_check
@@ -1124,6 +1126,12 @@ create table if not exists public.documentos_aluno (
         tipo = 'tce'
         and matricula_turma_id is not null
         and area_estagio_id is not null
+      )
+      or (
+        tipo = 'obrigatorio_generico'
+        and matricula_turma_id is null
+        and area_estagio_id is null
+        and documento_obrigatorio_curso_id is not null
       )
     ),
   constraint documentos_aluno_validacao_consistencia_check
@@ -1162,6 +1170,12 @@ create unique index if not exists idx_documentos_aluno_tce_ativo_uk
     and ativo = true
     and matricula_turma_id is not null;
 
+create unique index if not exists idx_documentos_aluno_generico_ativo_uk
+  on public.documentos_aluno (aluno_id, documento_obrigatorio_curso_id)
+  where tipo = 'obrigatorio_generico'
+    and ativo = true
+    and documento_obrigatorio_curso_id is not null;
+
 create index if not exists idx_documentos_aluno_aluno_tipo
   on public.documentos_aluno (aluno_id, tipo, ativo, created_at desc);
 
@@ -1173,6 +1187,12 @@ create index if not exists idx_documentos_aluno_unidade_status
 
 create index if not exists idx_documentos_aluno_area
   on public.documentos_aluno (area_estagio_id, tipo, created_at desc);
+
+create index if not exists idx_documentos_aluno_oferta_curso_unidade_id
+  on public.documentos_aluno (oferta_curso_unidade_id);
+
+create index if not exists idx_documentos_aluno_documento_obrigatorio_curso_id
+  on public.documentos_aluno (documento_obrigatorio_curso_id);
 
 create table if not exists public.notificacoes_documentos_aluno (
   id uuid primary key default gen_random_uuid(),

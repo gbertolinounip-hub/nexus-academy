@@ -3,6 +3,7 @@ import type { Route } from "next";
 import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
 import { StudentDocumentRecordList } from "@/components/documents/student-document-record-list";
+import { StudentRequiredDocumentList } from "@/components/documents/student-required-document-list";
 import type { StudentDocumentDetailPageData } from "@/services/student-documents";
 
 interface StudentDocumentDetailScreenProps {
@@ -33,7 +34,14 @@ export function StudentDocumentDetailScreen({
   heroTitle,
   heroDescription
 }: StudentDocumentDetailScreenProps) {
-  const allDocuments = [...pageData.vaccinationDocuments, ...pageData.tceDocuments];
+  const additionalDocumentHistory = pageData.additionalRequiredDocuments.flatMap(
+    (entry) => entry.history
+  );
+  const allDocuments = [
+    ...pageData.vaccinationDocuments,
+    ...pageData.tceDocuments,
+    ...additionalDocumentHistory
+  ];
   const activeVaccination =
     pageData.vaccinationDocuments.find((document) => document.active) ?? null;
   const activeTces = pageData.tceDocuments.filter((document) => document.active);
@@ -119,6 +127,21 @@ export function StudentDocumentDetailScreen({
           </div>
         </div>
       </SectionCard>
+
+      {pageData.additionalRequiredDocuments.length ? (
+        <SectionCard
+          title="Documentos obrigatórios adicionais"
+          description="Documentos ativos configurados pelo curso para este aluno. Eles aparecem aqui mesmo quando ainda não houve envio."
+        >
+          <StudentRequiredDocumentList
+            entries={pageData.additionalRequiredDocuments}
+            emptyMessage="Não há documentos obrigatórios adicionais ativos para este curso."
+            canReview={pageData.canReview}
+            reviewerLabel={reviewerLabel}
+            reviewReadOnly={!pageData.canReview}
+          />
+        </SectionCard>
+      ) : null}
 
       <SectionCard
         title="Carteira de vacinação"

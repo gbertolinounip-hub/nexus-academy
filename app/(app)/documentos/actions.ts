@@ -33,7 +33,12 @@ import type {
 type DocumentInsert = Database["public"]["Tables"]["documentos_aluno"]["Insert"];
 
 const studentDocumentUploadSchema = z.object({
-  document_type: z.enum(["carteira_vacinacao", "tce"]),
+  document_type: z.enum([
+    "carteira_vacinacao",
+    "tce",
+    "obrigatorio_generico"
+  ]),
+  required_course_document_id: z.string().trim().optional().default(""),
   enrollment_id: z.string().trim().optional().default("")
 });
 
@@ -93,6 +98,7 @@ function buildUploadState(input: {
   status: StudentDocumentUploadActionState["status"];
   message: string | null;
   documentType: StudentDocumentType;
+  requiredCourseDocumentId?: string;
   enrollmentId?: string;
   fieldErrors?: Record<string, string>;
   savedDocumentId?: string | null;
@@ -103,6 +109,7 @@ function buildUploadState(input: {
     fieldErrors: input.fieldErrors ?? {},
     formValues: {
       document_type: input.documentType,
+      required_course_document_id: input.requiredCourseDocumentId ?? "",
       enrollment_id: input.enrollmentId ?? ""
     },
     savedDocumentId: input.savedDocumentId ?? null,
@@ -133,24 +140,23 @@ function buildReviewState(input: {
 
 function buildDocumentNotificationContent(input: {
   reviewerRole: StudentDocumentReviewerRole;
-  documentType: StudentDocumentType;
+  documentLabel: string;
   areaName: string | null;
 }) {
-  const documentLabel = formatStudentDocumentType(input.documentType);
   const areaLabel = input.areaName ? ` - ${input.areaName}` : "";
 
   if (input.reviewerRole === "coordenador") {
     return {
       type: "documento_reprovado_coordenador" as StudentDocumentNotificationType,
       title: "Documento reprovado pela coordenacao",
-      message: `A coordenacao reprovou seu ${documentLabel.toLowerCase()}${areaLabel}. Verifique a justificativa e envie uma nova versao.`
+      message: `A coordenacao reprovou seu documento ${input.documentLabel.toLowerCase()}${areaLabel}. Verifique a justificativa e envie uma nova versao.`
     };
   }
 
   return {
     type: "documento_reprovado_professor" as StudentDocumentNotificationType,
     title: "Documento reprovado pelo professor",
-    message: `O professor supervisor reprovou seu ${documentLabel.toLowerCase()}${areaLabel}. Verifique a justificativa e envie uma nova versao.`
+    message: `O professor supervisor reprovou seu documento ${input.documentLabel.toLowerCase()}${areaLabel}. Verifique a justificativa e envie uma nova versao.`
   };
 }
 
@@ -172,19 +178,30 @@ export async function submitStudentDocumentAction(
   const currentUser = await requireRole(["aluno"]);
   const parsedData = studentDocumentUploadSchema.safeParse({
     document_type: readStringField(formData, "document_type"),
+    required_course_document_id: readStringField(
+      formData,
+      "required_course_document_id"
+    ),
     enrollment_id: readStringField(formData, "enrollment_id")
   });
 
   if (!parsedData.success) {
-    const fallbackType =
-      readStringField(formData, "document_type") === "tce"
+    const requestedType = readStringField(formData, "document_type");
+    const fallbackType: StudentDocumentType =
+      requestedType === "tce"
         ? "tce"
-        : "carteira_vacinacao";
+        : requestedType === "obrigatorio_generico"
+          ? "obrigatorio_generico"
+          : "carteira_vacinacao";
 
     return buildUploadState({
       status: "error",
       message: "Revise o tipo de documento antes de continuar.",
       documentType: fallbackType,
+      requiredCourseDocumentId: readStringField(
+        formData,
+        "required_course_document_id"
+      ),
       enrollmentId: readStringField(formData, "enrollment_id"),
       fieldErrors: {
         document_type: "Tipo de documento invalido."
@@ -199,6 +216,7 @@ export async function submitStudentDocumentAction(
       status: "error",
       message: "Selecione um arquivo antes de enviar o documento.",
       documentType: parsedData.data.document_type,
+      requiredCourseDocumentId: parsedData.data.required_course_document_id,
       enrollmentId: parsedData.data.enrollment_id,
       fieldErrors: {
         document_file: "Envie um arquivo .pdf, .jpg, .jpeg ou .png."
@@ -211,6 +229,7 @@ export async function submitStudentDocumentAction(
       status: "error",
       message: "O arquivo excede o tamanho maximo suportado nesta etapa.",
       documentType: parsedData.data.document_type,
+      requiredCourseDocumentId: parsedData.data.required_course_document_id,
       enrollmentId: parsedData.data.enrollment_id,
       fieldErrors: {
         document_file: "Use um arquivo com ate 10 MB."
@@ -225,6 +244,7 @@ export async function submitStudentDocumentAction(
       status: "error",
       message: "Formato de arquivo nao suportado para este envio.",
       documentType: parsedData.data.document_type,
+      requiredCourseDocumentId: parsedData.data.required_course_document_id,
       enrollmentId: parsedData.data.enrollment_id,
       fieldErrors: {
         document_file: "Use apenas .pdf, .jpg, .jpeg ou .png."
@@ -239,6 +259,7 @@ export async function submitStudentDocumentAction(
       status: "error",
       message: "O arquivo enviado nao pode ser validado com seguranca.",
       documentType: parsedData.data.document_type,
+      requiredCourseDocumentId: parsedData.data.required_course_document_id,
       enrollmentId: parsedData.data.enrollment_id,
       fieldErrors: {
         document_file: "O tipo MIME do arquivo nao e aceito nesta etapa."
@@ -248,19 +269,57 @@ export async function submitStudentDocumentAction(
 
   try {
     const pageData = await getStudentDocumentScopeForCurrentStudent(currentUser);
-    const documentType = parsedData.data.document_type;
+    const requestedDocumentType = parsedData.data.document_type;
     const selectedEnrollment =
-      documentType === "tce"
+      requestedDocumentType === "tce"
         ? pageData.tceOptions.find(
             (option) => option.enrollmentId === parsedData.data.enrollment_id
           ) ?? null
         : null;
+
+    if (requestedDocumentType === "tce" && !selectedEnrollment) {
+      return buildUploadState({
+        status: "error",
+        message: "Selecione a area e o bloco corretos antes de enviar o TCE.",
+        documentType: requestedDocumentType,
+        requiredCourseDocumentId: parsedData.data.required_course_document_id,
+        enrollmentId: parsedData.data.enrollment_id,
+        fieldErrors: {
+          enrollment_id: "Escolha uma area/bloco valido para este TCE."
+        }
+      });
+    }
+
+    if (
+      requestedDocumentType === "obrigatorio_generico" &&
+      !parsedData.data.required_course_document_id
+    ) {
+      return buildUploadState({
+        status: "error",
+        message: "Selecione um documento obrigatorio valido antes de continuar.",
+        documentType: requestedDocumentType,
+        requiredCourseDocumentId: parsedData.data.required_course_document_id,
+        enrollmentId: parsedData.data.enrollment_id,
+        fieldErrors: {
+          required_course_document_id: "Documento obrigatorio invalido."
+        }
+      });
+    }
+
+    const uploadContext = await resolveStudentDocumentUploadContext({
+      currentUser,
+      documentType: requestedDocumentType,
+      requiredCourseDocumentId: parsedData.data.required_course_document_id || null,
+      enrollmentId: selectedEnrollment?.enrollmentId ?? null
+    });
+    const documentType = uploadContext.documentType;
 
     if (documentType === "tce" && !selectedEnrollment) {
       return buildUploadState({
         status: "error",
         message: "Selecione a area e o bloco corretos antes de enviar o TCE.",
         documentType,
+        requiredCourseDocumentId: uploadContext.requiredCourseDocument.id,
         enrollmentId: parsedData.data.enrollment_id,
         fieldErrors: {
           enrollment_id: "Escolha uma area/bloco valido para este TCE."
@@ -271,16 +330,16 @@ export async function submitStudentDocumentAction(
     const previousDocument =
       documentType === "carteira_vacinacao"
         ? pageData.vaccinationCurrent
-        : pageData.tceDocuments.find(
-            (document) =>
-              document.active &&
-              document.enrollmentId === selectedEnrollment?.enrollmentId
-          ) ?? null;
-    const uploadContext = await resolveStudentDocumentUploadContext({
-      currentUser,
-      documentType,
-      enrollmentId: selectedEnrollment?.enrollmentId ?? null
-    });
+        : documentType === "tce"
+          ? pageData.tceDocuments.find(
+              (document) =>
+                document.active &&
+                document.enrollmentId === selectedEnrollment?.enrollmentId
+            ) ?? null
+          : pageData.additionalRequiredDocuments.find(
+              (entry) =>
+                entry.requiredCourseDocumentId === uploadContext.requiredCourseDocument.id
+            )?.currentDocument ?? null;
     const resolvedUnitId =
       uploadContext.offer.unidade_id ??
       uploadContext.student.unidade_id ??
@@ -293,6 +352,7 @@ export async function submitStudentDocumentAction(
         message:
           "Nao foi possivel identificar a unidade vinculada a este documento. Procure a coordenacao.",
         documentType,
+        requiredCourseDocumentId: uploadContext.requiredCourseDocument.id,
         enrollmentId: selectedEnrollment?.enrollmentId ?? ""
       });
     }
@@ -302,8 +362,11 @@ export async function submitStudentDocumentAction(
       unitId: resolvedUnitId,
       studentId: currentUser.id,
       documentId,
-      documentType,
+      documentType: uploadContext.documentType,
       fileName: uploadedFile.name || `documento.${fileExtension}`,
+      requiredCourseDocumentId: uploadContext.requiredCourseDocument.id,
+      documentTypeCode: uploadContext.documentTypeRow?.codigo ?? null,
+      documentLabel: uploadContext.documentLabel,
       enrollmentId: selectedEnrollment?.enrollmentId ?? null,
       areaName: selectedEnrollment?.areaName ?? null,
       blockName: selectedEnrollment?.blockName ?? null
@@ -323,6 +386,7 @@ export async function submitStudentDocumentAction(
         message:
           "Nao foi possivel enviar o arquivo para o storage privado do aluno.",
         documentType,
+        requiredCourseDocumentId: uploadContext.requiredCourseDocument.id,
         enrollmentId: selectedEnrollment?.enrollmentId ?? "",
         fieldErrors: {
           document_file: "O upload falhou. Tente novamente em instantes."
@@ -344,12 +408,12 @@ export async function submitStudentDocumentAction(
           status: "error",
           message: "Nao foi possivel preparar o reenvio deste documento.",
           documentType,
+          requiredCourseDocumentId: uploadContext.requiredCourseDocument.id,
           enrollmentId: selectedEnrollment?.enrollmentId ?? ""
         });
       }
     }
 
-    const supabase = await createSupabaseServerClient();
     const documentInsertPayload: DocumentInsert = {
       id: documentId,
       unidade_id: resolvedUnitId,
@@ -359,7 +423,7 @@ export async function submitStudentDocumentAction(
       oferta_curso_unidade_id: uploadContext.offer.id,
       documento_obrigatorio_curso_id: uploadContext.requiredCourseDocument.id,
       area_estagio_id: selectedEnrollment?.areaId ?? null,
-      tipo: documentType,
+      tipo: uploadContext.documentType,
       status: "enviado",
       arquivo_nome: uploadedFile.name,
       arquivo_mime_type: resolvedMimeType,
@@ -375,7 +439,7 @@ export async function submitStudentDocumentAction(
       validado_em: null
     };
 
-    const { error: insertError } = await (supabase.from("documentos_aluno") as any).insert(
+    const { error: insertError } = await (adminClient.from("documentos_aluno") as any).insert(
       documentInsertPayload
     );
 
@@ -392,6 +456,7 @@ export async function submitStudentDocumentAction(
         status: "error",
         message: "Nao foi possivel registrar o documento enviado no banco.",
         documentType,
+        requiredCourseDocumentId: uploadContext.requiredCourseDocument.id,
         enrollmentId: selectedEnrollment?.enrollmentId ?? "",
         fieldErrors: {
           document_file:
@@ -404,11 +469,9 @@ export async function submitStudentDocumentAction(
 
     return buildUploadState({
       status: "success",
-      message:
-        documentType === "carteira_vacinacao"
-          ? "Carteira de vacinacao enviada com sucesso."
-          : "TCE enviado com sucesso.",
+      message: `Upload de ${uploadContext.documentLabel} concluido com sucesso.`,
       documentType,
+      requiredCourseDocumentId: uploadContext.requiredCourseDocument.id,
       enrollmentId: selectedEnrollment?.enrollmentId ?? "",
       savedDocumentId: documentId
     });
@@ -420,6 +483,7 @@ export async function submitStudentDocumentAction(
           ? error.message
           : "Nao foi possivel enviar o documento do aluno.",
       documentType: parsedData.data.document_type,
+      requiredCourseDocumentId: parsedData.data.required_course_document_id,
       enrollmentId: parsedData.data.enrollment_id
     });
   }
@@ -508,7 +572,9 @@ export async function reviewStudentDocumentAction(
 
       const notificationContent = buildDocumentNotificationContent({
         reviewerRole,
-        documentType: documentRow.tipo as StudentDocumentType,
+        documentLabel:
+          reviewContext.requiredCourseDocument?.nome_exibicao?.trim() ||
+          formatStudentDocumentType(documentRow.tipo),
         areaName
       });
 

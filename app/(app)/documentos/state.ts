@@ -2,6 +2,7 @@ import type { StudentDocumentStatus, StudentDocumentType } from "@/types/domain"
 
 export interface StudentDocumentUploadFormValues {
   document_type: StudentDocumentType;
+  required_course_document_id: string;
   enrollment_id: string;
 }
 
@@ -34,6 +35,7 @@ export const initialStudentVaccinationUploadState: StudentDocumentUploadActionSt
   fieldErrors: {},
   formValues: {
     document_type: "carteira_vacinacao",
+    required_course_document_id: "",
     enrollment_id: ""
   },
   savedDocumentId: null
@@ -45,6 +47,19 @@ export const initialStudentTceUploadState: StudentDocumentUploadActionState = {
   fieldErrors: {},
   formValues: {
     document_type: "tce",
+    required_course_document_id: "",
+    enrollment_id: ""
+  },
+  savedDocumentId: null
+};
+
+export const initialStudentGenericUploadState: StudentDocumentUploadActionState = {
+  status: "idle",
+  message: null,
+  fieldErrors: {},
+  formValues: {
+    document_type: "obrigatorio_generico",
+    required_course_document_id: "",
     enrollment_id: ""
   },
   savedDocumentId: null

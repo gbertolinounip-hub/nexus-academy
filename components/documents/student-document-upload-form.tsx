@@ -4,6 +4,7 @@ import { useActionState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { submitStudentDocumentAction } from "@/app/(app)/documentos/actions";
 import {
+  initialStudentGenericUploadState,
   initialStudentTceUploadState,
   initialStudentVaccinationUploadState
 } from "@/app/(app)/documentos/state";
@@ -12,6 +13,7 @@ import type { StudentDocumentAreaOption, StudentDocumentType } from "@/types/dom
 
 interface StudentDocumentUploadFormProps {
   documentType: StudentDocumentType;
+  requiredCourseDocumentId?: string | null;
   title: string;
   description: string;
   submitLabel: string;
@@ -21,6 +23,7 @@ interface StudentDocumentUploadFormProps {
 
 export function StudentDocumentUploadForm({
   documentType,
+  requiredCourseDocumentId = null,
   title,
   description,
   submitLabel,
@@ -29,19 +32,40 @@ export function StudentDocumentUploadForm({
 }: StudentDocumentUploadFormProps) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
+  const initialState =
+    documentType === "tce"
+      ? {
+          ...initialStudentTceUploadState,
+          formValues: {
+            ...initialStudentTceUploadState.formValues,
+            required_course_document_id: requiredCourseDocumentId ?? ""
+          }
+        }
+      : documentType === "obrigatorio_generico"
+        ? {
+            ...initialStudentGenericUploadState,
+            formValues: {
+              ...initialStudentGenericUploadState.formValues,
+              required_course_document_id: requiredCourseDocumentId ?? ""
+            }
+          }
+        : {
+            ...initialStudentVaccinationUploadState,
+            formValues: {
+              ...initialStudentVaccinationUploadState.formValues,
+              required_course_document_id: requiredCourseDocumentId ?? ""
+            }
+          };
   const [state, formAction] = useActionState(
     submitStudentDocumentAction,
-    documentType === "tce"
-      ? initialStudentTceUploadState
-      : initialStudentVaccinationUploadState
+    initialState
   );
-  const safeState =
-    state ??
-    (documentType === "tce"
-      ? initialStudentTceUploadState
-      : initialStudentVaccinationUploadState);
+  const safeState = state ?? initialState;
   const fieldErrors = safeState.fieldErrors ?? {};
-  const disableForm = Boolean(disabledMessage) || (documentType === "tce" && !tceOptions.length);
+  const disableForm =
+    Boolean(disabledMessage) ||
+    (documentType === "tce" && !tceOptions.length) ||
+    (documentType === "obrigatorio_generico" && !requiredCourseDocumentId);
 
   useEffect(() => {
     if (safeState.status !== "success") {
@@ -55,6 +79,11 @@ export function StudentDocumentUploadForm({
   return (
     <form ref={formRef} action={formAction} className="form-stack student-document-upload-form">
       <input type="hidden" name="document_type" value={documentType} />
+      <input
+        type="hidden"
+        name="required_course_document_id"
+        value={requiredCourseDocumentId ?? ""}
+      />
 
       <div className="management-block-card student-document-upload-card">
         <div className="management-block-header">

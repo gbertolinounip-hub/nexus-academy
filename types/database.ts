@@ -1569,7 +1569,7 @@ export interface Database {
           oferta_curso_unidade_id: string | null;
           documento_obrigatorio_curso_id: string | null;
           area_estagio_id: string | null;
-          tipo: "carteira_vacinacao" | "tce";
+          tipo: "carteira_vacinacao" | "tce" | "obrigatorio_generico";
           status: "enviado" | "aprovado" | "reprovado";
           arquivo_nome: string;
           arquivo_mime_type: string;
@@ -1594,7 +1594,7 @@ export interface Database {
           oferta_curso_unidade_id?: string | null;
           documento_obrigatorio_curso_id?: string | null;
           area_estagio_id?: string | null;
-          tipo: "carteira_vacinacao" | "tce";
+          tipo: "carteira_vacinacao" | "tce" | "obrigatorio_generico";
           status?: "enviado" | "aprovado" | "reprovado";
           arquivo_nome: string;
           arquivo_mime_type: string;
@@ -1619,7 +1619,7 @@ export interface Database {
           oferta_curso_unidade_id?: string | null;
           documento_obrigatorio_curso_id?: string | null;
           area_estagio_id?: string | null;
-          tipo?: "carteira_vacinacao" | "tce";
+          tipo?: "carteira_vacinacao" | "tce" | "obrigatorio_generico";
           status?: "enviado" | "aprovado" | "reprovado";
           arquivo_nome?: string;
           arquivo_mime_type?: string;

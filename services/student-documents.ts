@@ -14,6 +14,7 @@ import type {
   StudentDocumentAreaOption,
   StudentDocumentNotificationCenter,
   StudentDocumentNotificationSummary,
+  StudentRequiredDocumentEntry,
   StudentDocumentNotificationType,
   StudentDocumentReviewerRole,
   StudentDocumentStatus,
@@ -42,6 +43,7 @@ type RequiredCourseDocumentRow =
 type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
 type SupabaseAdminClient = ReturnType<typeof createSupabaseAdminClient>;
 type StudentDocumentReadClient = SupabaseServerClient | SupabaseAdminClient;
+type FixedStudentDocumentType = Exclude<StudentDocumentType, "obrigatorio_generico">;
 
 export const STUDENT_DOCUMENTS_BUCKET = "student-documents";
 const STUDENT_DOCUMENTS_S3_SCHEME = "s3://";
@@ -61,7 +63,7 @@ export const STUDENT_DOCUMENT_ACCEPTED_MIME_TYPES = [
 const STUDENT_DOCUMENT_TYPE_COMPATIBILITY_CODES = {
   carteira_vacinacao: ["CARTEIRA_VACINACAO", "carteira_vacinacao"],
   tce: ["TCE", "tce"]
-} as const satisfies Record<StudentDocumentType, readonly string[]>;
+} as const satisfies Record<FixedStudentDocumentType, readonly string[]>;
 
 interface ResolvedStudentDocumentUploadContext {
   student: StudentRow;
@@ -70,6 +72,9 @@ interface ResolvedStudentDocumentUploadContext {
   semester: SemesterRow | null;
   offer: OfferRow;
   requiredCourseDocument: RequiredCourseDocumentRow;
+  documentType: StudentDocumentType;
+  documentTypeRow: DocumentTypeRow | null;
+  documentLabel: string;
 }
 
 interface ResolvedStudentDocumentReviewContext {
@@ -206,6 +211,9 @@ export function buildStudentDocumentStoragePath(input: {
   documentId: string;
   documentType: StudentDocumentType;
   fileName: string;
+  requiredCourseDocumentId?: string | null;
+  documentTypeCode?: string | null;
+  documentLabel?: string | null;
   enrollmentId?: string | null;
   areaName?: string | null;
   blockName?: string | null;
@@ -222,6 +230,23 @@ export function buildStudentDocumentStoragePath(input: {
     return [
       ...baseSegments,
       "carteira-vacinacao",
+      `${input.documentId}-${normalizedFileName}`
+    ].join("/");
+  }
+
+  if (input.documentType === "obrigatorio_generico") {
+    const documentSegment = [
+      normalizeStorageSegment(
+        input.documentTypeCode ?? input.documentLabel,
+        "documento-obrigatorio"
+      ),
+      input.requiredCourseDocumentId ?? "sem-configuracao"
+    ].join("__");
+
+    return [
+      ...baseSegments,
+      "documentos-obrigatorios",
+      documentSegment,
       `${input.documentId}-${normalizedFileName}`
     ].join("/");
   }
@@ -246,6 +271,9 @@ export function buildStudentDocumentS3StoragePath(input: {
   documentId: string;
   documentType: StudentDocumentType;
   fileName: string;
+  requiredCourseDocumentId?: string | null;
+  documentTypeCode?: string | null;
+  documentLabel?: string | null;
   enrollmentId?: string | null;
   areaName?: string | null;
   blockName?: string | null;
@@ -377,7 +405,7 @@ async function loadEnrollmentOfferContext(
 async function loadRequiredCourseDocumentForType(
   client: StudentDocumentReadClient,
   courseId: string,
-  documentType: StudentDocumentType
+  documentType: FixedStudentDocumentType
 ) {
   const compatibilityCodes = STUDENT_DOCUMENT_TYPE_COMPATIBILITY_CODES[documentType];
   const { data: documentTypeRowsData, error: documentTypeRowsError } = await client
@@ -431,9 +459,46 @@ async function loadRequiredCourseDocumentForType(
   } as const;
 }
 
+async function loadRequiredCourseDocumentById(
+  client: StudentDocumentReadClient,
+  requiredCourseDocumentId: string
+) {
+  const { data, error } = await client
+    .from("documentos_obrigatorios_curso")
+    .select("*")
+    .eq("id", requiredCourseDocumentId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      "Nao foi possivel carregar a configuracao do documento obrigatorio selecionado."
+    );
+  }
+
+  return (data ?? null) as RequiredCourseDocumentRow | null;
+}
+
+async function loadDocumentTypeRowById(
+  client: StudentDocumentReadClient,
+  documentTypeId: string
+) {
+  const { data, error } = await client
+    .from("tipos_documento")
+    .select("*")
+    .eq("id", documentTypeId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error("Nao foi possivel carregar o tipo documental selecionado.");
+  }
+
+  return (data ?? null) as DocumentTypeRow | null;
+}
+
 export async function resolveStudentDocumentUploadContext(input: {
   currentUser: SessionUser;
-  documentType: StudentDocumentType;
+  documentType?: StudentDocumentType | null;
+  requiredCourseDocumentId?: string | null;
   enrollmentId?: string | null;
 }) {
   const supabase = await createSupabaseServerClient();
@@ -513,23 +578,78 @@ export async function resolveStudentDocumentUploadContext(input: {
     }
   }
 
-  const requiredCourseDocumentResolution =
-    await loadRequiredCourseDocumentForType(
+  let requiredCourseDocument: RequiredCourseDocumentRow | null = null;
+  let documentTypeRow: DocumentTypeRow | null = null;
+  let resolvedDocumentType: StudentDocumentType | null = null;
+
+  if (input.requiredCourseDocumentId) {
+    requiredCourseDocument = await loadRequiredCourseDocumentById(
       supabase,
-      offer.curso_id,
-      input.documentType
+      input.requiredCourseDocumentId
     );
 
-  if (requiredCourseDocumentResolution.hasAmbiguity) {
-    throw new Error(
-      "Foi encontrada mais de uma configuracao obrigatoria ativa para este tipo de documento no curso. Procure a coordenacao."
+    if (!requiredCourseDocument || !requiredCourseDocument.ativo) {
+      throw new Error(
+        "O documento obrigatorio selecionado nao esta mais disponivel para upload."
+      );
+    }
+
+    if (requiredCourseDocument.curso_id !== offer.curso_id) {
+      throw new Error(
+        "O documento obrigatorio selecionado nao pertence ao curso ativo do aluno."
+      );
+    }
+
+    documentTypeRow = await loadDocumentTypeRowById(
+      supabase,
+      requiredCourseDocument.tipo_documento_id
     );
+    resolvedDocumentType = resolveRequiredDocumentCategory(
+      documentTypeRow?.codigo
+    );
+  } else {
+    if (!input.documentType || input.documentType === "obrigatorio_generico") {
+      throw new Error(
+        "Selecione um documento obrigatorio valido antes de continuar."
+      );
+    }
+
+    const requiredCourseDocumentResolution =
+      await loadRequiredCourseDocumentForType(
+        supabase,
+        offer.curso_id,
+        input.documentType
+      );
+
+    if (requiredCourseDocumentResolution.hasAmbiguity) {
+      throw new Error(
+        "Foi encontrada mais de uma configuracao obrigatoria ativa para este tipo de documento no curso. Procure a coordenacao."
+      );
+    }
+
+    requiredCourseDocument = requiredCourseDocumentResolution.requiredCourseDocument;
+
+    if (!requiredCourseDocument) {
+      throw new Error(
+        "Este documento ainda nao esta configurado como obrigatorio para o curso. Procure a coordenacao."
+      );
+    }
+
+    documentTypeRow = await loadDocumentTypeRowById(
+      supabase,
+      requiredCourseDocument.tipo_documento_id
+    );
+    resolvedDocumentType = input.documentType;
   }
 
-  if (!requiredCourseDocumentResolution.requiredCourseDocument) {
+  if (!requiredCourseDocument) {
     throw new Error(
       "Este documento ainda nao esta configurado como obrigatorio para o curso. Procure a coordenacao."
     );
+  }
+
+  if (!resolvedDocumentType) {
+    resolvedDocumentType = "obrigatorio_generico";
   }
 
   return {
@@ -538,8 +658,13 @@ export async function resolveStudentDocumentUploadContext(input: {
     classRow,
     semester,
     offer,
-    requiredCourseDocument:
-      requiredCourseDocumentResolution.requiredCourseDocument
+    requiredCourseDocument,
+    documentType: resolvedDocumentType,
+    documentTypeRow,
+    documentLabel:
+      requiredCourseDocument.nome_exibicao?.trim() ||
+      documentTypeRow?.nome?.trim() ||
+      formatStudentDocumentType(resolvedDocumentType)
   } satisfies ResolvedStudentDocumentUploadContext;
 }
 
@@ -801,6 +926,7 @@ export interface StudentDocumentsPageData {
   };
   vaccinationCurrent: StudentDocumentSummary | null;
   vaccinationHistory: StudentDocumentSummary[];
+  additionalRequiredDocuments: StudentRequiredDocumentEntry[];
   tceOptions: StudentDocumentAreaOption[];
   tceDocuments: StudentDocumentSummary[];
   notifications: StudentDocumentNotificationCenter;
@@ -878,6 +1004,7 @@ export interface StudentDocumentDetailPageData {
     active: boolean;
     areaLabels: string[];
   };
+  additionalRequiredDocuments: StudentRequiredDocumentEntry[];
   vaccinationDocuments: StudentDocumentSummary[];
   tceDocuments: StudentDocumentSummary[];
 }
@@ -894,6 +1021,8 @@ interface StudentDocumentScopeContext {
   areas: AreaRow[];
   blocks: BlockRow[];
   professorLinks: ProfessorLinkRow[];
+  requiredCourseDocuments: RequiredCourseDocumentRow[];
+  documentTypes: DocumentTypeRow[];
 }
 
 interface StudentDocumentStudentScope {
@@ -950,11 +1079,10 @@ function buildDocumentNotificationTitle(type: StudentDocumentNotificationType) {
 
 function buildDocumentNotificationMessage(input: {
   type: StudentDocumentNotificationType;
-  documentType: StudentDocumentType;
+  documentLabel: string;
   areaName: string | null;
   rejectionReason: string | null;
 }) {
-  const documentLabel = formatStudentDocumentType(input.documentType);
   const areaLabel = input.areaName ? ` em ${input.areaName}` : "";
   const prefix =
     input.type === "documento_reprovado_coordenador"
@@ -962,10 +1090,10 @@ function buildDocumentNotificationMessage(input: {
       : "O professor supervisor reprovou";
 
   if (input.rejectionReason) {
-    return `${prefix.toLowerCase()} sua ${documentLabel.toLowerCase()}${areaLabel}. Verifique a justificativa e envie uma nova versão.`;
+    return `${prefix.toLowerCase()} seu documento ${input.documentLabel.toLowerCase()}${areaLabel}. Verifique a justificativa e envie uma nova versão.`;
   }
 
-  return `${prefix} sua ${documentLabel.toLowerCase()}${areaLabel}. Verifique a justificativa e envie uma nova versão.`;
+  return `${prefix} seu documento ${input.documentLabel.toLowerCase()}${areaLabel}. Verifique a justificativa e envie uma nova versão.`;
 }
 
 function buildStudentDocumentSummaryMaps(context: StudentDocumentScopeContext) {
@@ -977,6 +1105,10 @@ function buildStudentDocumentSummaryMaps(context: StudentDocumentScopeContext) {
   const semesterMap = new Map(context.semesters.map((row) => [row.id, row]));
   const areaMap = new Map(context.areas.map((row) => [row.id, row]));
   const blockMap = new Map(context.blocks.map((row) => [row.id, row]));
+  const requiredCourseDocumentMap = new Map(
+    context.requiredCourseDocuments.map((row) => [row.id, row])
+  );
+  const documentTypeMap = new Map(context.documentTypes.map((row) => [row.id, row]));
 
   function toSummary(row: DocumentRow): StudentDocumentSummary {
     const studentUser = userMap.get(row.aluno_id) ?? null;
@@ -991,6 +1123,16 @@ function buildStudentDocumentSummaryMaps(context: StudentDocumentScopeContext) {
     const area = row.area_estagio_id ? areaMap.get(row.area_estagio_id) ?? null : null;
     const block = area ? blockMap.get(area.bloco_id) ?? null : null;
     const reviewerRole = row.validado_por_papel as StudentDocumentReviewerRole | null;
+    const requiredCourseDocument = row.documento_obrigatorio_curso_id
+      ? requiredCourseDocumentMap.get(row.documento_obrigatorio_curso_id) ?? null
+      : null;
+    const documentType = requiredCourseDocument
+      ? documentTypeMap.get(requiredCourseDocument.tipo_documento_id) ?? null
+      : null;
+    const typeLabel =
+      requiredCourseDocument?.nome_exibicao?.trim() ||
+      documentType?.nome?.trim() ||
+      formatStudentDocumentType(row.tipo);
 
     return {
       id: row.id,
@@ -1000,7 +1142,12 @@ function buildStudentDocumentSummaryMaps(context: StudentDocumentScopeContext) {
       studentName: studentUser?.nome_completo ?? "Aluno não identificado",
       registration: studentProfile?.matricula ?? "Sem matrícula",
       type: row.tipo as StudentDocumentType,
-      typeLabel: formatStudentDocumentType(row.tipo),
+      typeLabel,
+      requiredCourseDocumentId: row.documento_obrigatorio_curso_id ?? null,
+      requiredCourseDocumentDisplayName: requiredCourseDocument?.nome_exibicao?.trim() ?? null,
+      documentTypeId: documentType?.id ?? null,
+      documentTypeCode: documentType?.codigo ?? null,
+      documentTypeName: documentType?.nome?.trim() ?? null,
       status: row.status as StudentDocumentStatus,
       statusLabel: formatStudentDocumentStatus(row.status, reviewerRole),
       reviewerRole,
@@ -1042,7 +1189,7 @@ function buildStudentDocumentSummaryMaps(context: StudentDocumentScopeContext) {
         row.mensagem ||
         buildDocumentNotificationMessage({
           type: row.tipo as StudentDocumentNotificationType,
-          documentType: documentSummary.type,
+          documentLabel: documentSummary.typeLabel,
           areaName: documentSummary.areaName,
           rejectionReason: documentSummary.rejectionReason
         }),
@@ -1247,6 +1394,9 @@ async function loadStudentDocumentScopeByStudentIds(
   const documents = (documentRowsResult.data ?? []) as DocumentRow[];
   const studentRows = (studentRowsResult.data ?? []) as StudentRow[];
   const studentById = new Map(studentRows.map((row) => [row.usuario_id, row]));
+  const courseIds = [
+    ...new Set(studentRows.map((row) => row.curso_id).filter(Boolean))
+  ] as string[];
   const requiredCourseDocumentIds = [
     ...new Set(
       documents.map((row) => row.documento_obrigatorio_curso_id).filter(Boolean)
@@ -1268,7 +1418,8 @@ async function loadStudentDocumentScopeByStudentIds(
     reviewerUsersResult,
     enrollmentRowsResult,
     unitRowsResult,
-    requiredCourseDocumentsResult
+    activeRequiredCourseDocumentsResult,
+    referencedRequiredCourseDocumentsResult
   ] = await Promise.all([
     reviewerIds.length
       ? adminClient.from("usuarios").select("*").in("id", reviewerIds)
@@ -1278,6 +1429,13 @@ async function loadStudentDocumentScopeByStudentIds(
       : Promise.resolve({ data: [], error: null }),
     unitIds.length
       ? readClient.from("unidades").select("*").in("id", unitIds)
+      : Promise.resolve({ data: [], error: null }),
+    courseIds.length
+      ? readClient
+          .from("documentos_obrigatorios_curso")
+          .select("*")
+          .in("curso_id", courseIds)
+          .eq("ativo", true)
       : Promise.resolve({ data: [], error: null }),
     requiredCourseDocumentIds.length
       ? readClient
@@ -1291,7 +1449,8 @@ async function loadStudentDocumentScopeByStudentIds(
     reviewerUsersResult.error ||
     enrollmentRowsResult.error ||
     unitRowsResult.error ||
-    requiredCourseDocumentsResult.error
+    activeRequiredCourseDocumentsResult.error ||
+    referencedRequiredCourseDocumentsResult.error
   ) {
     throw new Error(
       "Não foi possível carregar o contexto complementar dos documentos dos alunos."
@@ -1358,11 +1517,34 @@ async function loadStudentDocumentScopeByStudentIds(
     );
   }
 
-  const requiredCourseDocuments =
-    (requiredCourseDocumentsResult.data ?? []) as RequiredCourseDocumentRow[];
+  const requiredCourseDocuments = [
+    ...new Map(
+      [
+        ...(((activeRequiredCourseDocumentsResult.data ?? []) as RequiredCourseDocumentRow[]).map(
+          (row) => [row.id, row] as const
+        )),
+        ...(((referencedRequiredCourseDocumentsResult.data ?? []) as RequiredCourseDocumentRow[]).map(
+          (row) => [row.id, row] as const
+        ))
+      ]
+    ).values()
+  ];
   const requiredCourseDocumentById = new Map(
     requiredCourseDocuments.map((row) => [row.id, row])
   );
+  const documentTypeIds = [
+    ...new Set(requiredCourseDocuments.map((row) => row.tipo_documento_id).filter(Boolean))
+  ] as string[];
+  const documentTypesResult = documentTypeIds.length
+    ? await readClient.from("tipos_documento").select("*").in("id", documentTypeIds)
+    : { data: [], error: null };
+
+  if (documentTypesResult.error) {
+    throw new Error(
+      "NÃ£o foi possÃ­vel carregar os tipos documentais vinculados aos cursos visÃ­veis."
+    );
+  }
+
   const scope = input?.scope ?? null;
   const visibleDocumentIds = new Set(
     documents
@@ -1423,7 +1605,9 @@ async function loadStudentDocumentScopeByStudentIds(
     semesters: (semesterRowsResult.data ?? []) as SemesterRow[],
     areas: areaRows,
     blocks: (blockRowsResult.data ?? []) as BlockRow[],
-    professorLinks: (professorLinksResult.data ?? []) as ProfessorLinkRow[]
+    professorLinks: (professorLinksResult.data ?? []) as ProfessorLinkRow[],
+    requiredCourseDocuments,
+    documentTypes: (documentTypesResult.data ?? []) as DocumentTypeRow[]
   } satisfies StudentDocumentScopeContext;
 }
 
@@ -1543,7 +1727,7 @@ function buildStudentNotificationCenter(
               row.mensagem ||
               buildDocumentNotificationMessage({
                 type: row.tipo as StudentDocumentNotificationType,
-                documentType: document.type,
+                documentLabel: document.typeLabel,
                 areaName: document.areaName,
                 rejectionReason: document.rejectionReason
               }),
@@ -1612,6 +1796,98 @@ function buildAreaIdsForStudent(input: {
         .filter(Boolean)
     )
   ] as string[];
+}
+
+function resolveRequiredDocumentCategory(
+  documentTypeCode: string | null | undefined
+): StudentDocumentType {
+  const normalizedCode = (documentTypeCode ?? "").trim();
+
+  if (
+    STUDENT_DOCUMENT_TYPE_COMPATIBILITY_CODES.carteira_vacinacao.includes(
+      normalizedCode as never
+    )
+  ) {
+    return "carteira_vacinacao";
+  }
+
+  if (STUDENT_DOCUMENT_TYPE_COMPATIBILITY_CODES.tce.includes(normalizedCode as never)) {
+    return "tce";
+  }
+
+  return "obrigatorio_generico";
+}
+
+function buildAdditionalRequiredDocumentsForStudent(input: {
+  studentId: string;
+  context: StudentDocumentScopeContext;
+}) {
+  const student = input.context.students.find(
+    (row) => row.usuario_id === input.studentId
+  ) ?? null;
+
+  if (!student) {
+    return [] as StudentRequiredDocumentEntry[];
+  }
+
+  const requiredCourseDocuments = input.context.requiredCourseDocuments
+    .filter((row) => row.curso_id === student.curso_id && row.ativo)
+    .sort((left, right) => {
+      const leftOrder = left.ordem ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = right.ordem ?? Number.MAX_SAFE_INTEGER;
+
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+
+      return left.created_at.localeCompare(right.created_at);
+    });
+  const documentTypeMap = new Map(
+    input.context.documentTypes.map((row) => [row.id, row])
+  );
+  const maps = buildStudentDocumentSummaryMaps(input.context);
+  const studentDocuments = input.context.documents
+    .filter((row) => row.aluno_id === input.studentId)
+    .map((row) => maps.toSummary(row))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+
+  return requiredCourseDocuments
+    .map((requiredCourseDocument) => {
+      const documentType =
+        documentTypeMap.get(requiredCourseDocument.tipo_documento_id) ?? null;
+
+      if (!documentType) {
+        return null;
+      }
+
+      if (
+        resolveRequiredDocumentCategory(documentType.codigo) !==
+        "obrigatorio_generico"
+      ) {
+        return null;
+      }
+
+      const history = studentDocuments.filter(
+        (document) => document.requiredCourseDocumentId === requiredCourseDocument.id
+      );
+      const currentDocument =
+        history.find((document) => document.active) ?? history[0] ?? null;
+
+      return {
+        requiredCourseDocumentId: requiredCourseDocument.id,
+        documentTypeId: documentType.id,
+        documentTypeCode: documentType.codigo,
+        documentTypeName: documentType.nome,
+        displayName:
+          requiredCourseDocument.nome_exibicao?.trim() || documentType.nome,
+        description: requiredCourseDocument.descricao?.trim() || null,
+        required: requiredCourseDocument.obrigatorio,
+        order: requiredCourseDocument.ordem,
+        currentDocument,
+        history
+      } satisfies StudentRequiredDocumentEntry;
+    })
+    .filter(Boolean) as StudentRequiredDocumentEntry[];
 }
 
 function matchesDirectoryStatusFilter(
@@ -1970,6 +2246,10 @@ export async function getStudentDocumentScopeForCurrentStudent(
   const unit = studentUser?.unidade_id
     ? context.units.find((row) => row.id === studentUser.unidade_id) ?? null
     : null;
+  const additionalRequiredDocuments = buildAdditionalRequiredDocumentsForStudent({
+    studentId: currentUser.id,
+    context
+  });
 
   return {
     student: {
@@ -1983,6 +2263,7 @@ export async function getStudentDocumentScopeForCurrentStudent(
     vaccinationHistory: documentSummaries.filter(
       (document) => document.type === "carteira_vacinacao"
     ),
+    additionalRequiredDocuments,
     tceOptions: assignments,
     tceDocuments: documentSummaries.filter((document) => document.type === "tce"),
     notifications
@@ -2179,6 +2460,10 @@ export async function getStudentDocumentDetailPageData(input: {
   const unit = studentUser.unidade_id
     ? context.units.find((row) => row.id === studentUser.unidade_id) ?? null
     : null;
+  const additionalRequiredDocuments = buildAdditionalRequiredDocumentsForStudent({
+    studentId: studentUser.id,
+    context
+  });
 
   return {
     viewerRole: input.viewerRole,
@@ -2195,6 +2480,7 @@ export async function getStudentDocumentDetailPageData(input: {
         context
       })
     },
+    additionalRequiredDocuments,
     vaccinationDocuments: documents.filter(
       (document) => document.type === "carteira_vacinacao"
     ),
