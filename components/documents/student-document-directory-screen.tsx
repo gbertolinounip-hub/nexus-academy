@@ -39,22 +39,22 @@ export function StudentDocumentDirectoryScreen({
         <MetricCard
           label="Alunos no recorte"
           value={String(pageData.metrics.totalStudents)}
-          hint="Quantidade de alunos visiveis apos a aplicacao dos filtros atuais."
+          hint="Quantidade de alunos visíveis após a aplicação dos filtros atuais."
         />
         <MetricCard
-          label="Com pendencias"
+          label="Com pendências"
           value={String(pageData.metrics.withPendingDocuments)}
-          hint="Alunos com documentos ativos aguardando analise."
+          hint="Alunos com documentos ativos aguardando análise."
           tone="alert"
         />
         <MetricCard
-          label="Com reprovacao ativa"
+          label="Com reprovação ativa"
           value={String(pageData.metrics.withRejectedDocuments)}
-          hint="Alunos com documento ativo reprovado e passivel de novo envio."
+          hint="Alunos com documento ativo reprovado e passível de novo envio."
           tone="alert"
         />
         <MetricCard
-          label="Com notificacao nao lida"
+          label="Com notificação não lida"
           value={String(pageData.metrics.withUnreadNotifications)}
           hint="Alunos que ainda possuem devolutiva pendente de leitura."
         />
@@ -64,10 +64,10 @@ export function StudentDocumentDirectoryScreen({
         title="Filtros documentais"
         description={
           showInstitutionScope
-            ? "Refine a visao global por instituicao, unidade, aluno, area e status documental."
+            ? "Refine a visão global por instituição, unidade, aluno, área e status documental."
             : showScopedUnitFilter
-              ? "Refine a visao documental do curso por unidade, aluno, area e status documental."
-            : "Refine a visao operacional por aluno, area e status documental."
+              ? "Refine a visão documental do curso por unidade, aluno, área e status documental."
+            : "Refine a visão operacional por aluno, área e status documental."
         }
       >
         {showInstitutionScope ? (
@@ -88,12 +88,12 @@ export function StudentDocumentDirectoryScreen({
                 type="search"
                 name="q"
                 defaultValue={pageData.filters.search}
-                placeholder="Nome, matricula ou e-mail"
+                placeholder="Nome, matrícula ou e-mail"
               />
             </label>
 
             <label className="field">
-              <span>Area</span>
+              <span>Área</span>
               <select className="input" name="area_id" defaultValue={pageData.filters.areaId}>
                 <option value="">Todas</option>
                 {pageData.areaOptions.map((option) => (

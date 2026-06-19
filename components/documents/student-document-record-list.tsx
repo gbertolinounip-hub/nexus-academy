@@ -17,16 +17,16 @@ interface StudentDocumentRecordListProps {
 
 function buildDocumentSubtitle(document: StudentDocumentSummary) {
   if (document.type === "carteira_vacinacao") {
-    return "Documento geral obrigatorio do aluno.";
+    return "Documento geral obrigatório do aluno.";
   }
 
   if (document.type === "obrigatorio_generico") {
-    return "Documento obrigatorio configurado dinamicamente para o curso.";
+    return "Documento obrigatório configurado dinamicamente para o curso.";
   }
 
   const scopeLabel = joinDisplayParts([document.areaName, document.semesterCode]);
 
-  return scopeLabel || "Documento vinculado a area operacional do TCE.";
+  return scopeLabel || "Documento vinculado à área operacional do TCE.";
 }
 
 export function StudentDocumentRecordList({
@@ -59,7 +59,7 @@ export function StudentDocumentRecordList({
               <span className={`status-pill status-${document.status}`}>
                 {document.statusLabel}
               </span>
-              {!document.active ? <span className="badge">Versao anterior</span> : null}
+              {!document.active ? <span className="badge">Versão anterior</span> : null}
             </div>
           </div>
 
@@ -73,11 +73,11 @@ export function StudentDocumentRecordList({
               <strong>{formatDateTime(document.submittedAt)}</strong>
             </div>
             <div className="report-mini-card">
-              <span>Validacao</span>
+              <span>Validação</span>
               <strong>
                 {document.reviewedAt
                   ? formatDateTime(document.reviewedAt)
-                  : "Aguardando analise"}
+                  : "Aguardando análise"}
               </strong>
             </div>
             <div className="report-mini-card">
@@ -96,7 +96,7 @@ export function StudentDocumentRecordList({
 
           {document.rejectionReason ? (
             <div className="form-notice form-notice-error student-document-record-reason">
-              <strong>Justificativa da reprovacao:</strong> {document.rejectionReason}
+              <strong>Justificativa da reprovação:</strong> {document.rejectionReason}
             </div>
           ) : null}
 

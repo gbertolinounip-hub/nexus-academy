@@ -346,7 +346,7 @@ async function loadOfferRowById(
 
   if (error) {
     throw new Error(
-      "Nao foi possivel carregar a oferta do curso vinculada ao documento."
+      "Não foi possível carregar a oferta do curso vinculada ao documento."
     );
   }
 
@@ -370,7 +370,7 @@ async function loadEnrollmentOfferContext(
 
     if (classRowError) {
       throw new Error(
-        "Nao foi possivel consultar a turma vinculada ao documento do aluno."
+        "Não foi possível consultar a turma vinculada ao documento do aluno."
       );
     }
 
@@ -386,7 +386,7 @@ async function loadEnrollmentOfferContext(
 
       if (semesterError) {
         throw new Error(
-          "Nao foi possivel consultar o semestre vinculado ao documento do aluno."
+          "Não foi possível consultar o semestre vinculado ao documento do aluno."
         );
       }
 
@@ -416,7 +416,7 @@ async function loadRequiredCourseDocumentForType(
 
   if (documentTypeRowsError) {
     throw new Error(
-      "Nao foi possivel carregar a configuracao dos tipos documentais do curso."
+      "Não foi possível carregar a configuração dos tipos documentais do curso."
     );
   }
 
@@ -445,7 +445,7 @@ async function loadRequiredCourseDocumentForType(
 
   if (requiredCourseDocumentRowsError) {
     throw new Error(
-      "Nao foi possivel carregar os documentos obrigatorios configurados para o curso."
+      "Não foi possível carregar os documentos obrigatórios configurados para o curso."
     );
   }
 
@@ -471,7 +471,7 @@ async function loadRequiredCourseDocumentById(
 
   if (error) {
     throw new Error(
-      "Nao foi possivel carregar a configuracao do documento obrigatorio selecionado."
+      "Não foi possível carregar a configuração do documento obrigatório selecionado."
     );
   }
 
@@ -489,7 +489,7 @@ async function loadDocumentTypeRowById(
     .maybeSingle();
 
   if (error) {
-    throw new Error("Nao foi possivel carregar o tipo documental selecionado.");
+    throw new Error("Não foi possível carregar o tipo documental selecionado.");
   }
 
   return (data ?? null) as DocumentTypeRow | null;
@@ -510,7 +510,7 @@ export async function resolveStudentDocumentUploadContext(input: {
 
   if (studentRowError) {
     throw new Error(
-      "Nao foi possivel localizar o cadastro academico do aluno para este envio."
+      "Não foi possível localizar o cadastro acadêmico do aluno para este envio."
     );
   }
 
@@ -518,7 +518,7 @@ export async function resolveStudentDocumentUploadContext(input: {
 
   if (!student) {
     throw new Error(
-      "Nao foi possivel localizar o cadastro academico do aluno para este envio."
+      "Não foi possível localizar o cadastro acadêmico do aluno para este envio."
     );
   }
 
@@ -537,7 +537,7 @@ export async function resolveStudentDocumentUploadContext(input: {
 
     if (enrollmentRowError || !enrollmentRowData) {
       throw new Error(
-        "Nao foi possivel identificar a matricula vinculada a este documento. Procure a coordenacao."
+        "Não foi possível identificar a matrícula vinculada a este documento. Procure a coordenação."
       );
     }
 
@@ -553,7 +553,7 @@ export async function resolveStudentDocumentUploadContext(input: {
 
     if (!offer) {
       throw new Error(
-        "Nao foi possivel identificar a oferta do curso vinculada a este documento. Procure a coordenacao."
+        "Não foi possível identificar a oferta do curso vinculada a este documento. Procure a coordenação."
       );
     }
   } else {
@@ -565,7 +565,7 @@ export async function resolveStudentDocumentUploadContext(input: {
 
     if (fallbackOfferIds.length !== 1) {
       throw new Error(
-        "Nao foi possivel identificar a oferta do curso vinculada a este documento. Procure a coordenacao."
+        "Não foi possível identificar a oferta do curso vinculada a este documento. Procure a coordenação."
       );
     }
 
@@ -573,7 +573,7 @@ export async function resolveStudentDocumentUploadContext(input: {
 
     if (!offer) {
       throw new Error(
-        "Nao foi possivel identificar a oferta do curso vinculada a este documento. Procure a coordenacao."
+        "Não foi possível identificar a oferta do curso vinculada a este documento. Procure a coordenação."
       );
     }
   }
@@ -590,13 +590,13 @@ export async function resolveStudentDocumentUploadContext(input: {
 
     if (!requiredCourseDocument || !requiredCourseDocument.ativo) {
       throw new Error(
-        "O documento obrigatorio selecionado nao esta mais disponivel para upload."
+        "O documento obrigatório selecionado não está mais disponível para upload."
       );
     }
 
     if (requiredCourseDocument.curso_id !== offer.curso_id) {
       throw new Error(
-        "O documento obrigatorio selecionado nao pertence ao curso ativo do aluno."
+        "O documento obrigatório selecionado não pertence ao curso ativo do aluno."
       );
     }
 
@@ -610,7 +610,7 @@ export async function resolveStudentDocumentUploadContext(input: {
   } else {
     if (!input.documentType || input.documentType === "obrigatorio_generico") {
       throw new Error(
-        "Selecione um documento obrigatorio valido antes de continuar."
+        "Selecione um documento obrigatório válido antes de continuar."
       );
     }
 
@@ -623,7 +623,7 @@ export async function resolveStudentDocumentUploadContext(input: {
 
     if (requiredCourseDocumentResolution.hasAmbiguity) {
       throw new Error(
-        "Foi encontrada mais de uma configuracao obrigatoria ativa para este tipo de documento no curso. Procure a coordenacao."
+        "Foi encontrada mais de uma configuração obrigatória ativa para este tipo de documento no curso. Procure a coordenação."
       );
     }
 
@@ -631,7 +631,7 @@ export async function resolveStudentDocumentUploadContext(input: {
 
     if (!requiredCourseDocument) {
       throw new Error(
-        "Este documento ainda nao esta configurado como obrigatorio para o curso. Procure a coordenacao."
+        "Este documento ainda não está configurado como obrigatório para o curso. Procure a coordenação."
       );
     }
 
@@ -644,7 +644,7 @@ export async function resolveStudentDocumentUploadContext(input: {
 
   if (!requiredCourseDocument) {
     throw new Error(
-      "Este documento ainda nao esta configurado como obrigatorio para o curso. Procure a coordenacao."
+      "Este documento ainda não está configurado como obrigatório para o curso. Procure a coordenação."
     );
   }
 
@@ -678,7 +678,7 @@ async function resolveStudentDocumentReviewContext(documentId: string) {
 
   if (documentRowError) {
     throw new Error(
-      "Nao foi possivel localizar o documento solicitado para validacao."
+      "Não foi possível localizar o documento solicitado para validação."
     );
   }
 
@@ -720,7 +720,7 @@ async function resolveStudentDocumentReviewContext(documentId: string) {
     requiredCourseDocumentResult.error
   ) {
     throw new Error(
-      "Nao foi possivel carregar o contexto institucional do documento selecionado."
+      "Não foi possível carregar o contexto institucional do documento selecionado."
     );
   }
 
@@ -832,7 +832,7 @@ export async function assertCanReviewStudentDocument(
 
   if (!context) {
     throw new Error(
-      "O documento solicitado nao esta disponivel para esta validacao."
+      "O documento solicitado não está disponível para esta validação."
     );
   }
 
@@ -841,7 +841,7 @@ export async function assertCanReviewStudentDocument(
 
     if (!visibleStudentIds.includes(context.document.aluno_id)) {
       throw new Error(
-        "Voce nao tem permissao para revisar este documento no contexto atual."
+        "Você não tem permissão para revisar este documento no contexto atual."
       );
     }
 
@@ -856,7 +856,7 @@ export async function assertCanReviewStudentDocument(
 
     if (!canCoordinatorReviewResolvedDocument(scope, context)) {
       throw new Error(
-        "Voce nao tem permissao para revisar este documento no contexto atual."
+        "Você não tem permissão para revisar este documento no contexto atual."
       );
     }
 
@@ -864,7 +864,7 @@ export async function assertCanReviewStudentDocument(
   }
 
   throw new Error(
-    "Voce nao tem permissao para revisar este documento no contexto atual."
+    "Você não tem permissão para revisar este documento no contexto atual."
   );
 }
 
@@ -1541,7 +1541,7 @@ async function loadStudentDocumentScopeByStudentIds(
 
   if (documentTypesResult.error) {
     throw new Error(
-      "NÃ£o foi possÃ­vel carregar os tipos documentais vinculados aos cursos visÃ­veis."
+      "Não foi possível carregar os tipos documentais vinculados aos cursos visíveis."
     );
   }
 
@@ -1657,7 +1657,7 @@ async function loadScopedStudentDocumentUnitOptions(unitIds: string[]) {
 
   if (unitRowsError) {
     throw new Error(
-      "NÃ£o foi possÃ­vel carregar as unidades visÃ­veis para o contexto documental atual."
+      "Não foi possível carregar as unidades visíveis para o contexto documental atual."
     );
   }
 
@@ -2111,7 +2111,7 @@ async function loadStudentUsersByScope(input: {
 
       if (scopedStudentRowsError) {
         throw new Error(
-          "NÃ£o foi possÃ­vel consultar os alunos do curso visÃ­vel neste contexto."
+          "Não foi possível consultar os alunos do curso visível neste contexto."
         );
       }
 
@@ -2138,7 +2138,7 @@ async function loadStudentUsersByScope(input: {
       await coordinatorQuery;
 
     if (coordinatorStudentRowsError) {
-      throw new Error("NÃ£o foi possÃ­vel consultar os alunos disponÃ­veis neste escopo.");
+      throw new Error("Não foi possível consultar os alunos disponíveis neste escopo.");
     }
 
     return {

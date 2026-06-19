@@ -87,10 +87,10 @@ export function StudentDocumentDirectory({
             <tr>
               <th>Aluno</th>
               {showUnitColumn ? <th>Unidade</th> : null}
-              <th>Areas</th>
+              <th>Áreas</th>
               <th>Carteira</th>
               <th>TCEs</th>
-              <th>Pendencias</th>
+              <th>Pendências</th>
               <th>Acoes</th>
             </tr>
           </thead>
@@ -103,7 +103,7 @@ export function StudentDocumentDirectory({
                     {entry.registration} - {entry.email}
                   </span>
                 </td>
-                {showUnitColumn ? <td>{entry.unitName ?? "Nao informada"}</td> : null}
+                {showUnitColumn ? <td>{entry.unitName ?? "Não informada"}</td> : null}
                 <td>
                   {entry.areaLabels.length ? (
                     <div className="management-tag-list">
@@ -114,7 +114,7 @@ export function StudentDocumentDirectory({
                       ))}
                     </div>
                   ) : (
-                    <span className="table-helper">Sem area ativa identificada</span>
+                    <span className="table-helper">Sem área ativa identificada</span>
                   )}
                 </td>
                 <td>{renderVaccinationStatus(entry)}</td>
@@ -123,7 +123,7 @@ export function StudentDocumentDirectory({
                   <div className="student-document-directory-status-stack">
                     <strong>{entry.pendingCount}</strong>
                     <span className="table-helper">
-                      {entry.unreadNotificationCount} notificacao(oes) nao lida(s)
+                      {entry.unreadNotificationCount} notificação(ões) não lida(s)
                     </span>
                   </div>
                 </td>
@@ -163,7 +163,7 @@ export function StudentDocumentDirectory({
 
             {showUnitColumn ? (
               <p className="field-help student-document-directory-mobile-unit">
-                Unidade: <strong>{entry.unitName ?? "Nao informada"}</strong>
+                Unidade: <strong>{entry.unitName ?? "Não informada"}</strong>
               </p>
             ) : null}
 
@@ -175,7 +175,7 @@ export function StudentDocumentDirectory({
                   </span>
                 ))
               ) : (
-                <span className="table-helper">Sem area ativa identificada</span>
+                <span className="table-helper">Sem área ativa identificada</span>
               )}
             </div>
 
@@ -189,7 +189,7 @@ export function StudentDocumentDirectory({
                 <dd>{renderTceSummary(entry)}</dd>
               </div>
               <div>
-                <dt>Pendencias</dt>
+                <dt>Pendências</dt>
                 <dd>{entry.pendingCount}</dd>
               </div>
             </dl>

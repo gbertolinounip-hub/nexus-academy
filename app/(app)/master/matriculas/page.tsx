@@ -46,46 +46,46 @@ export default async function MasterEnrollmentsPage({
   return (
     <div className="stack master-dashboard master-enrollments-dashboard">
       <section className="hero-card">
-        <p className="eyebrow">Matriculas por turma e oferta</p>
-        <h1>Vinculos de alunos na arquitetura multicurso</h1>
+        <p className="eyebrow">Matrículas por turma e oferta</p>
+        <h1>Vínculos de alunos na arquitetura multicurso</h1>
         <p>
-          Visualize e vincule alunos existentes a turmas ja alinhadas a oferta certa,
+          Visualize e vincule alunos existentes a turmas já alinhadas à oferta certa,
           preservando o eixo legado por turma e semestre.
         </p>
       </section>
 
       <div className="metrics-grid">
         <MetricCard
-          label="Instituicoes"
+          label="Instituições"
           value={String(pageData.summary.totalInstitutions)}
-          hint="Instituicoes presentes na arquitetura nova."
+          hint="Instituições presentes na arquitetura nova."
         />
         <MetricCard
           label="Ofertas"
           value={String(pageData.summary.totalOffers)}
-          hint="Ofertas com potencial de matricula."
+          hint="Ofertas com potencial de matrícula."
         />
         <MetricCard
           label="Turmas"
           value={String(pageData.summary.totalClasses)}
-          hint="Turmas disponiveis para vinculacao."
+          hint="Turmas disponíveis para vinculação."
         />
         <MetricCard
           label="Alunos"
           value={String(pageData.summary.totalStudents)}
-          hint="Cadastros discentes disponiveis."
+          hint="Cadastros discentes disponíveis."
         />
         <MetricCard
-          label="Matriculas"
+          label="Matrículas"
           value={String(pageData.summary.totalEnrollments)}
-          hint={`${pageData.summary.totalEnrollmentsWithOffer} ja possuem oferta preenchida.`}
+          hint={`${pageData.summary.totalEnrollmentsWithOffer} já possuem oferta preenchida.`}
           tone="positive"
         />
       </div>
 
       <SectionCard
         title="Filtros institucionais"
-        description="Refine a leitura administrativa por instituicao, unidade, curso e oferta sem remover o vinculo emergencial de alunos pelo Nexus Admin."
+        description="Refine a leitura administrativa por instituição, unidade, curso e oferta sem remover o vínculo emergencial de alunos pelo Nexus Admin."
       >
         <MasterOperationalFilters
           actionPath="/master/matriculas"
@@ -98,8 +98,8 @@ export default async function MasterEnrollmentsPage({
       </SectionCard>
 
       <SectionCard
-        title="Vincular aluno a turma"
-        description="Selecione instituicao, curso, oferta, semestre, turma e aluno existente."
+        title="Vincular aluno à turma"
+        description="Selecione instituição, curso, oferta, semestre, turma e aluno existente."
       >
         <div className="management-block-card">
           <MasterEnrollmentForm
@@ -114,22 +114,22 @@ export default async function MasterEnrollmentsPage({
       </SectionCard>
 
       <SectionCard
-        title="Matriculas cadastradas"
-        description="Leitura administrativa da trilha instituicao -> unidade -> curso -> oferta -> semestre -> turma -> matricula."
+        title="Matrículas cadastradas"
+        description="Leitura administrativa da trilha instituição -> unidade -> curso -> oferta -> semestre -> turma -> matrícula."
       >
         {pageData.enrollments.length ? (
           <div className="table-wrap master-contexts-table-wrap master-enrollments-table-scroll">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Instituicao</th>
+                  <th>Instituição</th>
                   <th>Unidade</th>
                   <th>Curso</th>
                   <th>Oferta</th>
                   <th>Semestre</th>
                   <th>Turma</th>
                   <th>Aluno</th>
-                  <th>Matricula / RA</th>
+                  <th>Matrícula / RA</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -142,7 +142,7 @@ export default async function MasterEnrollmentsPage({
                     <td>{enrollment.unitName}</td>
                     <td>
                       {enrollment.courseName ?? (
-                        <span className="badge badge-muted">Curso nao identificado</span>
+                        <span className="badge badge-muted">Curso não identificado</span>
                       )}
                     </td>
                     <td>
@@ -165,10 +165,10 @@ export default async function MasterEnrollmentsPage({
                     <td>
                       <strong>{enrollment.registration}</strong>
                       <div className="table-helper">
-                        Curso do aluno: {enrollment.studentCourseName ?? "nao definido"}
+                        Curso do aluno: {enrollment.studentCourseName ?? "não definido"}
                       </div>
                       <div className="table-helper">
-                        Oferta do aluno: {enrollment.studentOfferName ?? "nao definida"}
+                        Oferta do aluno: {enrollment.studentOfferName ?? "não definida"}
                       </div>
                     </td>
                     <td>
@@ -182,7 +182,7 @@ export default async function MasterEnrollmentsPage({
             </table>
           </div>
         ) : (
-          <p className="empty-message">Nenhuma matricula encontrada com os filtros atuais.</p>
+          <p className="empty-message">Nenhuma matrícula encontrada com os filtros atuais.</p>
         )}
       </SectionCard>
     </div>

@@ -109,14 +109,14 @@ export function StudentDocumentUploadForm({
 
         {documentType === "tce" ? (
           <label className={fieldErrors.enrollment_id ? "field field-invalid" : "field"}>
-            <span>Area operacional do TCE</span>
+            <span>Área operacional do TCE</span>
             <select
               name="enrollment_id"
               className={fieldErrors.enrollment_id ? "input input-invalid" : "input"}
               defaultValue={safeState.formValues.enrollment_id}
               disabled={disableForm}
             >
-              <option value="">Selecione a area operacional</option>
+              <option value="">Selecione a área operacional</option>
               {tceOptions.map((option) => (
                 <option key={option.enrollmentId} value={option.enrollmentId}>
                   {formatStageAssignmentLabel({
@@ -127,7 +127,7 @@ export function StudentDocumentUploadForm({
               ))}
             </select>
             <span className="field-help">
-              O TCE fica vinculado a area operacional escolhida neste seletor.
+              O TCE fica vinculado à área operacional escolhida neste seletor.
             </span>
             {fieldErrors.enrollment_id ? (
               <span className="field-error">{fieldErrors.enrollment_id}</span>
@@ -145,7 +145,7 @@ export function StudentDocumentUploadForm({
             disabled={disableForm}
           />
           <span className="field-help">
-            Aceitamos PDF, JPG, JPEG e PNG com ate 10 MB.
+            Aceitamos PDF, JPG, JPEG e PNG com até 10 MB.
           </span>
           {fieldErrors.document_file ? (
             <span className="field-error">{fieldErrors.document_file}</span>

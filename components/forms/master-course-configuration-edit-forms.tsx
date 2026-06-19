@@ -210,7 +210,7 @@ function renderModelApplicationRuleSummary(
         ) : null}
         {applicationRule.curricularPeriod ? (
           <span className="badge badge-muted">
-            {applicationRule.curricularPeriod}º periodo
+            {applicationRule.curricularPeriod}º período
           </span>
         ) : null}
         {applicationRule.semesterLabel ? (
@@ -228,7 +228,7 @@ function renderRubricOptionsSummary(options: CourseConfigurationCriterionOptionE
   if (!options.length) {
     return (
       <div className="form-notice form-notice-error">
-        Nenhuma opcao de rubrica cadastrada para este criterio ainda.
+        Nenhuma opção de rubrica cadastrada para este critério ainda.
       </div>
     );
   }
@@ -464,7 +464,7 @@ export function MasterCourseConfigurationModelForm({
         {renderNotice(duplicateState)}
 
         <div className="management-tag-list">
-          <span className="badge badge-muted">Codigo fixo: {model.code}</span>
+          <span className="badge badge-muted">Código fixo: {model.code}</span>
           <span className="badge badge-muted">Versao fixa: {model.version}</span>
           <span
             className={`status-pill ${getCourseConfigurationModelBadgeTone(model.modality)}`}
@@ -534,7 +534,7 @@ export function MasterCourseConfigurationModelForm({
         </div>
 
         <label className={getFieldClassName(fieldErrors, "descricao")}>
-          <span>Descricao</span>
+          <span>Descrição</span>
           <textarea
             className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
             name="descricao"
@@ -575,17 +575,17 @@ export function MasterCourseConfigurationModelForm({
           Duplicar modelo
         </button>
         <span className="field-help">
-          O clone copia grupos, criterios e opcoes de rubrica, mas nasce sem regra de
-          aplicacao e sem virar padrao automaticamente.
+          O clone copia grupos, critérios e opções de rubrica, mas nasce sem regra de
+          aplicação e sem virar padrão automaticamente.
         </span>
       </form>
 
       <div className="stack">
         <div>
-          <strong>Regras de aplicacao</strong>
+          <strong>Regras de aplicação</strong>
           <p className="field-help">
-            Defina onde este modelo deve ser usado. Para modelos por 6o, 7o ou 8o periodo,
-            prefira regras por periodo curricular. Regras mais especificas e com maior
+            Defina onde este modelo deve ser usado. Para modelos por 6º, 7º ou 8º período,
+            prefira regras por período curricular. Regras mais específicas e com maior
             prioridade vencem no runtime futuro.
           </p>
         </div>
@@ -657,7 +657,7 @@ export function MasterCourseConfigurationCreateModelForm({
 
       <div className="form-grid">
         <label className={getFieldClassName(fieldErrors, "codigo")}>
-          <span>Codigo</span>
+          <span>Código</span>
           <input
             className={getInputClassName(fieldErrors, "codigo")}
             name="codigo"
@@ -729,7 +729,7 @@ export function MasterCourseConfigurationCreateModelForm({
       </div>
 
       <label className={getFieldClassName(fieldErrors, "descricao")}>
-        <span>Descricao</span>
+        <span>Descrição</span>
         <textarea
           className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
           name="descricao"
@@ -851,7 +851,7 @@ export function MasterCourseConfigurationImportModelForm({
         </label>
 
         <label className={getFieldClassName(fieldErrors, "codigo")}>
-          <span>Codigo sugerido</span>
+          <span>Código sugerido</span>
           <input
             className={getInputClassName(fieldErrors, "codigo")}
             name="codigo"
@@ -862,7 +862,7 @@ export function MasterCourseConfigurationImportModelForm({
         </label>
 
         <label className={getFieldClassName(fieldErrors, "copiar_regras_portateis")}>
-          <span>Regras por periodo curricular</span>
+          <span>Regras por período curricular</span>
           <select
             className={getInputClassName(fieldErrors, "copiar_regras_portateis")}
             name="copiar_regras_portateis"
@@ -871,8 +871,8 @@ export function MasterCourseConfigurationImportModelForm({
               updateDraft("copiar_regras_portateis", event.currentTarget.value)
             }
           >
-            <option value="true">Copiar regras portaveis</option>
-            <option value="false">Nao copiar regras</option>
+            <option value="true">Copiar regras portáveis</option>
+            <option value="false">Não copiar regras</option>
           </select>
           {fieldErrors.copiar_regras_portateis ? (
             <span className="field-error">{fieldErrors.copiar_regras_portateis}</span>
@@ -886,7 +886,7 @@ export function MasterCourseConfigurationImportModelForm({
             <div>
               <strong>{selectedSourceModel.name}</strong>
               <p className="field-help">
-                {getModelModalityLabel(selectedSourceModel.modality)} · versao{" "}
+                {getModelModalityLabel(selectedSourceModel.modality)} · versão{" "}
                 {selectedSourceModel.version}
               </p>
             </div>
@@ -901,20 +901,20 @@ export function MasterCourseConfigurationImportModelForm({
               {selectedSourceModel.groupCount} grupo(s)
             </span>
             <span className="badge badge-muted">
-              {selectedSourceModel.criterionCount} criterio(s)
+              {selectedSourceModel.criterionCount} critério(s)
             </span>
             <span className="badge badge-muted">
-              {selectedSourceModel.rubricOptionCount} opcao(oes) de rubrica
+              {selectedSourceModel.rubricOptionCount} opção(ões) de rubrica
             </span>
             <span className="badge badge-muted">
-              {selectedSourceModel.portableCurricularRuleCount} regra(s) portavel(is)
+              {selectedSourceModel.portableCurricularRuleCount} regra(s) portável(is)
             </span>
           </div>
           <p className="field-help">
-            A importacao cria um novo modelo local com grupos, criterios e opcoes de rubrica
-            remapeados. Regras com turma, semestre, area ou oferta nao sao copiadas
-            automaticamente. O modelo importado nasce como complementar e nao vira padrao
-            para lancamento sozinho.
+            A importação cria um novo modelo local com grupos, critérios e opções de rubrica
+            remapeados. Regras com turma, semestre, área ou oferta não são copiadas
+            automaticamente. O modelo importado nasce como complementar e não vira padrão
+            para lançamento sozinho.
           </p>
         </div>
       ) : null}
@@ -1133,7 +1133,7 @@ export function MasterCourseConfigurationGroupForm({
         {renderNotice(safeDeleteState)}
 
         <div className="management-tag-list">
-          <span className="badge badge-muted">Codigo fixo: {group.code}</span>
+          <span className="badge badge-muted">Código fixo: {group.code}</span>
           <span className="badge badge-muted">Modelo fixo: {group.modelCode}</span>
         </div>
 
@@ -1226,7 +1226,7 @@ export function MasterCourseConfigurationGroupForm({
         onSubmit={(event) => {
           if (
             !window.confirm(
-              `Excluir o grupo ${group.name}? Se ele tiver criterios vinculados, a exclusao sera bloqueada.`
+              `Excluir o grupo ${group.name}? Se ele tiver critérios vinculados, a exclusão será bloqueada.`
             )
           ) {
             event.preventDefault();
@@ -1323,7 +1323,7 @@ export function MasterCourseConfigurationCreateCriterionForm({
         </label>
 
         <label className={getFieldClassName(fieldErrors, "codigo")}>
-          <span>Codigo</span>
+          <span>Código</span>
           <input
             className={getInputClassName(fieldErrors, "codigo")}
             name="codigo"
@@ -1407,7 +1407,7 @@ export function MasterCourseConfigurationCreateCriterionForm({
       </div>
 
       <label className={getFieldClassName(fieldErrors, "descricao")}>
-        <span>Descricao</span>
+        <span>Descrição</span>
         <textarea
           className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
           name="descricao"
@@ -1422,7 +1422,7 @@ export function MasterCourseConfigurationCreateCriterionForm({
 
       <div className="actions-row">
         <button className="button button-secondary" type="submit" disabled={!groups.length}>
-          Salvar novo criterio
+          Salvar novo critério
         </button>
       </div>
     </form>
@@ -1723,7 +1723,7 @@ export function MasterCourseConfigurationCriterionForm({
         {renderNotice(safeDeleteState)}
 
         <div className="management-tag-list">
-          <span className="badge badge-muted">Codigo fixo: {criterion.code}</span>
+          <span className="badge badge-muted">Código fixo: {criterion.code}</span>
           <span className="badge badge-muted">Grupo fixo: {criterion.groupName}</span>
           <span className="badge badge-muted">
             {getModelModalityLabel(criterion.modelModality)}
@@ -1831,7 +1831,7 @@ export function MasterCourseConfigurationCriterionForm({
         </div>
 
         <label className={getFieldClassName(fieldErrors, "descricao")}>
-          <span>Descricao</span>
+          <span>Descrição</span>
           <textarea
             className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
             name="descricao"
@@ -1853,7 +1853,7 @@ export function MasterCourseConfigurationCriterionForm({
 
         <div className="actions-row">
           <button className="button button-secondary" type="submit">
-            Salvar criterio
+            Salvar critério
           </button>
         </div>
       </form>
@@ -1861,7 +1861,7 @@ export function MasterCourseConfigurationCriterionForm({
         <div className="form-stack master-course-configuration-edit-form">
           <div className="management-block-header">
             <div>
-              <h6>Opcoes da rubrica</h6>
+              <h6>Opções da rubrica</h6>
               <p className="field-help">
                 Configure os rótulos, notas automáticas e a ordem de exibição usadas pelo
                 professor na avaliação por rubrica.
@@ -1879,7 +1879,7 @@ export function MasterCourseConfigurationCriterionForm({
             </div>
           ) : (
             <div className="form-notice form-notice-error">
-              Nenhuma opcao de rubrica cadastrada para este criterio ainda.
+              Nenhuma opção de rubrica cadastrada para este critério ainda.
             </div>
           )}
           <MasterCourseConfigurationCreateCriterionOptionForm criterion={criterion} />
@@ -1887,7 +1887,7 @@ export function MasterCourseConfigurationCriterionForm({
       ) : (
         <div className="form-stack master-course-configuration-edit-form">
           <div className="form-notice">
-            Opcoes de rubrica disponiveis apenas para modelos do tipo Avaliacao por rubrica.
+            Opções de rubrica disponíveis apenas para modelos do tipo Avaliação por rubrica.
           </div>
         </div>
       )}
@@ -1897,7 +1897,7 @@ export function MasterCourseConfigurationCriterionForm({
         onSubmit={(event) => {
           if (
             !window.confirm(
-              `Excluir o criterio ${criterion.name}? Se ele ja tiver historico de avaliacoes, sera desativado para preservar os registros.`
+              `Excluir o critério ${criterion.name}? Se ele já tiver histórico de avaliações, será desativado para preservar os registros.`
             )
           ) {
             event.preventDefault();
@@ -1906,7 +1906,7 @@ export function MasterCourseConfigurationCriterionForm({
       >
         <input type="hidden" name="criterion_id" value={criterion.id} />
         <button className="button button-danger button-small" type="submit">
-          Excluir criterio
+          Excluir critério
         </button>
       </form>
     </>
@@ -2186,7 +2186,7 @@ export function MasterCourseConfigurationCreateRequiredDocumentForm({
                 type="search"
                 value={documentTypeSearch}
                 onChange={(event) => setDocumentTypeSearch(event.currentTarget.value)}
-                placeholder="Busque por nome ou codigo"
+                placeholder="Busque por nome ou código"
                 disabled={!availableDocumentTypes.length}
               />
               {!availableDocumentTypes.length ? (
@@ -2195,7 +2195,7 @@ export function MasterCourseConfigurationCreateRequiredDocumentForm({
                 </span>
               ) : (
                 <span className="field-help">
-                  Pesquise por nome ou codigo para localizar um tipo documental existente.
+                  Pesquise por nome ou código para localizar um tipo documental existente.
                 </span>
               )}
             </label>
@@ -2220,7 +2220,7 @@ export function MasterCourseConfigurationCreateRequiredDocumentForm({
                 <span className="field-error">{fieldErrors.tipo_documento_id}</span>
               ) : filteredAvailableDocumentTypes.length ? (
                 <span className="field-help">
-                  Nao encontrou? Troque para &quot;Criar novo tipo&quot; e cadastre rapidamente.
+                  Não encontrou? Troque para &quot;Criar novo tipo&quot; e cadastre rapidamente.
                 </span>
               ) : (
                 <span className="field-help">
@@ -2244,18 +2244,18 @@ export function MasterCourseConfigurationCreateRequiredDocumentForm({
                 <span className="field-error">{fieldErrors.novo_tipo_documental_nome}</span>
               ) : (
                 <span className="field-help">
-                  O codigo sera gerado automaticamente a partir do nome informado.
+                  O código será gerado automaticamente a partir do nome informado.
                 </span>
               )}
             </label>
 
             <label className="field">
-              <span>Codigo gerado</span>
+              <span>Código gerado</span>
               <input
                 className="input"
                 value={newDocumentTypeCodePreview}
                 readOnly
-                placeholder="Sera gerado automaticamente"
+                placeholder="Será gerado automaticamente"
               />
             </label>
           </div>
@@ -2264,7 +2264,7 @@ export function MasterCourseConfigurationCreateRequiredDocumentForm({
 
       <div className="form-grid">
         <label className={getFieldClassName(fieldErrors, "nome_exibicao")}>
-          <span>Nome de exibicao</span>
+          <span>Nome de exibição</span>
           <input
             className={getInputClassName(fieldErrors, "nome_exibicao")}
             name="nome_exibicao"
@@ -2275,7 +2275,7 @@ export function MasterCourseConfigurationCreateRequiredDocumentForm({
             <span className="field-error">{fieldErrors.nome_exibicao}</span>
           ) : selectedDocumentTypeName ? (
             <span className="field-help">
-              Sugestao baseada no tipo documental: {selectedDocumentTypeName}
+              Sugestão baseada no tipo documental: {selectedDocumentTypeName}
             </span>
           ) : null}
         </label>
@@ -2291,7 +2291,7 @@ export function MasterCourseConfigurationCreateRequiredDocumentForm({
             value={draft.ordem}
             onChange={(event) => updateDraft("ordem", event.currentTarget.value)}
           />
-          <span className="field-help">Deixe vazio se o documento nao tiver ordem fixa.</span>
+          <span className="field-help">Deixe vazio se o documento não tiver ordem fixa.</span>
           {fieldErrors.ordem ? <span className="field-error">{fieldErrors.ordem}</span> : null}
         </label>
 
@@ -2303,7 +2303,7 @@ export function MasterCourseConfigurationCreateRequiredDocumentForm({
             value={draft.obrigatorio}
             onChange={(event) => updateDraft("obrigatorio", event.currentTarget.value)}
           >
-            <option value="true">Obrigatorio</option>
+            <option value="true">Obrigatório</option>
             <option value="false">Opcional</option>
           </select>
           {fieldErrors.obrigatorio ? (
@@ -2329,7 +2329,7 @@ export function MasterCourseConfigurationCreateRequiredDocumentForm({
       {displayNameWarning ? <div className="form-notice">{displayNameWarning}</div> : null}
 
       <label className={getFieldClassName(fieldErrors, "descricao")}>
-        <span>Descricao</span>
+        <span>Descrição</span>
         <textarea
           className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
           name="descricao"
@@ -2400,13 +2400,13 @@ export function MasterCourseConfigurationRequiredDocumentForm({
             Tipo fixo: {requiredDocument.typeName} ({requiredDocument.typeCode})
           </span>
           {requiredDocument.code ? (
-            <span className="badge badge-muted">Codigo fixo: {requiredDocument.code}</span>
+            <span className="badge badge-muted">Código fixo: {requiredDocument.code}</span>
           ) : null}
         </div>
 
         <div className="form-grid">
           <label className={getFieldClassName(fieldErrors, "nome_exibicao")}>
-            <span>Nome de exibicao</span>
+            <span>Nome de exibição</span>
             <input
               className={getInputClassName(fieldErrors, "nome_exibicao")}
               name="nome_exibicao"
@@ -2444,7 +2444,7 @@ export function MasterCourseConfigurationRequiredDocumentForm({
                 setDraft((currentDraft) => ({ ...currentDraft, ordem: value }));
               }}
             />
-            <span className="field-help">Deixe vazio se o documento nao tiver ordem fixa.</span>
+            <span className="field-help">Deixe vazio se o documento não tiver ordem fixa.</span>
             {fieldErrors.ordem ? <span className="field-error">{fieldErrors.ordem}</span> : null}
           </label>
 
@@ -2463,7 +2463,7 @@ export function MasterCourseConfigurationRequiredDocumentForm({
                 }));
               }}
             >
-              <option value="true">Obrigatorio</option>
+              <option value="true">Obrigatório</option>
               <option value="false">Opcional</option>
             </select>
             {fieldErrors.obrigatorio ? (
@@ -2493,7 +2493,7 @@ export function MasterCourseConfigurationRequiredDocumentForm({
         {displayNameWarning ? <div className="form-notice">{displayNameWarning}</div> : null}
 
         <label className={getFieldClassName(fieldErrors, "descricao")}>
-          <span>Descricao</span>
+          <span>Descrição</span>
           <textarea
             className={`${getInputClassName(fieldErrors, "descricao")} textarea`}
             name="descricao"

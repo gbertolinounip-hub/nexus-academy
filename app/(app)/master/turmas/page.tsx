@@ -50,17 +50,17 @@ export default async function MasterClassesPage({
         <p className="eyebrow">Auditoria de turmas por oferta</p>
         <h1>Visão administrativa de turmas</h1>
         <p>
-          Acompanhe a trilha instituicao - unidade - curso - oferta - semestre - turma e
-          audite o periodo curricular usado pelas regras de avaliacao. A criacao operacional
+          Acompanhe a trilha instituição - unidade - curso - oferta - semestre - turma e
+          audite o período curricular usado pelas regras de avaliação. A criação operacional
           das turmas deve ocorrer prioritariamente no Coordenador local.
         </p>
       </section>
 
       <div className="metrics-grid">
         <MetricCard
-          label="Instituicoes"
+          label="Instituições"
           value={String(pageData.summary.totalInstitutions)}
-          hint="Instituicoes presentes na arquitetura nova."
+          hint="Instituições presentes na arquitetura nova."
         />
         <MetricCard
           label="Ofertas"
@@ -70,7 +70,7 @@ export default async function MasterClassesPage({
         <MetricCard
           label="Semestres"
           value={String(pageData.summary.totalSemesters)}
-          hint="Semestres disponiveis para vinculacao."
+          hint="Semestres disponíveis para vinculação."
         />
         <MetricCard
           label="Turmas"
@@ -87,7 +87,7 @@ export default async function MasterClassesPage({
 
       <SectionCard
         title="Filtros institucionais"
-        description="Refine a leitura administrativa por instituicao, unidade, curso e oferta para auditar a estrutura multicurso sem assumir a operacao academica cotidiana."
+        description="Refine a leitura administrativa por instituição, unidade, curso e oferta para auditar a estrutura multicurso sem assumir a operação acadêmica cotidiana."
       >
         <MasterOperationalFilters
           actionPath="/master/turmas"
@@ -100,13 +100,13 @@ export default async function MasterClassesPage({
       </SectionCard>
 
       <SectionCard
-        title="Acao administrativa excepcional"
-        description="Use este bloco apenas em cenarios administrativos excepcionais. A criacao operacional das turmas reais deve ser feita pelo Coordenador local da oferta, junto do ajuste de periodo curricular."
+        title="Ação administrativa excepcional"
+        description="Use este bloco apenas em cenários administrativos excepcionais. A criação operacional das turmas reais deve ser feita pelo Coordenador local da oferta, junto do ajuste de período curricular."
       >
         <div className="management-block-card">
           <p className="field-help">
-            Se precisar agir aqui, informe o periodo curricular para manter a selecao de
-            modelos de avaliacao coerente com as regras do curso.
+            Se precisar agir aqui, informe o período curricular para manter a seleção de
+            modelos de avaliação coerente com as regras do curso.
           </p>
           <MasterClassForm
             institutions={pageData.institutions}
@@ -119,22 +119,22 @@ export default async function MasterClassesPage({
 
       <SectionCard
         title="Turmas cadastradas"
-        description="Leitura administrativa da trilha instituicao -> unidade -> curso -> oferta -> semestre -> turma."
+        description="Leitura administrativa da trilha instituição -> unidade -> curso -> oferta -> semestre -> turma."
       >
         {pageData.classes.length ? (
           <div className="table-wrap master-contexts-table-wrap master-classes-table-scroll">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Instituicao</th>
+                  <th>Instituição</th>
                   <th>Unidade</th>
                   <th>Curso</th>
                   <th>Oferta</th>
                   <th>Semestre</th>
-                  <th>Periodo curricular</th>
+                  <th>Período curricular</th>
                   <th>Turma</th>
                   <th>Status</th>
-                  <th>Matriculas</th>
+                  <th>Matrículas</th>
                 </tr>
               </thead>
               <tbody>
@@ -146,7 +146,7 @@ export default async function MasterClassesPage({
                     <td>{classEntry.unitName}</td>
                     <td>
                       {classEntry.courseName ?? (
-                        <span className="badge badge-muted">Curso nao identificado</span>
+                        <span className="badge badge-muted">Curso não identificado</span>
                       )}
                     </td>
                     <td>
@@ -168,7 +168,7 @@ export default async function MasterClassesPage({
                     <td>
                       <strong>{classEntry.classCode}</strong>
                       <div className="table-helper">{classEntry.className}</div>
-                      <div className="table-helper">Area: {classEntry.stageArea}</div>
+                      <div className="table-helper">Área: {classEntry.stageArea}</div>
                     </td>
                     <td>
                       <span

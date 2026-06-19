@@ -32,10 +32,10 @@ export default async function MasterCoordinatorsPage({
     <div className="stack master-dashboard">
       <section className="hero-card">
         <p className="eyebrow">Coordenadores</p>
-        <h1>Gestao institucional de coordenadores</h1>
+        <h1>Gestão institucional de coordenadores</h1>
         <p>
-          Liste responsaveis das unidades, filtre por IES e campus, ajuste dados basicos e
-          controle o acesso institucional sem misturar este fluxo com a operacao academica local.
+          Liste responsáveis das unidades, filtre por IES e campus, ajuste dados básicos e
+          controle o acesso institucional sem misturar este fluxo com a operação acadêmica local.
         </p>
       </section>
 
@@ -43,7 +43,7 @@ export default async function MasterCoordinatorsPage({
         <MetricCard
           label="Coordenadores encontrados"
           value={String(pageData.entries.length)}
-          hint={`${pageData.totalCoordinators} vinculo(s) de coordenacao cadastrado(s) no total.`}
+          hint={`${pageData.totalCoordinators} vínculo(s) de coordenação cadastrado(s) no total.`}
         />
         <MetricCard
           label="Ativos no recorte"
@@ -55,7 +55,7 @@ export default async function MasterCoordinatorsPage({
 
       <SectionCard
         title="Filtros institucionais"
-        description="Restrinja a visao por instituicao, unidade, status ou busca textual sem alterar a operacao diaria das coordenacoes locais."
+        description="Restrinja a visão por instituição, unidade, status ou busca textual sem alterar a operação diária das coordenações locais."
       >
         <MasterCoordinatorFilters
           institutions={pageData.institutions}
@@ -66,7 +66,7 @@ export default async function MasterCoordinatorsPage({
 
       <SectionCard
         title="Coordenadores por unidade"
-        description="A listagem usa uma estrutura administrativa estavel para suportar poucos ou muitos vinculos de coordenacao sem perder legibilidade."
+        description="A listagem usa uma estrutura administrativa estável para suportar poucos ou muitos vínculos de coordenação sem perder legibilidade."
       >
         <MasterCoordinatorDirectory
           entries={pageData.entries}
