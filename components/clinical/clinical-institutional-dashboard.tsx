@@ -118,8 +118,12 @@ function renderBreakdownCard(props: {
   emptyMessage: string;
 }) {
   return (
-    <SectionCard title={props.title} description={props.description}>
-      <div className="table-wrap">
+    <SectionCard
+      title={props.title}
+      description={props.description}
+      className="clinical-institutional-breakdown-card"
+    >
+      <div className="table-wrap clinical-institutional-breakdown-table-wrap">
         <table className="table clinical-institutional-breakdown-table">
           <thead>
             <tr>
