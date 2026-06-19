@@ -79,6 +79,141 @@ export interface EvaluationModelSelectionContext {
   stageAreaId: string | null;
 }
 
+export interface TceConcedingPartyData {
+  corporateName?: string | null;
+  documentNumber?: string | null;
+  address?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  internshipLocation?: string | null;
+  internshipLocationAddress?: string | null;
+  responsibleName?: string | null;
+  responsibleDocument?: string | null;
+  professionalCouncil?: string | null;
+}
+
+export interface TceTermData {
+  startsAt?: string | null;
+  endsAt?: string | null;
+}
+
+export interface TceScheduleData {
+  monday?: string | null;
+  tuesday?: string | null;
+  wednesday?: string | null;
+  thursday?: string | null;
+  friday?: string | null;
+  saturday?: string | null;
+  intervalNotes?: string | null;
+}
+
+export interface TceStudentData {
+  fullName?: string | null;
+  registration?: string | null;
+  campus?: string | null;
+  courseName?: string | null;
+  semesterLabel?: string | null;
+  shift?: string | null;
+  address?: string | null;
+  addressNumber?: string | null;
+  addressComplement?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  phone?: string | null;
+  email?: string | null;
+}
+
+export interface TceModel {
+  id: string;
+  institutionId: string | null;
+  courseId: string | null;
+  name: string;
+  code: string;
+  description: string | null;
+  active: boolean;
+  templatePath: string | null;
+  templateVersion: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TceInternshipConfiguration {
+  id: string;
+  modelId: string;
+  courseId: string;
+  offerId: string;
+  semesterId: string | null;
+  classId: string | null;
+  stageAreaId: string;
+  name: string;
+  active: boolean;
+  concedingPartyData: TceConcedingPartyData;
+  termData: TceTermData;
+  scheduleData: TceScheduleData;
+  dailyWorkload: string | null;
+  weeklyWorkload: string | null;
+  semesterWorkload: string | null;
+  activityPlan: string | null;
+  signatureCity: string | null;
+  signatureDate: string | null;
+  createdBy: string | null;
+  updatedBy: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StudentTce {
+  id: string;
+  configurationId: string;
+  studentId: string;
+  enrollmentId: string | null;
+  stageAreaId: string | null;
+  studentData: TceStudentData;
+  configurationSnapshot: Record<string, unknown>;
+  templateVersionSnapshot: string | null;
+  generatedPdfPath: string | null;
+  generatedAt: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TceConfigurationFormData {
+  modelId: string;
+  courseId: string;
+  offerId: string;
+  semesterId?: string | null;
+  classId?: string | null;
+  stageAreaId: string;
+  name: string;
+  active?: boolean;
+  concedingPartyData: TceConcedingPartyData;
+  termData: TceTermData;
+  scheduleData: TceScheduleData;
+  dailyWorkload?: string | null;
+  weeklyWorkload?: string | null;
+  semesterWorkload?: string | null;
+  activityPlan?: string | null;
+  signatureCity?: string | null;
+  signatureDate?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface StudentTceFormData {
+  enrollmentId?: string | null;
+  stageAreaId?: string | null;
+  studentData: TceStudentData;
+  metadata?: Record<string, unknown>;
+}
+
 export type StudentDocumentNotificationType =
   | "documento_reprovado_professor"
   | "documento_reprovado_coordenador";
