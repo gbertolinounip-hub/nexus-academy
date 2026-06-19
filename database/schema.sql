@@ -1984,6 +1984,54 @@ begin
       where c.id = nullif(p_record_data ->> 'caso_clinico_id', '')::uuid
       limit 1;
 
+    when 'modelos_tce' then
+      resolved_unit_id := p_actor_unit_id;
+
+    when 'configuracoes_tce_estagio' then
+      select ocu.unidade_id
+      into resolved_unit_id
+      from public.configuracoes_tce_estagio cte
+      join public.ofertas_curso_unidade ocu
+        on ocu.id = cte.oferta_curso_unidade_id
+      where cte.id = coalesce(
+        nullif(p_record_data ->> 'id', '')::uuid,
+        nullif(p_record_data ->> 'configuracao_tce_estagio_id', '')::uuid
+      )
+      limit 1;
+
+    when 'tces_aluno' then
+      select ocu.unidade_id
+      into resolved_unit_id
+      from public.tces_aluno ta
+      join public.configuracoes_tce_estagio cte
+        on cte.id = ta.configuracao_tce_estagio_id
+      join public.ofertas_curso_unidade ocu
+        on ocu.id = cte.oferta_curso_unidade_id
+      where ta.id = coalesce(
+        nullif(p_record_data ->> 'id', '')::uuid,
+        nullif(p_record_data ->> 'tce_aluno_id', '')::uuid
+      )
+      limit 1;
+
+      if resolved_unit_id is null then
+        select s.unidade_id
+        into resolved_unit_id
+        from public.matriculas_turma m
+        join public.turmas t on t.id = m.turma_id
+        join public.semestres s on s.id = t.semestre_id
+        where m.id = nullif(p_record_data ->> 'matricula_turma_id', '')::uuid
+        limit 1;
+      end if;
+
+      if resolved_unit_id is null then
+        select coalesce(a.unidade_id, u.unidade_id)
+        into resolved_unit_id
+        from public.alunos a
+        left join public.usuarios u on u.id = a.usuario_id
+        where a.usuario_id = nullif(p_record_data ->> 'aluno_id', '')::uuid
+        limit 1;
+      end if;
+
     when 'documentos_aluno' then
       select d.unidade_id
       into resolved_unit_id
@@ -2000,6 +2048,9 @@ begin
       from public.documentos_aluno d
       where d.id = nullif(p_record_data ->> 'documento_id', '')::uuid
       limit 1;
+
+    else
+      resolved_unit_id := null;
   end case;
 
   return coalesce(resolved_unit_id, p_actor_unit_id);
