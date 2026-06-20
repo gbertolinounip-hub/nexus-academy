@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import {
   PDFDocument,
   StandardFonts,
@@ -5,6 +7,13 @@ import {
   type PDFFont,
   type PDFPage
 } from "pdf-lib";
+import {
+  UNIP_TCE_TEMPLATE_FIELDS,
+  UNIP_TCE_TEMPLATE_PATH,
+  UNIP_TCE_TEMPLATE_VERSION,
+  type UnipPdfRectSpec,
+  type UnipPdfTextFieldSpec
+} from "@/lib/tce/unip-template-map";
 import type {
   TceConfigurationSnapshot,
   TceConcedingPartyData,
@@ -12,118 +21,187 @@ import type {
   TceStudentData
 } from "@/types/domain";
 
-const A4_PAGE_WIDTH = 595.28;
-const A4_PAGE_HEIGHT = 841.89;
-const PAGE_MARGIN_X = 42;
-const PAGE_MARGIN_TOP = 48;
-const PAGE_MARGIN_BOTTOM = 48;
-const CONTENT_WIDTH = A4_PAGE_WIDTH - PAGE_MARGIN_X * 2;
-const TITLE_COLOR = rgb(0.12, 0.18, 0.32);
-const MUTED_COLOR = rgb(0.35, 0.39, 0.48);
-const BORDER_COLOR = rgb(0.8, 0.83, 0.88);
-const HEADER_FILL = rgb(0.95, 0.97, 1);
-const CELL_FILL = rgb(0.985, 0.99, 1);
-const BODY_FONT_SIZE = 10;
-const SMALL_FONT_SIZE = 8.5;
-const LABEL_FONT_SIZE = 8.5;
-const SECTION_TITLE_SIZE = 11;
-const LINE_HEIGHT = 13;
-
 interface TcePdfRenderInput {
   snapshot: TceConfigurationSnapshot;
   studentData: TceStudentData;
 }
 
-interface WrappedCell {
-  label: string;
-  lines: string[];
-  wide?: boolean;
+interface ResolvedTextFit {
+  text: string;
+  size: number;
 }
 
-interface PdfLayoutState {
-  pdfDoc: PDFDocument;
-  regularFont: PDFFont;
-  boldFont: PDFFont;
-  page: PDFPage;
-  y: number;
-  pageNumber: number;
-}
-
-const TCE_CLAUSES = [
-  "1. O estágio será desenvolvido no campo informado pela Parte Concedente, durante a vigência indicada neste termo, em conformidade com o plano de atividades e com a jornada aqui registrada.",
-  "2. O estagiário compromete-se a cumprir a programação definida, respeitar as normas da instituição concedente e manter postura ética, sigilo profissional e responsabilidade técnica durante todo o período de estágio.",
-  "3. A Parte Concedente acompanhará a rotina prática do estágio, assegurando condições adequadas para aprendizagem, supervisão local e registro das atividades compatíveis com a formação acadêmica do aluno.",
-  "4. A Instituição de Ensino acompanhará o desenvolvimento acadêmico do estágio, mantendo o vínculo pedagógico com o aluno e podendo revisar as informações deste termo sempre que necessário.",
-  "5. Quaisquer ajustes de vigência, jornada, campo de estágio ou plano de atividades deverão ser formalizados em nova versão deste documento antes da continuidade do estágio.",
-  "6. O presente termo deve ser impresso e assinado fisicamente pela Parte Concedente, pelo Estagiário(a) e pela Instituição de Ensino para produzir os efeitos administrativos esperados."
+const TEXT_COLOR = rgb(0.08, 0.08, 0.08);
+const COVER_COLOR = rgb(1, 1, 1);
+const MIN_FONT_SIZE = 7.2;
+const TEMPLATE_SUPPORTED_VERSIONS = new Set([
+  UNIP_TCE_TEMPLATE_VERSION,
+  null,
+  ""
+]);
+const PT_BR_MONTHS = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro"
 ];
 
-function formatDatePtBr(value: string | null | undefined) {
-  if (!value) {
-    return "Não informado";
-  }
-
-  const normalizedDate = new Date(value);
-
-  if (Number.isNaN(normalizedDate.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric"
-  }).format(normalizedDate);
-}
-
-function displayText(value: string | null | undefined, fallback = "Não informado") {
-  return typeof value === "string" && value.trim().length ? value.trim() : fallback;
-}
-
-function joinTextParts(values: Array<string | null | undefined>, fallback = "Não informado") {
-  const normalizedParts = values
-    .map((value) => (typeof value === "string" ? value.trim() : ""))
-    .filter((value) => value.length > 0);
-
-  return normalizedParts.length ? normalizedParts.join(" - ") : fallback;
-}
-
-function formatScheduleRange(input: {
-  startTime?: string | null;
-  endTime?: string | null;
-}) {
-  if (!input.startTime || !input.endTime) {
-    return "Não informado";
-  }
-
-  return `${input.startTime} às ${input.endTime}`;
-}
-
-function formatScheduleBreak(input: {
-  breakStartTime?: string | null;
-  breakEndTime?: string | null;
-}) {
-  if (!input.breakStartTime || !input.breakEndTime) {
-    return "Sem intervalo";
-  }
-
-  return `${input.breakStartTime} às ${input.breakEndTime}`;
-}
-
-function normalizePdfText(value: string) {
+function normalizeWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function wrapText(
-  font: PDFFont,
-  fontSize: number,
-  text: string,
-  maxWidth: number
-) {
-  const normalizedText = normalizePdfText(text);
+function getOptionalText(value: string | null | undefined) {
+  return typeof value === "string" ? normalizeWhitespace(value) : "";
+}
+
+function parseDateParts(value: string | null | undefined) {
+  const normalizedValue = getOptionalText(value);
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const isoMatch = normalizedValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (isoMatch) {
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]);
+    const day = Number(isoMatch[3]);
+
+    if (year > 0 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return { day, month, year };
+    }
+  }
+
+  const parsedDate = new Date(normalizedValue);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return {
+    day: parsedDate.getUTCDate(),
+    month: parsedDate.getUTCMonth() + 1,
+    year: parsedDate.getUTCFullYear()
+  };
+}
+
+function formatShortDate(value: string | null | undefined) {
+  const parts = parseDateParts(value);
+
+  if (!parts) {
+    return getOptionalText(value);
+  }
+
+  return `${String(parts.day).padStart(2, "0")}/${String(parts.month).padStart(2, "0")}/${parts.year}`;
+}
+
+function formatLongDate(value: string | null | undefined) {
+  const parts = parseDateParts(value);
+
+  if (!parts) {
+    return getOptionalText(value);
+  }
+
+  return `${parts.day} de ${PT_BR_MONTHS[parts.month - 1]} de ${parts.year}`;
+}
+
+function splitPhone(value: string | null | undefined) {
+  const digits = getOptionalText(value).replace(/\D+/g, "");
+
+  if (!digits) {
+    return {
+      areaCode: "",
+      number: ""
+    };
+  }
+
+  if (digits.length <= 2) {
+    return {
+      areaCode: digits,
+      number: ""
+    };
+  }
+
+  return {
+    areaCode: digits.slice(0, 2),
+    number: digits.slice(2)
+  };
+}
+
+function fitTextToWidth(input: {
+  font: PDFFont;
+  text: string;
+  width: number;
+  size: number;
+  minSize?: number;
+}) {
+  const normalizedText = getOptionalText(input.text);
 
   if (!normalizedText) {
-    return ["-"];
+    return {
+      text: "",
+      size: input.size
+    } satisfies ResolvedTextFit;
+  }
+
+  let fontSize = input.size;
+  const minSize = input.minSize ?? MIN_FONT_SIZE;
+
+  while (
+    fontSize > minSize &&
+    input.font.widthOfTextAtSize(normalizedText, fontSize) > input.width
+  ) {
+    fontSize = Number((fontSize - 0.2).toFixed(2));
+  }
+
+  if (input.font.widthOfTextAtSize(normalizedText, fontSize) <= input.width) {
+    return {
+      text: normalizedText,
+      size: fontSize
+    } satisfies ResolvedTextFit;
+  }
+
+  const ellipsis = "...";
+  let truncatedText = normalizedText;
+
+  while (truncatedText.length > 1) {
+    truncatedText = truncatedText.slice(0, -1).trimEnd();
+    const candidateText = `${truncatedText}${ellipsis}`;
+
+    if (input.font.widthOfTextAtSize(candidateText, fontSize) <= input.width) {
+      return {
+        text: candidateText,
+        size: fontSize
+      } satisfies ResolvedTextFit;
+    }
+  }
+
+  return {
+    text: ellipsis,
+    size: fontSize
+  } satisfies ResolvedTextFit;
+}
+
+function wrapTextIntoLines(input: {
+  font: PDFFont;
+  text: string;
+  width: number;
+  size: number;
+  maxLines: number;
+}) {
+  const normalizedText = getOptionalText(input.text);
+
+  if (!normalizedText) {
+    return [];
   }
 
   const words = normalizedText.split(" ");
@@ -133,7 +211,7 @@ function wrapText(
   for (const word of words) {
     const candidateLine = currentLine ? `${currentLine} ${word}` : word;
 
-    if (font.widthOfTextAtSize(candidateLine, fontSize) <= maxWidth) {
+    if (input.font.widthOfTextAtSize(candidateLine, input.size) <= input.width) {
       currentLine = candidateLine;
       continue;
     }
@@ -143,7 +221,7 @@ function wrapText(
       currentLine = "";
     }
 
-    if (font.widthOfTextAtSize(word, fontSize) <= maxWidth) {
+    if (input.font.widthOfTextAtSize(word, input.size) <= input.width) {
       currentLine = word;
       continue;
     }
@@ -153,7 +231,7 @@ function wrapText(
     for (const character of word) {
       const candidateFragment = `${fragment}${character}`;
 
-      if (font.widthOfTextAtSize(candidateFragment, fontSize) <= maxWidth) {
+      if (input.font.widthOfTextAtSize(candidateFragment, input.size) <= input.width) {
         fragment = candidateFragment;
         continue;
       }
@@ -172,561 +250,335 @@ function wrapText(
     lines.push(currentLine);
   }
 
-  return lines.length ? lines : ["-"];
-}
-
-function addPage(state: PdfLayoutState) {
-  state.page = state.pdfDoc.addPage([A4_PAGE_WIDTH, A4_PAGE_HEIGHT]);
-  state.y = A4_PAGE_HEIGHT - PAGE_MARGIN_TOP;
-  state.pageNumber += 1;
-}
-
-function ensureSpace(state: PdfLayoutState, requiredHeight: number) {
-  if (state.y - requiredHeight < PAGE_MARGIN_BOTTOM) {
-    addPage(state);
+  if (lines.length <= input.maxLines) {
+    return lines;
   }
+
+  const visibleLines = lines.slice(0, input.maxLines);
+  const lastVisibleLine = visibleLines[input.maxLines - 1] ?? "";
+  const truncatedLastLine = fitTextToWidth({
+    font: input.font,
+    text: `${lastVisibleLine}...`,
+    width: input.width,
+    size: input.size,
+    minSize: input.size
+  });
+
+  visibleLines[input.maxLines - 1] = truncatedLastLine.text;
+  return visibleLines;
 }
 
-function drawWrappedLines(input: {
-  state: PdfLayoutState;
-  lines: string[];
-  x: number;
-  y: number;
+function resolveFieldX(input: {
   font: PDFFont;
-  fontSize: number;
-  color?: ReturnType<typeof rgb>;
-  lineHeight?: number;
+  spec: UnipPdfTextFieldSpec;
+  text: string;
+  size: number;
 }) {
-  const lineHeight = input.lineHeight ?? LINE_HEIGHT;
+  const textWidth = input.font.widthOfTextAtSize(input.text, input.size);
 
-  input.lines.forEach((line, index) => {
-    input.state.page.drawText(line, {
-      x: input.x,
-      y: input.y - lineHeight * index,
-      font: input.font,
-      size: input.fontSize,
-      color: input.color ?? rgb(0.1, 0.13, 0.18)
-    });
-  });
-}
-
-function drawSectionTitle(state: PdfLayoutState, title: string) {
-  ensureSpace(state, 28);
-
-  const boxHeight = 20;
-  const topY = state.y;
-
-  state.page.drawRectangle({
-    x: PAGE_MARGIN_X,
-    y: topY - boxHeight,
-    width: CONTENT_WIDTH,
-    height: boxHeight,
-    color: HEADER_FILL,
-    borderColor: BORDER_COLOR,
-    borderWidth: 0.75
-  });
-  state.page.drawText(title, {
-    x: PAGE_MARGIN_X + 10,
-    y: topY - 14,
-    font: state.boldFont,
-    size: SECTION_TITLE_SIZE,
-    color: TITLE_COLOR
-  });
-  state.y = topY - boxHeight - 12;
-}
-
-function drawFieldRows(
-  state: PdfLayoutState,
-  fields: Array<{ label: string; value: string; wide?: boolean }>
-) {
-  const gap = 12;
-  const narrowWidth = (CONTENT_WIDTH - gap) / 2;
-
-  function flushRow(rowFields: WrappedCell[]) {
-    if (!rowFields.length) {
-      return;
-    }
-
-    const rowHeight =
-      Math.max(
-        ...rowFields.map(
-          (field) => 12 + field.lines.length * LINE_HEIGHT + 12
-        )
-      ) + 4;
-
-    ensureSpace(state, rowHeight);
-
-    rowFields.forEach((field, index) => {
-      const width = field.wide ? CONTENT_WIDTH : narrowWidth;
-      const x = field.wide
-        ? PAGE_MARGIN_X
-        : PAGE_MARGIN_X + index * (narrowWidth + gap);
-      const topY = state.y;
-
-      state.page.drawRectangle({
-        x,
-        y: topY - rowHeight,
-        width,
-        height: rowHeight,
-        color: CELL_FILL,
-        borderColor: BORDER_COLOR,
-        borderWidth: 0.75
-      });
-
-      state.page.drawText(field.label, {
-        x: x + 8,
-        y: topY - 14,
-        font: state.boldFont,
-        size: LABEL_FONT_SIZE,
-        color: MUTED_COLOR
-      });
-
-      drawWrappedLines({
-        state,
-        lines: field.lines,
-        x: x + 8,
-        y: topY - 28,
-        font: state.regularFont,
-        fontSize: BODY_FONT_SIZE,
-        lineHeight: LINE_HEIGHT
-      });
-    });
-
-    state.y -= rowHeight + 10;
+  if (input.spec.align === "center") {
+    return input.spec.x + Math.max((input.spec.width - textWidth) / 2, 0);
   }
 
-  let currentRow: WrappedCell[] = [];
+  if (input.spec.align === "right") {
+    return input.spec.x + Math.max(input.spec.width - textWidth, 0);
+  }
 
-  fields.forEach((field) => {
-    const cellWidth = field.wide ? CONTENT_WIDTH : narrowWidth;
-    const lines = wrapText(
-      state.regularFont,
-      BODY_FONT_SIZE,
-      field.value,
-      cellWidth - 16
-    );
-    const wrappedField = {
-      label: field.label,
-      lines,
-      wide: field.wide
-    } satisfies WrappedCell;
+  return input.spec.x;
+}
 
-    if (field.wide) {
-      flushRow(currentRow);
-      currentRow = [];
-      flushRow([wrappedField]);
+function drawTextField(input: {
+  page: PDFPage;
+  font: PDFFont;
+  spec: UnipPdfTextFieldSpec;
+  value: string | null | undefined;
+}) {
+  const resolvedText = fitTextToWidth({
+    font: input.font,
+    text: getOptionalText(input.value),
+    width: input.spec.width,
+    size: input.spec.size,
+    minSize: input.spec.minSize
+  });
+
+  if (!resolvedText.text) {
+    return;
+  }
+
+  input.page.drawText(resolvedText.text, {
+    x: resolveFieldX({
+      font: input.font,
+      spec: input.spec,
+      text: resolvedText.text,
+      size: resolvedText.size
+    }),
+    y: input.spec.y,
+    font: input.font,
+    size: resolvedText.size,
+    color: TEXT_COLOR
+  });
+}
+
+function drawActivityPlan(input: {
+  pages: PDFPage[];
+  font: PDFFont;
+  activityPlan: string | null | undefined;
+}) {
+  const lineSpecs = UNIP_TCE_TEMPLATE_FIELDS.activityPlanLines;
+  const normalizedText = getOptionalText(input.activityPlan);
+
+  if (!normalizedText) {
+    return;
+  }
+
+  const wrappedLines = wrapTextIntoLines({
+    font: input.font,
+    text: normalizedText,
+    width: lineSpecs[0]?.width ?? 468,
+    size: lineSpecs[0]?.size ?? 10.2,
+    maxLines: lineSpecs.length
+  });
+
+  wrappedLines.forEach((line, index) => {
+    const spec = lineSpecs[index];
+
+    if (!spec) {
       return;
     }
 
-    currentRow.push(wrappedField);
-
-    if (currentRow.length === 2) {
-      flushRow(currentRow);
-      currentRow = [];
-    }
+    drawTextField({
+      page: input.pages[spec.page],
+      font: input.font,
+      spec,
+      value: line
+    });
   });
-
-  flushRow(currentRow);
 }
 
-function drawParagraphs(state: PdfLayoutState, paragraphs: string[]) {
-  paragraphs.forEach((paragraph) => {
-    const lines = wrapText(
-      state.regularFont,
-      BODY_FONT_SIZE,
-      paragraph,
-      CONTENT_WIDTH
-    );
-    const requiredHeight = lines.length * LINE_HEIGHT + 6;
-    ensureSpace(state, requiredHeight);
-    drawWrappedLines({
-      state,
-      lines,
-      x: PAGE_MARGIN_X,
-      y: state.y,
-      font: state.regularFont,
-      fontSize: BODY_FONT_SIZE,
-      lineHeight: LINE_HEIGHT
-    });
-    state.y -= requiredHeight;
+function drawRect(input: {
+  page: PDFPage;
+  spec: UnipPdfRectSpec;
+}) {
+  input.page.drawRectangle({
+    x: input.spec.x,
+    y: input.spec.y,
+    width: input.spec.width,
+    height: input.spec.height,
+    color: COVER_COLOR
   });
 }
 
-function drawScheduleTable(state: PdfLayoutState, scheduleData: TceScheduleData) {
-  const rows = [
-    { label: "Segunda-feira", day: scheduleData.monday },
-    { label: "Terça-feira", day: scheduleData.tuesday },
-    { label: "Quarta-feira", day: scheduleData.wednesday },
-    { label: "Quinta-feira", day: scheduleData.thursday },
-    { label: "Sexta-feira", day: scheduleData.friday },
-    { label: "Sábado", day: scheduleData.saturday }
-  ];
-  const columnWidths = [145, 150, CONTENT_WIDTH - 295];
-  const headerHeight = 24;
-  const rowHeight = 24;
-  const tableHeight = headerHeight + rows.length * rowHeight;
+function buildSignatureDateLine(snapshot: TceConfigurationSnapshot) {
+  const city = getOptionalText(snapshot.fixedData.signatureCity);
+  const longDate = formatLongDate(snapshot.fixedData.signatureDate);
 
-  ensureSpace(state, tableHeight + 8);
+  if (!city && !longDate) {
+    return "";
+  }
 
-  const tableTop = state.y;
-  const headerLabels = ["Dia", "Horário", "Intervalo"];
-  let currentX = PAGE_MARGIN_X;
+  if (city && longDate) {
+    return `${city}, ${longDate}.`;
+  }
 
-  headerLabels.forEach((label, index) => {
-    const width = columnWidths[index] ?? 120;
-    state.page.drawRectangle({
-      x: currentX,
-      y: tableTop - headerHeight,
-      width,
-      height: headerHeight,
-      color: HEADER_FILL,
-      borderColor: BORDER_COLOR,
-      borderWidth: 0.75
-    });
-    state.page.drawText(label, {
-      x: currentX + 8,
-      y: tableTop - 15,
-      font: state.boldFont,
-      size: LABEL_FONT_SIZE,
-      color: TITLE_COLOR
-    });
-    currentX += width;
+  return city || longDate;
+}
+
+function getTemplateVersion(snapshot: TceConfigurationSnapshot) {
+  const resolvedVersion = getOptionalText(snapshot.model.templateVersion);
+  return TEMPLATE_SUPPORTED_VERSIONS.has(resolvedVersion)
+    ? UNIP_TCE_TEMPLATE_VERSION
+    : UNIP_TCE_TEMPLATE_VERSION;
+}
+
+function fillConcedingParty(input: {
+  pages: PDFPage[];
+  font: PDFFont;
+  data: TceConcedingPartyData;
+}) {
+  const fields = UNIP_TCE_TEMPLATE_FIELDS.concedingParty;
+  const phone = splitPhone(input.data.phone);
+  const internshipPhone = splitPhone(input.data.internshipLocationPhone);
+  const page = input.pages[0];
+
+  drawTextField({ page, font: input.font, spec: fields.corporateName, value: input.data.corporateName });
+  drawTextField({ page, font: input.font, spec: fields.documentNumber, value: input.data.documentNumber });
+  drawTextField({ page, font: input.font, spec: fields.address, value: input.data.address });
+  drawTextField({ page, font: input.font, spec: fields.addressNumber, value: input.data.addressNumber });
+  drawTextField({ page, font: input.font, spec: fields.addressComplement, value: input.data.addressComplement });
+  drawTextField({ page, font: input.font, spec: fields.neighborhood, value: input.data.neighborhood });
+  drawTextField({ page, font: input.font, spec: fields.city, value: input.data.city });
+  drawTextField({ page, font: input.font, spec: fields.state, value: input.data.state });
+  drawTextField({ page, font: input.font, spec: fields.postalCode, value: input.data.postalCode });
+  drawTextField({ page, font: input.font, spec: fields.phoneAreaCode, value: phone.areaCode });
+  drawTextField({ page, font: input.font, spec: fields.phoneNumber, value: phone.number });
+  drawTextField({ page, font: input.font, spec: fields.email, value: input.data.email });
+  drawTextField({ page, font: input.font, spec: fields.internshipLocation, value: input.data.internshipLocation });
+  drawTextField({ page, font: input.font, spec: fields.internshipAddress, value: input.data.internshipLocationAddress });
+  drawTextField({ page, font: input.font, spec: fields.internshipAddressNumber, value: input.data.internshipLocationNumber });
+  drawTextField({ page, font: input.font, spec: fields.internshipAddressComplement, value: input.data.internshipLocationComplement });
+  drawTextField({ page, font: input.font, spec: fields.internshipNeighborhood, value: input.data.internshipLocationNeighborhood });
+  drawTextField({ page, font: input.font, spec: fields.internshipCity, value: input.data.internshipLocationCity });
+  drawTextField({ page, font: input.font, spec: fields.internshipState, value: input.data.internshipLocationState });
+  drawTextField({ page, font: input.font, spec: fields.internshipPostalCode, value: input.data.internshipLocationPostalCode });
+  drawTextField({ page, font: input.font, spec: fields.internshipPhoneAreaCode, value: internshipPhone.areaCode });
+  drawTextField({ page, font: input.font, spec: fields.internshipPhoneNumber, value: internshipPhone.number });
+  drawTextField({ page, font: input.font, spec: fields.internshipEmail, value: input.data.internshipLocationEmail });
+  drawTextField({ page, font: input.font, spec: fields.responsibleName, value: input.data.responsibleName });
+  drawTextField({ page, font: input.font, spec: fields.responsibleDocument, value: input.data.responsibleDocument });
+  drawTextField({ page, font: input.font, spec: fields.professionalCouncil, value: input.data.professionalCouncil });
+}
+
+function fillStudent(input: {
+  pages: PDFPage[];
+  font: PDFFont;
+  data: TceStudentData;
+}) {
+  const fields = UNIP_TCE_TEMPLATE_FIELDS.student;
+  const phone = splitPhone(input.data.phone);
+  const page = input.pages[0];
+
+  drawTextField({ page, font: input.font, spec: fields.fullName, value: input.data.fullName });
+  drawTextField({ page, font: input.font, spec: fields.registration, value: input.data.registration });
+  drawTextField({ page, font: input.font, spec: fields.campus, value: input.data.campus });
+  drawTextField({ page, font: input.font, spec: fields.courseName, value: input.data.courseName });
+  drawTextField({ page, font: input.font, spec: fields.semesterLabel, value: input.data.semesterLabel });
+  drawTextField({ page, font: input.font, spec: fields.shift, value: input.data.shift });
+  drawTextField({ page, font: input.font, spec: fields.address, value: input.data.address });
+  drawTextField({ page, font: input.font, spec: fields.addressNumber, value: input.data.addressNumber });
+  drawTextField({ page, font: input.font, spec: fields.addressComplement, value: input.data.addressComplement });
+  drawTextField({ page, font: input.font, spec: fields.neighborhood, value: input.data.neighborhood });
+  drawTextField({ page, font: input.font, spec: fields.city, value: input.data.city });
+  drawTextField({ page, font: input.font, spec: fields.state, value: input.data.state });
+  drawTextField({ page, font: input.font, spec: fields.postalCode, value: input.data.postalCode });
+  drawTextField({ page, font: input.font, spec: fields.phoneAreaCode, value: phone.areaCode });
+  drawTextField({ page, font: input.font, spec: fields.phoneNumber, value: phone.number });
+  drawTextField({ page, font: input.font, spec: fields.email, value: input.data.email });
+}
+
+function fillTermAndSchedule(input: {
+  pages: PDFPage[];
+  font: PDFFont;
+  termData: TceConfigurationSnapshot["fixedData"]["termData"];
+  scheduleData: TceScheduleData;
+  dailyWorkload: string | null;
+  weeklyWorkload: string | null;
+  semesterWorkload: string | null;
+}) {
+  const page = input.pages[1];
+  const termFields = UNIP_TCE_TEMPLATE_FIELDS.term;
+  const scheduleFields = UNIP_TCE_TEMPLATE_FIELDS.schedule;
+  const workloadFields = UNIP_TCE_TEMPLATE_FIELDS.workload;
+
+  drawTextField({
+    page,
+    font: input.font,
+    spec: termFields.startsAt,
+    value: formatShortDate(input.termData.startsAt)
+  });
+  drawTextField({
+    page,
+    font: input.font,
+    spec: termFields.endsAt,
+    value: formatShortDate(input.termData.endsAt)
   });
 
-  rows.forEach((row, rowIndex) => {
-    const baseY = tableTop - headerHeight - rowHeight * rowIndex;
-    const values = [
-      row.label,
-      formatScheduleRange({
-        startTime: row.day?.startTime,
-        endTime: row.day?.endTime
-      }),
-      formatScheduleBreak({
-        breakStartTime: row.day?.breakStartTime,
-        breakEndTime: row.day?.breakEndTime
-      })
-    ];
+  const scheduleEntries = [
+    [scheduleFields.monday, input.scheduleData.monday],
+    [scheduleFields.tuesday, input.scheduleData.tuesday],
+    [scheduleFields.wednesday, input.scheduleData.wednesday],
+    [scheduleFields.thursday, input.scheduleData.thursday],
+    [scheduleFields.friday, input.scheduleData.friday],
+    [scheduleFields.saturday, input.scheduleData.saturday]
+  ] as const;
 
-    let rowX = PAGE_MARGIN_X;
-
-    values.forEach((value, valueIndex) => {
-      const width = columnWidths[valueIndex] ?? 120;
-      state.page.drawRectangle({
-        x: rowX,
-        y: baseY - rowHeight,
-        width,
-        height: rowHeight,
-        color: rgb(1, 1, 1),
-        borderColor: BORDER_COLOR,
-        borderWidth: 0.75
-      });
-      state.page.drawText(value, {
-        x: rowX + 8,
-        y: baseY - 15,
-        font: state.regularFont,
-        size: BODY_FONT_SIZE,
-        color: rgb(0.15, 0.17, 0.22)
-      });
-      rowX += width;
+  scheduleEntries.forEach(([specs, day]) => {
+    drawTextField({ page, font: input.font, spec: specs.startTime, value: day?.startTime });
+    drawTextField({ page, font: input.font, spec: specs.endTime, value: day?.endTime });
+    drawTextField({
+      page,
+      font: input.font,
+      spec: specs.breakStartTime,
+      value: day?.breakStartTime
+    });
+    drawTextField({
+      page,
+      font: input.font,
+      spec: specs.breakEndTime,
+      value: day?.breakEndTime
     });
   });
 
-  state.y = tableTop - tableHeight - 12;
-}
-
-function drawSignatureRow(state: PdfLayoutState) {
-  const gap = 16;
-  const signatureWidth = (CONTENT_WIDTH - gap * 2) / 3;
-  const signatureLabels = [
-    "Parte Concedente",
-    "Estagiário(a)",
-    "Instituição de Ensino"
-  ];
-
-  ensureSpace(state, 70);
-
-  const lineY = state.y - 24;
-
-  signatureLabels.forEach((label, index) => {
-    const x = PAGE_MARGIN_X + index * (signatureWidth + gap);
-
-    state.page.drawLine({
-      start: { x, y: lineY },
-      end: { x: x + signatureWidth, y: lineY },
-      thickness: 1,
-      color: BORDER_COLOR
-    });
-    state.page.drawText(label, {
-      x: x + 4,
-      y: lineY - 18,
-      font: state.boldFont,
-      size: SMALL_FONT_SIZE,
-      color: MUTED_COLOR
-    });
+  drawTextField({
+    page,
+    font: input.font,
+    spec: workloadFields.daily,
+    value: input.dailyWorkload
   });
-
-  state.y = lineY - 36;
-}
-
-function buildConcedingPartyAddress(data: TceConcedingPartyData) {
-  return joinTextParts([
-    data.address,
-    data.addressNumber,
-    data.addressComplement,
-    data.neighborhood,
-    data.city,
-    data.state,
-    data.postalCode
-  ]);
-}
-
-function buildInternshipLocationAddress(data: TceConcedingPartyData) {
-  return joinTextParts([
-    data.internshipLocation,
-    data.internshipLocationAddress,
-    data.internshipLocationNumber,
-    data.internshipLocationComplement,
-    data.internshipLocationNeighborhood,
-    data.internshipLocationCity,
-    data.internshipLocationState,
-    data.internshipLocationPostalCode
-  ]);
-}
-
-function buildStudentAddress(studentData: TceStudentData) {
-  return joinTextParts([
-    studentData.address,
-    studentData.addressNumber,
-    studentData.addressComplement,
-    studentData.neighborhood,
-    studentData.city,
-    studentData.state,
-    studentData.postalCode
-  ]);
+  drawTextField({
+    page,
+    font: input.font,
+    spec: workloadFields.weekly,
+    value: input.weeklyWorkload || input.semesterWorkload
+  });
 }
 
 export async function buildStudentTcePdfBuffer(input: TcePdfRenderInput) {
-  const pdfDoc = await PDFDocument.create();
-  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const state: PdfLayoutState = {
-    pdfDoc,
-    regularFont,
-    boldFont,
-    page: pdfDoc.addPage([A4_PAGE_WIDTH, A4_PAGE_HEIGHT]),
-    y: A4_PAGE_HEIGHT - PAGE_MARGIN_TOP,
-    pageNumber: 1
-  };
-  const context = input.snapshot.context;
-  const fixedData = input.snapshot.fixedData;
-  const studentData = input.studentData;
+  const templateVersion = getTemplateVersion(input.snapshot);
+  const templatePath =
+    templateVersion === UNIP_TCE_TEMPLATE_VERSION
+      ? path.join(process.cwd(), UNIP_TCE_TEMPLATE_PATH)
+      : path.join(process.cwd(), UNIP_TCE_TEMPLATE_PATH);
+  const templateBytes = await readFile(templatePath);
+  const pdfDoc = await PDFDocument.load(templateBytes);
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const pages = pdfDoc.getPages();
 
   pdfDoc.setTitle(
-    `TCE - ${context.areaName} - ${context.semesterCode}`
+    `TCE - ${getOptionalText(input.snapshot.context.areaName) || "estagio"} - ${getOptionalText(input.snapshot.context.semesterCode) || "semestre"}`
   );
-  pdfDoc.setSubject("Termo de Compromisso de Estágio");
+  pdfDoc.setSubject("Termo de Compromisso de Estagio");
   pdfDoc.setCreator("Nexus Academy");
   pdfDoc.setProducer("Nexus Academy");
 
-  state.page.drawText("NEXUS ACADEMY", {
-    x: PAGE_MARGIN_X,
-    y: state.y,
-    font: state.boldFont,
-    size: 12,
-    color: TITLE_COLOR
+  fillConcedingParty({
+    pages,
+    font,
+    data: input.snapshot.fixedData.concedingPartyData
   });
-  state.page.drawText("Termo institucional gerado pelo módulo TCE", {
-    x: PAGE_MARGIN_X,
-    y: state.y - 16,
-    font: state.regularFont,
-    size: SMALL_FONT_SIZE,
-    color: MUTED_COLOR
+  fillStudent({
+    pages,
+    font,
+    data: input.studentData
+  });
+  fillTermAndSchedule({
+    pages,
+    font,
+    termData: input.snapshot.fixedData.termData,
+    scheduleData: input.snapshot.fixedData.scheduleData,
+    dailyWorkload: input.snapshot.fixedData.dailyWorkload,
+    weeklyWorkload: input.snapshot.fixedData.weeklyWorkload,
+    semesterWorkload: input.snapshot.fixedData.semesterWorkload
+  });
+  drawActivityPlan({
+    pages,
+    font,
+    activityPlan: input.snapshot.fixedData.activityPlan
   });
 
-  state.page.drawText("TERMO DE COMPROMISSO DE ESTÁGIO (OBRIGATÓRIO)", {
-    x: PAGE_MARGIN_X,
-    y: state.y - 46,
-    font: state.boldFont,
-    size: 15,
-    color: TITLE_COLOR
-  });
+  const signatureText = buildSignatureDateLine(input.snapshot);
 
-  const introLines = wrapText(
-    state.regularFont,
-    BODY_FONT_SIZE,
-    `Documento gerado a partir do modelo ${displayText(input.snapshot.model.name)} para o estágio em ${displayText(context.areaName)}. Esta versão consolida os dados do estagiário e a configuração institucional vigente no momento do preenchimento.`,
-    CONTENT_WIDTH
-  );
-
-  drawWrappedLines({
-    state,
-    lines: introLines,
-    x: PAGE_MARGIN_X,
-    y: state.y - 68,
-    font: state.regularFont,
-    fontSize: BODY_FONT_SIZE,
-    lineHeight: LINE_HEIGHT
-  });
-  state.y -= 96;
-
-  drawSectionTitle(state, "Parte Concedente");
-  drawFieldRows(state, [
-    {
-      label: "Razão social",
-      value: displayText(fixedData.concedingPartyData.corporateName)
-    },
-    {
-      label: "CNPJ/CPF/Código escola",
-      value: displayText(fixedData.concedingPartyData.documentNumber)
-    },
-    {
-      label: "Responsável",
-      value: displayText(fixedData.concedingPartyData.responsibleName)
-    },
-    {
-      label: "RG ou funcional",
-      value: displayText(fixedData.concedingPartyData.responsibleDocument)
-    },
-    {
-      label: "Conselho profissional e número",
-      value: displayText(fixedData.concedingPartyData.professionalCouncil)
-    },
-    {
-      label: "Telefone",
-      value: displayText(fixedData.concedingPartyData.phone)
-    },
-    {
-      label: "E-mail",
-      value: displayText(fixedData.concedingPartyData.email)
-    },
-    {
-      label: "Endereço da concedente",
-      value: buildConcedingPartyAddress(fixedData.concedingPartyData),
-      wide: true
-    },
-    {
-      label: "Local de estágio",
-      value: buildInternshipLocationAddress(fixedData.concedingPartyData),
-      wide: true
-    }
-  ]);
-
-  drawSectionTitle(state, "Estagiário(a)");
-  drawFieldRows(state, [
-    { label: "Nome", value: displayText(studentData.fullName) },
-    { label: "RA", value: displayText(studentData.registration) },
-    { label: "Campus/Polo", value: displayText(studentData.campus) },
-    { label: "Curso", value: displayText(studentData.courseName) },
-    { label: "Semestre", value: displayText(studentData.semesterLabel) },
-    { label: "Turno", value: displayText(studentData.shift) },
-    { label: "Telefone", value: displayText(studentData.phone) },
-    { label: "E-mail", value: displayText(studentData.email) },
-    {
-      label: "Endereço do estagiário",
-      value: buildStudentAddress(studentData),
-      wide: true
-    }
-  ]);
-
-  drawSectionTitle(state, "Instituição de Ensino");
-  drawFieldRows(state, [
-    {
-      label: "Instituição",
-      value: displayText(context.institutionName)
-    },
-    {
-      label: "Curso",
-      value: displayText(context.courseName)
-    },
-    {
-      label: "Unidade",
-      value: displayText(context.unitName)
-    },
-    {
-      label: "Área de estágio",
-      value: displayText(context.areaName)
-    },
-    {
-      label: "Turma",
-      value: displayText(context.className)
-    },
-    {
-      label: "Semestre acadêmico",
-      value: displayText(context.semesterCode)
-    }
-  ]);
-
-  drawSectionTitle(state, "Vigência");
-  drawFieldRows(state, [
-    {
-      label: "Data inicial",
-      value: formatDatePtBr(fixedData.termData.startsAt)
-    },
-    {
-      label: "Data final",
-      value: formatDatePtBr(fixedData.termData.endsAt)
-    }
-  ]);
-
-  drawSectionTitle(state, "Horário de Estágio");
-  drawScheduleTable(state, fixedData.scheduleData);
-
-  drawSectionTitle(state, "Jornada");
-  drawFieldRows(state, [
-    {
-      label: "Jornada diária",
-      value: displayText(fixedData.dailyWorkload)
-    },
-    {
-      label: "Jornada semanal",
-      value: displayText(fixedData.weeklyWorkload)
-    },
-    {
-      label: "Jornada semestral",
-      value: displayText(fixedData.semesterWorkload)
-    }
-  ]);
-
-  drawSectionTitle(state, "Cláusulas contratuais");
-  drawParagraphs(state, TCE_CLAUSES);
-
-  drawSectionTitle(state, "Plano de Atividades de Estágio");
-  drawParagraphs(state, [
-    displayText(
-      fixedData.activityPlan,
-      "Plano de atividades não informado pela coordenação."
-    )
-  ]);
-
-  drawSectionTitle(state, "Cidade e Data");
-  drawParagraphs(state, [
-    `${displayText(fixedData.signatureCity)}, ${formatDatePtBr(fixedData.signatureDate)}`
-  ]);
-
-  drawSectionTitle(state, "Assinaturas");
-  drawParagraphs(state, [
-    "Após a conferência, este documento deve ser impresso e assinado fisicamente pelas partes responsáveis."
-  ]);
-  drawSignatureRow(state);
-
-  pdfDoc.getPages().forEach((page, pageIndex, pages) => {
-    page.drawLine({
-      start: { x: PAGE_MARGIN_X, y: 34 },
-      end: { x: PAGE_MARGIN_X + CONTENT_WIDTH, y: 34 },
-      thickness: 0.75,
-      color: BORDER_COLOR
+  if (signatureText) {
+    drawRect({
+      page: pages[UNIP_TCE_TEMPLATE_FIELDS.signatureLine.cover.page],
+      spec: UNIP_TCE_TEMPLATE_FIELDS.signatureLine.cover
     });
-    page.drawText(
-      `Nexus Academy - TCE - Página ${pageIndex + 1} de ${pages.length}`,
-      {
-        x: PAGE_MARGIN_X,
-        y: 20,
-        font: regularFont,
-        size: SMALL_FONT_SIZE,
-        color: MUTED_COLOR
-      }
-    );
-  });
+    drawTextField({
+      page: pages[UNIP_TCE_TEMPLATE_FIELDS.signatureLine.text.page],
+      font,
+      spec: UNIP_TCE_TEMPLATE_FIELDS.signatureLine.text,
+      value: signatureText
+    });
+  }
 
   const pdfBytes = await pdfDoc.save();
   return Buffer.from(pdfBytes);
