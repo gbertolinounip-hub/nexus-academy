@@ -260,9 +260,9 @@ export const UNIP_TCE_TEMPLATE_FIELDS = {
       size: 10,
       align: "center"
     },
-    firstLineY: 686,
-    lineSpacing: 18,
-    linesPerPage: 29,
+    firstLineY: 739,
+    lineSpacing: 15.9,
+    linesPerPage: 40,
     lineX: 55,
     lineWidth: 468,
     lineStrokeOffset: 3.5

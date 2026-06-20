@@ -31,6 +31,11 @@ interface ResolvedTextFit {
   size: number;
 }
 
+interface WrappedTextFit {
+  lines: string[];
+  size: number;
+}
+
 interface ParsedDateParts {
   day: string;
   month: string;
@@ -40,7 +45,9 @@ interface ParsedDateParts {
 const TEXT_COLOR = rgb(0.08, 0.08, 0.08);
 const COVER_COLOR = rgb(1, 1, 1);
 const LINE_COLOR = rgb(0.18, 0.18, 0.18);
-const MIN_FONT_SIZE = 6.6;
+const MIN_FONT_SIZE = 9;
+const BODY_FONT_SIZE = 10.5;
+const BODY_LINE_HEIGHT = 11.2;
 const TEMPLATE_SUPPORTED_VERSIONS = new Set([
   UNIP_TCE_TEMPLATE_VERSION,
   null,
@@ -257,6 +264,47 @@ function wrapTextIntoLines(input: {
   return lines;
 }
 
+function fitWrappedTextToWidth(input: {
+  font: PDFFont;
+  text: string;
+  width: number;
+  size: number;
+  minSize?: number;
+}) {
+  const normalizedText = getOptionalText(input.text);
+
+  if (!normalizedText) {
+    return {
+      lines: [],
+      size: input.size
+    } satisfies WrappedTextFit;
+  }
+
+  let fontSize = input.size;
+  const minSize = input.minSize ?? MIN_FONT_SIZE;
+  let lines = wrapTextIntoLines({
+    font: input.font,
+    text: normalizedText,
+    width: input.width,
+    size: fontSize
+  });
+
+  while (fontSize > minSize && lines.some((line) => !line.trim())) {
+    fontSize = Number((fontSize - 0.2).toFixed(2));
+    lines = wrapTextIntoLines({
+      font: input.font,
+      text: normalizedText,
+      width: input.width,
+      size: fontSize
+    });
+  }
+
+  return {
+    lines,
+    size: fontSize
+  } satisfies WrappedTextFit;
+}
+
 function resolveFieldX(input: {
   font: PDFFont;
   spec: UnipPdfTextFieldSpec;
@@ -318,6 +366,93 @@ function drawRect(input: {
     width: input.spec.width,
     height: input.spec.height,
     color: COVER_COLOR
+  });
+}
+
+function drawTextAt(input: {
+  page: PDFPage;
+  font: PDFFont;
+  x: number;
+  y: number;
+  text: string | null | undefined;
+  size?: number;
+}) {
+  const resolvedText = getOptionalText(input.text);
+
+  if (!resolvedText) {
+    return;
+  }
+
+  input.page.drawText(resolvedText, {
+    x: input.x,
+    y: input.y,
+    font: input.font,
+    size: input.size ?? BODY_FONT_SIZE,
+    color: TEXT_COLOR
+  });
+}
+
+function drawWrappedTextLines(input: {
+  page: PDFPage;
+  font: PDFFont;
+  x: number;
+  y: number;
+  width: number;
+  text: string | null | undefined;
+  size?: number;
+  minSize?: number;
+  lineHeight?: number;
+}) {
+  const resolved = fitWrappedTextToWidth({
+    font: input.font,
+    text: input.text ?? "",
+    width: input.width,
+    size: input.size ?? BODY_FONT_SIZE,
+    minSize: input.minSize
+  });
+
+  resolved.lines.forEach((line, index) => {
+    input.page.drawText(line, {
+      x: input.x,
+      y: input.y - index * (input.lineHeight ?? BODY_LINE_HEIGHT),
+      font: input.font,
+      size: resolved.size,
+      color: TEXT_COLOR
+    });
+  });
+
+  return resolved;
+}
+
+function drawSectionBorder(input: {
+  page: PDFPage;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}) {
+  input.page.drawRectangle({
+    x: input.x,
+    y: input.y,
+    width: input.width,
+    height: input.height,
+    color: COVER_COLOR,
+    borderColor: LINE_COLOR,
+    borderWidth: 0.75
+  });
+}
+
+function drawHorizontalRule(input: {
+  page: PDFPage;
+  x: number;
+  y: number;
+  width: number;
+}) {
+  input.page.drawLine({
+    start: { x: input.x, y: input.y },
+    end: { x: input.x + input.width, y: input.y },
+    thickness: 0.75,
+    color: LINE_COLOR
   });
 }
 
@@ -647,6 +782,196 @@ function fillStudent(input: {
   });
 }
 
+function renderStudentExpandableContactBlock(input: {
+  page: PDFPage;
+  font: PDFFont;
+  data: TceStudentData;
+}) {
+  const fields = UNIP_TCE_TEMPLATE_FIELDS.student;
+  const phone = splitPhone(input.data.phone);
+  const addressText = getOptionalText(input.data.address);
+  const addressLines = fitWrappedTextToWidth({
+    font: input.font,
+    text: addressText,
+    width: fields.address.width,
+    size: BODY_FONT_SIZE
+  });
+  const addressExtraHeight =
+    Math.max(addressLines.lines.length, 1) - 1 > 0
+      ? (Math.max(addressLines.lines.length, 1) - 1) * BODY_LINE_HEIGHT
+      : 0;
+  const rowHeight = 14.3;
+  const topBorderY = 435.4;
+  const blockX = 51.2;
+  const blockWidth = 489.2;
+  const rowFourBottomY = topBorderY - (rowHeight + addressExtraHeight);
+  const rowFiveBottomY = rowFourBottomY - rowHeight;
+  const blockBottomY = rowFiveBottomY - rowHeight;
+  const shiftedLocalityY = fields.neighborhood.y - addressExtraHeight;
+  const shiftedContactY = fields.phoneNumber.y - addressExtraHeight;
+  const addressAnchorY = fields.address.y;
+  const verticalCenterOffset = addressExtraHeight / 2;
+
+  drawSectionBorder({
+    page: input.page,
+    x: blockX,
+    y: blockBottomY,
+    width: blockWidth,
+    height: topBorderY - blockBottomY
+  });
+  drawHorizontalRule({
+    page: input.page,
+    x: blockX,
+    y: rowFourBottomY,
+    width: blockWidth
+  });
+  drawHorizontalRule({
+    page: input.page,
+    x: blockX,
+    y: rowFiveBottomY,
+    width: blockWidth
+  });
+
+  drawTextAt({
+    page: input.page,
+    font: input.font,
+    x: 56,
+    y: addressAnchorY,
+    text: "Endereço:"
+  });
+  drawWrappedTextLines({
+    page: input.page,
+    font: input.font,
+    x: fields.address.x,
+    y: addressAnchorY,
+    width: fields.address.width,
+    text: addressText,
+    size: BODY_FONT_SIZE,
+    minSize: MIN_FONT_SIZE,
+    lineHeight: BODY_LINE_HEIGHT
+  });
+  drawTextAt({
+    page: input.page,
+    font: input.font,
+    x: 340,
+    y: addressAnchorY - verticalCenterOffset,
+    text: "nº"
+  });
+  drawTextField({
+    page: input.page,
+    font: input.font,
+    spec: {
+      ...fields.addressNumber,
+      y: fields.addressNumber.y - verticalCenterOffset
+    },
+    value: input.data.addressNumber
+  });
+  drawTextAt({
+    page: input.page,
+    font: input.font,
+    x: 419,
+    y: addressAnchorY - verticalCenterOffset,
+    text: "Compl.:"
+  });
+  drawTextField({
+    page: input.page,
+    font: input.font,
+    spec: {
+      ...fields.addressComplement,
+      y: fields.addressComplement.y - verticalCenterOffset
+    },
+    value: input.data.addressComplement
+  });
+
+  drawTextAt({
+    page: input.page,
+    font: input.font,
+    x: 56,
+    y: shiftedLocalityY,
+    text: "Bairro:"
+  });
+  drawTextField({
+    page: input.page,
+    font: input.font,
+    spec: { ...fields.neighborhood, y: shiftedLocalityY },
+    value: input.data.neighborhood
+  });
+  drawTextAt({
+    page: input.page,
+    font: input.font,
+    x: 213,
+    y: shiftedLocalityY,
+    text: "Município:"
+  });
+  drawTextField({
+    page: input.page,
+    font: input.font,
+    spec: { ...fields.city, y: shiftedLocalityY },
+    value: input.data.city
+  });
+  drawTextAt({
+    page: input.page,
+    font: input.font,
+    x: 379,
+    y: shiftedLocalityY,
+    text: "UF:"
+  });
+  drawTextField({
+    page: input.page,
+    font: input.font,
+    spec: { ...fields.state, y: shiftedLocalityY },
+    value: input.data.state
+  });
+  drawTextAt({
+    page: input.page,
+    font: input.font,
+    x: 443,
+    y: shiftedLocalityY,
+    text: "CEP:"
+  });
+  drawTextField({
+    page: input.page,
+    font: input.font,
+    spec: { ...fields.postalCode, y: shiftedLocalityY },
+    value: input.data.postalCode
+  });
+
+  drawTextAt({
+    page: input.page,
+    font: input.font,
+    x: 56,
+    y: shiftedContactY,
+    text: "Telefone:"
+  });
+  drawTextField({
+    page: input.page,
+    font: input.font,
+    spec: {
+      ...fields.phoneNumber,
+      x: 112,
+      width: 150,
+      y: shiftedContactY
+    },
+    value:
+      phone.areaCode && phone.number
+        ? `(${phone.areaCode}) ${phone.number}`
+        : phone.areaCode || phone.number
+  });
+  drawTextAt({
+    page: input.page,
+    font: input.font,
+    x: 279,
+    y: shiftedContactY,
+    text: "E-mail:"
+  });
+  drawTextField({
+    page: input.page,
+    font: input.font,
+    spec: { ...fields.email, y: shiftedContactY },
+    value: input.data.email
+  });
+}
+
 function fillTermAndSchedule(input: {
   pages: PDFPage[];
   font: PDFFont;
@@ -768,19 +1093,6 @@ async function insertContinuationActivityPages(input: {
       color: COVER_COLOR
     });
 
-    drawTextField({
-      page: insertedPage,
-      font: input.font,
-      spec: continuationSpec.title,
-      value: "PLANO DE ATIVIDADES DE ESTAGIO"
-    });
-    drawTextField({
-      page: insertedPage,
-      font: input.font,
-      spec: continuationSpec.subtitle,
-      value: "Continuacao"
-    });
-
     chunk.forEach((line, lineIndex) => {
       const y = continuationSpec.firstLineY - lineIndex * continuationSpec.lineSpacing;
 
@@ -852,44 +1164,38 @@ async function drawActivityPlan(input: {
     return;
   }
 
-  let linesForFinalPage = allLines.slice(officialPageThreeSpecs.length);
-  let insertedPageCount = 0;
+  if (allLines.length <= officialSpecs.length) {
+    const linesForFinalOfficialPage = allLines.slice(officialPageThreeSpecs.length);
+    const finalOfficialPage = pagesBeforeInsert[3];
 
-  if (allLines.length > officialSpecs.length) {
-    const reservedFinalPageCount = officialPageFourSpecs.length;
-    const middleLines = allLines.slice(
-      officialPageThreeSpecs.length,
-      allLines.length - reservedFinalPageCount
-    );
+    linesForFinalOfficialPage.forEach((line, index) => {
+      const spec = officialPageFourSpecs[index];
 
-    insertedPageCount = await insertContinuationActivityPages({
-      outputDoc: input.outputDoc,
-      templateDoc: input.templateDoc,
-      lines: middleLines,
-      font: input.font
+      if (!spec) {
+        return;
+      }
+
+      drawActivityPlanLine({
+        page: finalOfficialPage,
+        font: input.font,
+        x: spec.x,
+        y: spec.y,
+        width: spec.width,
+        size: spec.size,
+        value: line
+      });
     });
-    linesForFinalPage = allLines.slice(-reservedFinalPageCount);
+
+    return;
   }
 
-  const pagesAfterInsert = input.outputDoc.getPages();
-  const finalPlanPage = pagesAfterInsert[3 + insertedPageCount];
+  const continuationLines = allLines.slice(officialPageThreeSpecs.length);
 
-  linesForFinalPage.forEach((line, index) => {
-    const spec = officialPageFourSpecs[index];
-
-    if (!spec) {
-      return;
-    }
-
-    drawActivityPlanLine({
-      page: finalPlanPage,
-      font: input.font,
-      x: spec.x,
-      y: spec.y,
-      width: spec.width,
-      size: spec.size,
-      value: line
-    });
+  await insertContinuationActivityPages({
+    outputDoc: input.outputDoc,
+    templateDoc: input.templateDoc,
+    lines: continuationLines,
+    font: input.font
   });
 }
 
@@ -946,6 +1252,11 @@ export async function buildStudentTcePdfBuffer(input: TcePdfRenderInput) {
   });
   fillStudent({
     pages,
+    font,
+    data: input.studentData
+  });
+  renderStudentExpandableContactBlock({
+    page: pages[0],
     font,
     data: input.studentData
   });
