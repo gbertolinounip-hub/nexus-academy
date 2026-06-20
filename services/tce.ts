@@ -1,3 +1,11 @@
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { buildStudentTcePdfBuffer } from "@/lib/tce/pdf";
 import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import {
   loadScopedOperationalGraph,
@@ -9,6 +17,7 @@ import { loadVisibleStageAreaCatalog } from "@/services/stage-areas";
 import type { Database } from "@/types/database";
 import type {
   SessionUser,
+  TceConfigurationSnapshot,
   StudentTce,
   TceConcedingPartyData,
   TceInternshipConfiguration,
@@ -42,6 +51,16 @@ type TceQueryClient =
   | Awaited<ReturnType<typeof createSupabaseServerClient>>
   | ReturnType<typeof createSupabaseAdminClient>;
 
+interface TceS3Config {
+  region: string;
+  bucket: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+let tceS3Client: S3Client | null = null;
+let tceS3ClientSignature: string | null = null;
+
 export class TceServiceError extends Error {
   constructor(
     readonly kind:
@@ -51,7 +70,8 @@ export class TceServiceError extends Error {
       | "duplicate_active"
       | "ambiguous_configuration"
       | "validation"
-      | "not_found",
+      | "not_found"
+      | "storage",
     message: string,
     readonly fieldErrors: Record<string, string> = {}
   ) {
@@ -202,6 +222,11 @@ export interface SaveStudentTceDataInput {
   studentData: TceStudentData;
 }
 
+export interface GenerateStudentTcePdfResult {
+  tce: StudentTce;
+  downloadFileName: string;
+}
+
 export interface SaveTceConfigurationInput {
   modelId: string;
   name: string;
@@ -260,6 +285,206 @@ function buildTceModuleSetupError() {
   return buildEmptyState(
     "Módulo de TCE indisponível",
     "As tabelas do módulo TCE ainda não estão disponíveis neste ambiente. Aplique o script-15 do TCE gerador antes de usar esta tela."
+  );
+}
+
+function getTceS3Config(): TceS3Config {
+  const region = process.env.AWS_REGION?.trim() ?? "";
+  const bucket = process.env.AWS_S3_BUCKET?.trim() ?? "";
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID?.trim() ?? "";
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY?.trim() ?? "";
+
+  if (!region || !bucket || !accessKeyId || !secretAccessKey) {
+    throw new TceServiceError(
+      "storage",
+      "As credenciais de armazenamento do TCE nÃ£o estÃ£o configuradas neste ambiente."
+    );
+  }
+
+  return {
+    region,
+    bucket,
+    accessKeyId,
+    secretAccessKey
+  };
+}
+
+function getTceS3Client() {
+  const config = getTceS3Config();
+  const signature = `${config.region}:${config.bucket}:${config.accessKeyId}`;
+
+  if (tceS3Client && tceS3ClientSignature === signature) {
+    return tceS3Client;
+  }
+
+  tceS3Client = new S3Client({
+    region: config.region,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey
+    }
+  });
+  tceS3ClientSignature = signature;
+
+  return tceS3Client;
+}
+
+const TCE_S3_SCHEME = "s3://";
+
+function isTceS3StoragePath(storagePath: string) {
+  return storagePath.startsWith(TCE_S3_SCHEME);
+}
+
+function parseTceS3StoragePath(storagePath: string) {
+  if (!isTceS3StoragePath(storagePath)) {
+    return null;
+  }
+
+  const normalizedPath = storagePath.slice(TCE_S3_SCHEME.length);
+  const firstSlashIndex = normalizedPath.indexOf("/");
+
+  if (firstSlashIndex <= 0) {
+    return null;
+  }
+
+  return {
+    bucket: normalizedPath.slice(0, firstSlashIndex),
+    key: normalizedPath.slice(firstSlashIndex + 1)
+  };
+}
+
+function buildPersistedS3TceStoragePath(storageKey: string) {
+  const { bucket } = getTceS3Config();
+  return `${TCE_S3_SCHEME}${bucket}/${storageKey}`;
+}
+
+function normalizeStorageSegment(
+  value: string | null | undefined,
+  fallback: string,
+  maxLength = 48
+) {
+  const normalizedValue = (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase()
+    .slice(0, maxLength)
+    .replace(/-+$/g, "");
+
+  return normalizedValue || fallback;
+}
+
+function normalizeStorageFileName(fileName: string) {
+  const trimmedFileName = fileName.trim();
+  const extensionMatch = trimmedFileName.match(/\.([a-zA-Z0-9]+)$/);
+  const extension = extensionMatch?.[1]?.toLowerCase() ?? "";
+  const baseName = extension
+    ? trimmedFileName.slice(0, -extension.length - 1)
+    : trimmedFileName;
+  const normalizedBaseName = normalizeStorageSegment(baseName, "tce", 80);
+
+  return extension ? `${normalizedBaseName}.${extension}` : normalizedBaseName;
+}
+
+function buildInlineDownloadDisposition(fileName: string) {
+  const fallbackName = normalizeStorageFileName(fileName).replace(/"/g, "");
+  const encodedName = encodeURIComponent(fileName);
+
+  return `inline; filename="${fallbackName}"; filename*=UTF-8''${encodedName}`;
+}
+
+function buildTcePdfFileName(input: {
+  areaName: string | null;
+  semesterCode: string | null;
+}) {
+  const areaSegment = normalizeStorageSegment(input.areaName, "estagio", 36);
+  const semesterSegment = normalizeStorageSegment(input.semesterCode, "semestre", 24);
+  return `tce-${areaSegment}-${semesterSegment}.pdf`;
+}
+
+function buildTcePdfStorageKey(input: {
+  studentId: string;
+  tceId: string;
+  areaName: string | null;
+  semesterCode: string | null;
+}) {
+  const fileName = buildTcePdfFileName({
+    areaName: input.areaName,
+    semesterCode: input.semesterCode
+  });
+
+  return [
+    "tces",
+    normalizeStorageSegment(input.studentId, "aluno", 64),
+    normalizeStorageSegment(input.tceId, "tce", 64),
+    `${Date.now()}-${fileName}`
+  ].join("/");
+}
+
+async function uploadTcePdfBinary(input: {
+  storagePath: string;
+  fileBuffer: Buffer;
+}) {
+  const location = parseTceS3StoragePath(input.storagePath);
+
+  if (!location) {
+    throw new TceServiceError("storage", "O caminho do PDF do TCE Ã© invÃ¡lido.");
+  }
+
+  const s3Client = getTceS3Client();
+  await s3Client.send(
+    new PutObjectCommand({
+      Bucket: location.bucket,
+      Key: location.key,
+      Body: input.fileBuffer,
+      ContentType: "application/pdf"
+    })
+  );
+}
+
+async function removeTcePdfBinary(storagePath: string | null | undefined) {
+  if (!storagePath) {
+    return;
+  }
+
+  const location = parseTceS3StoragePath(storagePath);
+
+  if (!location) {
+    return;
+  }
+
+  const s3Client = getTceS3Client();
+  await s3Client.send(
+    new DeleteObjectCommand({
+      Bucket: location.bucket,
+      Key: location.key
+    })
+  );
+}
+
+async function buildTcePdfDownloadUrl(input: {
+  storagePath: string;
+  fileName: string;
+}) {
+  const location = parseTceS3StoragePath(input.storagePath);
+
+  if (!location) {
+    return null;
+  }
+
+  const s3Client = getTceS3Client();
+
+  return getSignedUrl(
+    s3Client,
+    new GetObjectCommand({
+      Bucket: location.bucket,
+      Key: location.key,
+      ResponseContentType: "application/pdf",
+      ResponseContentDisposition: buildInlineDownloadDisposition(input.fileName)
+    }),
+    { expiresIn: 60 }
   );
 }
 
@@ -342,6 +567,73 @@ function toScheduleData(value: unknown): TceScheduleData {
     friday: toScheduleDayData(data.friday),
     saturday: toScheduleDayData(data.saturday)
   };
+}
+
+function toTceConfigurationSnapshot(value: unknown): TceConfigurationSnapshot {
+  const data =
+    value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const model =
+    data.model && typeof data.model === "object"
+      ? (data.model as Record<string, unknown>)
+      : {};
+  const context =
+    data.context && typeof data.context === "object"
+      ? (data.context as Record<string, unknown>)
+      : {};
+  const fixedData =
+    data.fixedData && typeof data.fixedData === "object"
+      ? (data.fixedData as Record<string, unknown>)
+      : {};
+
+  return {
+    configurationId: toOptionalText(data.configurationId) ?? "",
+    configurationName: toOptionalText(data.configurationName) ?? "",
+    model: {
+      id: toOptionalText(model.id) ?? "",
+      name: toOptionalText(model.name) ?? "",
+      code: toOptionalText(model.code) ?? "",
+      templateVersion: toOptionalText(model.templateVersion)
+    },
+    context: {
+      enrollmentId: toOptionalText(context.enrollmentId) ?? "",
+      classId: toOptionalText(context.classId) ?? "",
+      className: toOptionalText(context.className) ?? "",
+      semesterId: toOptionalText(context.semesterId) ?? "",
+      semesterCode: toOptionalText(context.semesterCode) ?? "",
+      semesterName: toOptionalText(context.semesterName) ?? "",
+      curricularPeriod:
+        typeof context.curricularPeriod === "number" ? context.curricularPeriod : null,
+      areaId: toOptionalText(context.areaId) ?? "",
+      areaName: toOptionalText(context.areaName) ?? "",
+      blockName: toOptionalText(context.blockName),
+      offerId: toOptionalText(context.offerId) ?? "",
+      offerName: toOptionalText(context.offerName),
+      courseName: toOptionalText(context.courseName) ?? "",
+      institutionName: toOptionalText(context.institutionName),
+      unitName: toOptionalText(context.unitName)
+    },
+    fixedData: {
+      concedingPartyData: toConcedingPartyData(fixedData.concedingPartyData),
+      termData: toTermData(fixedData.termData),
+      scheduleData: toScheduleData(fixedData.scheduleData),
+      dailyWorkload: toOptionalText(fixedData.dailyWorkload),
+      weeklyWorkload: toOptionalText(fixedData.weeklyWorkload),
+      semesterWorkload: toOptionalText(fixedData.semesterWorkload),
+      activityPlan: toOptionalText(fixedData.activityPlan),
+      signatureCity: toOptionalText(fixedData.signatureCity),
+      signatureDate: toOptionalText(fixedData.signatureDate)
+    },
+    savedAt: toOptionalText(data.savedAt) ?? new Date().toISOString()
+  };
+}
+
+function hasMeaningfulTceSnapshot(snapshot: TceConfigurationSnapshot) {
+  return Boolean(
+    snapshot.configurationId &&
+      snapshot.model.id &&
+      snapshot.context.offerId &&
+      snapshot.context.areaId
+  );
 }
 
 function buildModelScopeLabel(input: {
@@ -1372,10 +1664,7 @@ function mapStudentTceRowToDomain(row: StudentTceRow): StudentTce {
     enrollmentId: row.matricula_turma_id,
     stageAreaId: row.area_estagio_id,
     studentData: toTceStudentData(row.dados_estagiario),
-    configurationSnapshot:
-      row.configuracao_snapshot && typeof row.configuracao_snapshot === "object"
-        ? (row.configuracao_snapshot as Record<string, unknown>)
-        : {},
+    configurationSnapshot: toTceConfigurationSnapshot(row.configuracao_snapshot),
     templateVersionSnapshot: row.template_version_snapshot,
     generatedPdfPath: row.pdf_gerado_path,
     generatedAt: row.gerado_em,
@@ -1608,7 +1897,9 @@ function serializeTceStudentData(studentData: TceStudentData) {
   } satisfies Record<string, unknown>;
 }
 
-function buildTceConfigurationSnapshot(entry: StudentTceAvailableEntry) {
+function buildTceConfigurationSnapshot(
+  entry: StudentTceAvailableEntry
+): TceConfigurationSnapshot {
   return {
     configurationId: entry.configuration.id,
     configurationName: entry.configuration.name,
@@ -1647,7 +1938,71 @@ function buildTceConfigurationSnapshot(entry: StudentTceAvailableEntry) {
       signatureDate: entry.configuration.signatureDate
     },
     savedAt: new Date().toISOString()
-  } satisfies Record<string, unknown>;
+  };
+}
+
+function buildStudentTcePdfFieldErrors(studentData: TceStudentData) {
+  const requiredFields: Array<{
+    key: keyof TceStudentData;
+    formField: string;
+    label: string;
+  }> = [
+    { key: "fullName", formField: "full_name", label: "Nome" },
+    { key: "registration", formField: "registration", label: "RA" },
+    { key: "courseName", formField: "course_name", label: "Curso" },
+    { key: "address", formField: "address", label: "EndereÃ§o" },
+    { key: "city", formField: "city", label: "MunicÃ­pio" },
+    { key: "state", formField: "state", label: "UF" },
+    { key: "postalCode", formField: "postal_code", label: "CEP" },
+    { key: "phone", formField: "phone", label: "Telefone" },
+    { key: "email", formField: "email", label: "E-mail" }
+  ];
+
+  return Object.fromEntries(
+    requiredFields
+      .filter(({ key }) => !toOptionalText(studentData[key]))
+      .map(({ formField, label }) => [
+        formField,
+        `${label} Ã© obrigatÃ³rio para gerar o PDF.`
+      ])
+  );
+}
+
+function resolveStudentTceSnapshot(input: {
+  savedTce: StudentTce;
+  availableEntry: StudentTceAvailableEntry;
+}) {
+  if (hasMeaningfulTceSnapshot(input.savedTce.configurationSnapshot)) {
+    return input.savedTce.configurationSnapshot;
+  }
+
+  return buildTceConfigurationSnapshot(input.availableEntry);
+}
+
+async function loadStudentTceRowByConfiguration(input: {
+  currentUser: SessionUser;
+  configurationId: string;
+}) {
+  const adminClient = createSupabaseAdminClient();
+  const { data, error } = await adminClient
+    .from("tces_aluno")
+    .select("*")
+    .eq("aluno_id", input.currentUser.id)
+    .eq("configuracao_tce_estagio_id", input.configurationId)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingTceModuleRelationError(error)) {
+      throw new TceServiceError(
+        "database_not_ready",
+        "As tabelas do mÃ³dulo TCE ainda nÃ£o estÃ£o disponÃ­veis neste ambiente."
+      );
+    }
+
+    throw new Error("Houve um problema ao carregar os dados salvos do TCE.");
+  }
+
+  return (data ?? null) as StudentTceRow | null;
 }
 
 export async function resolveStudentTceContext(
@@ -2222,4 +2577,142 @@ export async function saveStudentTceData(
   }
 
   return mapStudentTceRowToDomain(data as StudentTceRow);
+}
+
+export async function loadStudentGeneratedTce(
+  currentUser: SessionUser,
+  configurationId: string
+) {
+  const row = await loadStudentTceRowByConfiguration({
+    currentUser,
+    configurationId
+  });
+
+  return row ? mapStudentTceRowToDomain(row) : null;
+}
+
+export async function generateStudentTcePdf(
+  currentUser: SessionUser,
+  configurationId: string
+): Promise<GenerateStudentTcePdfResult> {
+  const availableEntry = await loadStudentTceByConfiguration(currentUser, configurationId);
+  const savedTceRow = await loadStudentTceRowByConfiguration({
+    currentUser,
+    configurationId
+  });
+
+  if (!savedTceRow) {
+    throw new TceServiceError(
+      "validation",
+      "Salve os dados obrigatÃ³rios do TCE antes de gerar o PDF."
+    );
+  }
+
+  const savedTce = mapStudentTceRowToDomain(savedTceRow);
+  const fieldErrors = buildStudentTcePdfFieldErrors(savedTce.studentData);
+
+  if (Object.keys(fieldErrors).length) {
+    throw new TceServiceError(
+      "validation",
+      "Preencha e salve os dados obrigatÃ³rios antes de gerar o PDF.",
+      fieldErrors
+    );
+  }
+
+  const resolvedSnapshot = resolveStudentTceSnapshot({
+    savedTce,
+    availableEntry
+  });
+  const pdfBuffer = await buildStudentTcePdfBuffer({
+    snapshot: resolvedSnapshot,
+    studentData: savedTce.studentData
+  });
+  const storagePath = buildPersistedS3TceStoragePath(
+    buildTcePdfStorageKey({
+      studentId: currentUser.id,
+      tceId: savedTce.id,
+      areaName: resolvedSnapshot.context.areaName,
+      semesterCode: resolvedSnapshot.context.semesterCode
+    })
+  );
+
+  await uploadTcePdfBinary({
+    storagePath,
+    fileBuffer: pdfBuffer
+  });
+
+  try {
+    if (
+      savedTce.generatedPdfPath &&
+      savedTce.generatedPdfPath !== storagePath
+    ) {
+      await removeTcePdfBinary(savedTce.generatedPdfPath);
+    }
+  } catch {
+    // Se a remoÃ§Ã£o do PDF anterior falhar, mantemos o novo arquivo salvo.
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const updatePayload = {
+    pdf_gerado_path: storagePath,
+    gerado_em: new Date().toISOString(),
+    configuracao_snapshot: resolvedSnapshot,
+    template_version_snapshot:
+      savedTce.templateVersionSnapshot ?? availableEntry.model.templateVersion
+  };
+  const { data, error } = await adminClient
+    .from("tces_aluno")
+    .update(updatePayload as never)
+    .eq("id", savedTce.id)
+    .eq("aluno_id", currentUser.id)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error("Houve um problema ao registrar o PDF gerado do TCE.");
+  }
+
+  return {
+    tce: mapStudentTceRowToDomain(data as StudentTceRow),
+    downloadFileName: buildTcePdfFileName({
+      areaName: resolvedSnapshot.context.areaName,
+      semesterCode: resolvedSnapshot.context.semesterCode
+    })
+  };
+}
+
+export async function getStudentTcePdfDownloadUrl(
+  currentUser: SessionUser,
+  configurationId: string
+) {
+  const row = await loadStudentTceRowByConfiguration({
+    currentUser,
+    configurationId
+  });
+
+  if (!row?.pdf_gerado_path) {
+    return null;
+  }
+
+  const mappedTce = mapStudentTceRowToDomain(row);
+  const snapshot = hasMeaningfulTceSnapshot(mappedTce.configurationSnapshot)
+    ? mappedTce.configurationSnapshot
+    : null;
+  const fileName = buildTcePdfFileName({
+    areaName: snapshot?.context.areaName ?? null,
+    semesterCode: snapshot?.context.semesterCode ?? null
+  });
+  const downloadUrl = await buildTcePdfDownloadUrl({
+    storagePath: row.pdf_gerado_path,
+    fileName
+  });
+
+  if (!downloadUrl) {
+    return null;
+  }
+
+  return {
+    url: downloadUrl,
+    fileName
+  };
 }

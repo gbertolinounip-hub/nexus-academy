@@ -30,6 +30,14 @@ export interface StudentTceActionState {
   submittedAt?: number;
 }
 
+export interface StudentTcePdfActionState {
+  status: "idle" | "success" | "error";
+  message: string | null;
+  fieldErrors: Record<string, string>;
+  generatedAt?: string | null;
+  submittedAt?: number;
+}
+
 function readText(value?: string | null) {
   return typeof value === "string" ? value : "";
 }
@@ -94,3 +102,36 @@ export const initialStudentTceActionState: StudentTceActionState = {
   formValues: createInitialStudentTceFormValues(),
   savedAt: null
 };
+
+export const initialStudentTcePdfActionState: StudentTcePdfActionState = {
+  status: "idle",
+  message: null,
+  fieldErrors: {},
+  generatedAt: null
+};
+
+export function areStudentTceFormValuesEqual(
+  left: StudentTceFormValues,
+  right: StudentTceFormValues
+) {
+  return (
+    left.configuration_id === right.configuration_id &&
+    left.enrollment_id === right.enrollment_id &&
+    left.area_estagio_id === right.area_estagio_id &&
+    left.full_name === right.full_name &&
+    left.registration === right.registration &&
+    left.campus === right.campus &&
+    left.course_name === right.course_name &&
+    left.semester_label === right.semester_label &&
+    left.shift === right.shift &&
+    left.address === right.address &&
+    left.address_number === right.address_number &&
+    left.address_complement === right.address_complement &&
+    left.neighborhood === right.neighborhood &&
+    left.city === right.city &&
+    left.state === right.state &&
+    left.postal_code === right.postal_code &&
+    left.phone === right.phone &&
+    left.email === right.email
+  );
+}

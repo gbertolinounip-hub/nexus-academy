@@ -1,6 +1,9 @@
 "use client";
 
-import type { StudentTceActionState, StudentTceFormValues } from "@/app/(app)/tce/state";
+import type {
+  StudentTceActionState,
+  StudentTceFormValues
+} from "@/app/(app)/tce/state";
 import type { StudentTceAvailableEntry } from "@/services/tce";
 
 interface StudentTceFormProps {
@@ -9,6 +12,7 @@ interface StudentTceFormProps {
   state: StudentTceActionState;
   formAction: (formData: FormData) => void;
   onChange: (field: keyof StudentTceFormValues, value: string) => void;
+  savePending?: boolean;
 }
 
 export function StudentTceForm({
@@ -16,7 +20,8 @@ export function StudentTceForm({
   draft,
   state,
   formAction,
-  onChange
+  onChange,
+  savePending = false
 }: StudentTceFormProps) {
   const fieldErrors = state.fieldErrors ?? {};
 
@@ -49,17 +54,17 @@ export function StudentTceForm({
       <div className="card">
         <div className="card-header">
           <div>
-            <h3>Dados do estagiário</h3>
+            <h3>Dados do estagiÃ¡rio</h3>
             <p>
-              Revise os campos abaixo. Sempre que possível, o sistema já pré-preenche os
-              dados básicos do seu cadastro acadêmico.
+              Revise os campos abaixo. Sempre que possÃ­vel, o sistema jÃ¡ prÃ©-preenche os
+              dados bÃ¡sicos do seu cadastro acadÃªmico.
             </p>
           </div>
         </div>
 
         <div className="management-tag-list">
           <span className="badge badge-muted">TCE: {entry.label}</span>
-          <span className="badge badge-muted">Área: {entry.areaName}</span>
+          <span className="badge badge-muted">Ãrea: {entry.areaName}</span>
           <span className="badge badge-muted">Semestre: {entry.semesterCode}</span>
         </div>
       </div>
@@ -132,7 +137,7 @@ export function StudentTceForm({
         </label>
 
         <label className={getFieldClassName("address")}>
-          <span>Endereço</span>
+          <span>EndereÃ§o</span>
           <input
             className={getInputClassName("address")}
             name="address"
@@ -142,7 +147,7 @@ export function StudentTceForm({
         </label>
 
         <label className={getFieldClassName("address_number")}>
-          <span>Número</span>
+          <span>NÃºmero</span>
           <input
             className={getInputClassName("address_number")}
             name="address_number"
@@ -172,7 +177,7 @@ export function StudentTceForm({
         </label>
 
         <label className={getFieldClassName("city")}>
-          <span>Município</span>
+          <span>MunicÃ­pio</span>
           <input
             className={getInputClassName("city")}
             name="city"
@@ -227,13 +232,12 @@ export function StudentTceForm({
       </div>
 
       <p className="field-help">
-        Esta etapa apenas salva seus dados de preenchimento. A geração do PDF será liberada
-        na próxima fase do módulo.
+        Salve os dados do estagiÃ¡rio antes de gerar o PDF final do TCE.
       </p>
 
       <div className="actions-row">
-        <button className="button" type="submit">
-          Salvar dados
+        <button className="button" type="submit" disabled={savePending}>
+          {savePending ? "Salvando..." : "Salvar dados"}
         </button>
       </div>
     </form>

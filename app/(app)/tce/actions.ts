@@ -4,10 +4,15 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth/session";
 import type {
+  StudentTcePdfActionState,
   StudentTceActionState,
   StudentTceFormValues
 } from "@/app/(app)/tce/state";
-import { saveStudentTceData, TceServiceError } from "@/services/tce";
+import {
+  generateStudentTcePdf,
+  saveStudentTceData,
+  TceServiceError
+} from "@/services/tce";
 
 const emailSchema = z.string().email();
 
@@ -106,6 +111,32 @@ function buildSuccessState(
   };
 }
 
+function buildPdfErrorState(
+  message: string,
+  fieldErrors: Record<string, string> = {}
+): StudentTcePdfActionState {
+  return {
+    status: "error",
+    message,
+    fieldErrors,
+    generatedAt: null,
+    submittedAt: Date.now()
+  };
+}
+
+function buildPdfSuccessState(
+  message: string,
+  generatedAt: string | null
+): StudentTcePdfActionState {
+  return {
+    status: "success",
+    message,
+    fieldErrors: {},
+    generatedAt,
+    submittedAt: Date.now()
+  };
+}
+
 export async function saveStudentTceDataAction(
   _previousState: StudentTceActionState,
   formData: FormData
@@ -162,6 +193,37 @@ export async function saveStudentTceDataAction(
       "Não foi possível salvar os dados do TCE neste momento.",
       {},
       formValues
+    );
+  }
+}
+
+export async function generateStudentTcePdfAction(
+  _previousState: StudentTcePdfActionState,
+  formData: FormData
+): Promise<StudentTcePdfActionState> {
+  const currentUser = await requireRole(["aluno"]);
+  const configurationId = readField(formData, "configuration_id");
+
+  if (!configurationId) {
+    return buildPdfErrorState("O TCE selecionado é inválido.");
+  }
+
+  try {
+    const generated = await generateStudentTcePdf(currentUser, configurationId);
+
+    revalidatePath("/tce");
+
+    return buildPdfSuccessState(
+      "PDF gerado com sucesso. Você já pode abrir ou baixar o documento.",
+      generated.tce.generatedAt
+    );
+  } catch (error) {
+    if (error instanceof TceServiceError) {
+      return buildPdfErrorState(error.message, error.fieldErrors);
+    }
+
+    return buildPdfErrorState(
+      "Não foi possível gerar o PDF do TCE neste momento."
     );
   }
 }

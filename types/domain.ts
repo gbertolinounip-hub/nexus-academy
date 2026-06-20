@@ -186,6 +186,52 @@ export interface TceInternshipConfiguration {
   updatedAt: string;
 }
 
+export interface TceConfigurationSnapshotModel {
+  id: string;
+  name: string;
+  code: string;
+  templateVersion: string | null;
+}
+
+export interface TceConfigurationSnapshotContext {
+  enrollmentId: string;
+  classId: string;
+  className: string;
+  semesterId: string;
+  semesterCode: string;
+  semesterName: string;
+  curricularPeriod: number | null;
+  areaId: string;
+  areaName: string;
+  blockName: string | null;
+  offerId: string;
+  offerName: string | null;
+  courseName: string;
+  institutionName: string | null;
+  unitName: string | null;
+}
+
+export interface TceConfigurationSnapshotFixedData {
+  concedingPartyData: TceConcedingPartyData;
+  termData: TceTermData;
+  scheduleData: TceScheduleData;
+  dailyWorkload: string | null;
+  weeklyWorkload: string | null;
+  semesterWorkload: string | null;
+  activityPlan: string | null;
+  signatureCity: string | null;
+  signatureDate: string | null;
+}
+
+export interface TceConfigurationSnapshot {
+  configurationId: string;
+  configurationName: string;
+  model: TceConfigurationSnapshotModel;
+  context: TceConfigurationSnapshotContext;
+  fixedData: TceConfigurationSnapshotFixedData;
+  savedAt: string;
+}
+
 export interface StudentTce {
   id: string;
   configurationId: string;
@@ -193,7 +239,7 @@ export interface StudentTce {
   enrollmentId: string | null;
   stageAreaId: string | null;
   studentData: TceStudentData;
-  configurationSnapshot: Record<string, unknown>;
+  configurationSnapshot: TceConfigurationSnapshot;
   templateVersionSnapshot: string | null;
   generatedPdfPath: string | null;
   generatedAt: string | null;
