@@ -18,6 +18,14 @@ export interface UnipPdfRectSpec {
   height: number;
 }
 
+export interface UnipPdfLineFieldSpec {
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  size: number;
+}
+
 export const UNIP_TCE_TEMPLATE_VERSION = "v1";
 export const UNIP_TCE_TEMPLATE_PATH =
   "assets/templates/tce/tce-obrigatorio-unip-v1.pdf";
@@ -171,8 +179,14 @@ export const UNIP_TCE_TEMPLATE_FIELDS = {
     email: { page: 0, x: 314, y: 399.6, width: 220, size: 10.5 }
   },
   term: {
-    startsAt: { page: 1, x: 144, y: 731.6, width: 92, size: 10.5 },
-    endsAt: { page: 1, x: 268, y: 731.6, width: 92, size: 10.5 }
+    rangeCover: { page: 1, x: 147, y: 727.4, width: 262, height: 18 },
+    rangeText: { page: 1, x: 148, y: 731.6, width: 258, size: 10.5 },
+    startsAtDay: { page: 1, x: 147, y: 731.6, width: 22, size: 10.5, align: "center" },
+    startsAtMonth: { page: 1, x: 185, y: 731.6, width: 22, size: 10.5, align: "center" },
+    startsAtYear: { page: 1, x: 220, y: 731.6, width: 34, size: 10.5, align: "center" },
+    endsAtDay: { page: 1, x: 292, y: 731.6, width: 22, size: 10.5, align: "center" },
+    endsAtMonth: { page: 1, x: 330, y: 731.6, width: 22, size: 10.5, align: "center" },
+    endsAtYear: { page: 1, x: 366, y: 731.6, width: 34, size: 10.5, align: "center" }
   },
   schedule: {
     monday: {
@@ -228,8 +242,44 @@ export const UNIP_TCE_TEMPLATE_FIELDS = {
     { page: 3, x: 55, y: 706.9, width: 468, size: 10.2 },
     { page: 3, x: 55, y: 691.0, width: 468, size: 10.2 }
   ],
+  activityPlanContinuationPage: {
+    clearBody: { page: 0, x: 42, y: 36, width: 512, height: 706 },
+    title: {
+      page: 0,
+      x: 120,
+      y: 738,
+      width: 355,
+      size: 14,
+      align: "center"
+    },
+    subtitle: {
+      page: 0,
+      x: 150,
+      y: 720,
+      width: 295,
+      size: 10,
+      align: "center"
+    },
+    firstLineY: 686,
+    lineSpacing: 18,
+    linesPerPage: 29,
+    lineX: 55,
+    lineWidth: 468,
+    lineStrokeOffset: 3.5
+  },
   signatureLine: {
     cover: { page: 3, x: 187, y: 388, width: 224, height: 20 },
     text: { page: 3, x: 190, y: 396.1, width: 218, size: 10.5, align: "center" }
+  },
+  pageNumber: {
+    cover: { page: 0, x: 500, y: 10, width: 54, height: 34 },
+    text: {
+      page: 0,
+      x: 518,
+      y: 22,
+      width: 24,
+      size: 10,
+      align: "right"
+    }
   }
 } as const;
