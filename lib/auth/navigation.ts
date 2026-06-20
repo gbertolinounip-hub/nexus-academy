@@ -37,6 +37,11 @@ export const navigationItems: NavigationItem[] = [
     allowedRoles: ["aluno"]
   },
   {
+    href: "/tce" as Route,
+    label: "TCE",
+    allowedRoles: ["aluno"]
+  },
+  {
     href: "/professor/documentos" as Route,
     label: "Documentos",
     allowedRoles: ["professor"]
@@ -149,6 +154,11 @@ export const navigationItems: NavigationItem[] = [
   {
     href: "/gestao/alunos" as Route,
     label: "Cadastros",
+    allowedRoles: ["coordenador"]
+  },
+  {
+    href: "/gestao/tces" as Route,
+    label: "TCEs",
     allowedRoles: ["coordenador"]
   },
   {
