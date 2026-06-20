@@ -1,7 +1,9 @@
 import { formatDate } from "@/lib/utils/format";
 import type { StudentTceFormValues } from "@/app/(app)/tce/state";
 import type { StudentTceAvailableEntry } from "@/services/tce";
-import type { TceScheduleDayData } from "@/types/domain";
+
+type TcePreviewScheduleDay =
+  StudentTceAvailableEntry["configuration"]["scheduleData"][keyof StudentTceAvailableEntry["configuration"]["scheduleData"]];
 
 interface TcePreviewProps {
   entry: StudentTceAvailableEntry;
@@ -36,7 +38,7 @@ function formatPreviewDate(value: string | null | undefined) {
   }
 }
 
-function formatTimeRange(day: TceScheduleDayData | null | undefined) {
+function formatTimeRange(day: TcePreviewScheduleDay | null | undefined) {
   if (!day?.startTime || !day?.endTime) {
     return "Não informado";
   }
@@ -44,7 +46,7 @@ function formatTimeRange(day: TceScheduleDayData | null | undefined) {
   return `${day.startTime} às ${day.endTime}`;
 }
 
-function formatBreakRange(day: TceScheduleDayData | null | undefined) {
+function formatBreakRange(day: TcePreviewScheduleDay | null | undefined) {
   if (!day?.breakStartTime || !day?.breakEndTime) {
     return "Sem intervalo";
   }

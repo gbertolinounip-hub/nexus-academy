@@ -83,6 +83,8 @@ export interface TceConcedingPartyData {
   corporateName?: string | null;
   documentNumber?: string | null;
   address?: string | null;
+  addressNumber?: string | null;
+  addressComplement?: string | null;
   neighborhood?: string | null;
   city?: string | null;
   state?: string | null;
@@ -91,6 +93,14 @@ export interface TceConcedingPartyData {
   email?: string | null;
   internshipLocation?: string | null;
   internshipLocationAddress?: string | null;
+  internshipLocationNumber?: string | null;
+  internshipLocationComplement?: string | null;
+  internshipLocationNeighborhood?: string | null;
+  internshipLocationCity?: string | null;
+  internshipLocationState?: string | null;
+  internshipLocationPostalCode?: string | null;
+  internshipLocationPhone?: string | null;
+  internshipLocationEmail?: string | null;
   responsibleName?: string | null;
   responsibleDocument?: string | null;
   professionalCouncil?: string | null;
@@ -101,14 +111,20 @@ export interface TceTermData {
   endsAt?: string | null;
 }
 
+export interface TceScheduleDayData {
+  startTime?: string | null;
+  endTime?: string | null;
+  breakStartTime?: string | null;
+  breakEndTime?: string | null;
+}
+
 export interface TceScheduleData {
-  monday?: string | null;
-  tuesday?: string | null;
-  wednesday?: string | null;
-  thursday?: string | null;
-  friday?: string | null;
-  saturday?: string | null;
-  intervalNotes?: string | null;
+  monday?: TceScheduleDayData | null;
+  tuesday?: TceScheduleDayData | null;
+  wednesday?: TceScheduleDayData | null;
+  thursday?: TceScheduleDayData | null;
+  friday?: TceScheduleDayData | null;
+  saturday?: TceScheduleDayData | null;
 }
 
 export interface TceStudentData {
