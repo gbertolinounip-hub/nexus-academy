@@ -4,12 +4,12 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth/session";
 import type {
-  StudentTcePdfActionState,
   StudentTceActionState,
+  StudentTceDocumentActionState,
   StudentTceFormValues
 } from "@/app/(app)/tce/state";
 import {
-  generateStudentTcePdf,
+  generateStudentTceDocument,
   saveStudentTceData,
   TceServiceError
 } from "@/services/tce";
@@ -17,7 +17,10 @@ import {
 const emailSchema = z.string().email();
 
 const optionalTextSchema = (maxLength: number) =>
-  z.string().trim().max(maxLength, `O campo deve ter no máximo ${maxLength} caracteres.`);
+  z
+    .string()
+    .trim()
+    .max(maxLength, `O campo deve ter no máximo ${maxLength} caracteres.`);
 
 const studentTceFormSchema = z.object({
   configuration_id: z.string().uuid("TCE inválido."),
@@ -111,10 +114,10 @@ function buildSuccessState(
   };
 }
 
-function buildPdfErrorState(
+function buildDocumentErrorState(
   message: string,
   fieldErrors: Record<string, string> = {}
-): StudentTcePdfActionState {
+): StudentTceDocumentActionState {
   return {
     status: "error",
     message,
@@ -124,10 +127,10 @@ function buildPdfErrorState(
   };
 }
 
-function buildPdfSuccessState(
+function buildDocumentSuccessState(
   message: string,
   generatedAt: string | null
-): StudentTcePdfActionState {
+): StudentTceDocumentActionState {
   return {
     status: "success",
     message,
@@ -135,6 +138,39 @@ function buildPdfSuccessState(
     generatedAt,
     submittedAt: Date.now()
   };
+}
+
+function normalizeDocumentGenerationFieldErrors(
+  fieldErrors: Record<string, string>
+): Record<string, string> {
+  const labels: Record<string, string> = {
+    full_name: "Nome",
+    registration: "RA",
+    course_name: "Curso",
+    address: "Endereço",
+    city: "Município",
+    state: "UF",
+    postal_code: "CEP",
+    phone: "Telefone",
+    email: "E-mail"
+  };
+
+  return Object.fromEntries(
+    Object.entries(fieldErrors).map(([field, message]) => [
+      field,
+      labels[field] ? `${labels[field]} é obrigatório para gerar o TCE.` : message
+    ])
+  );
+}
+
+function getDocumentGenerationErrorMessage(error: TceServiceError) {
+  if (error.kind === "validation") {
+    return Object.keys(error.fieldErrors).length
+      ? "Preencha e salve os dados obrigatórios antes de gerar o TCE."
+      : "Salve os dados do TCE antes de gerar o documento.";
+  }
+
+  return error.message;
 }
 
 export async function saveStudentTceDataAction(
@@ -197,33 +233,36 @@ export async function saveStudentTceDataAction(
   }
 }
 
-export async function generateStudentTcePdfAction(
-  _previousState: StudentTcePdfActionState,
+export async function generateStudentTceDocumentAction(
+  _previousState: StudentTceDocumentActionState,
   formData: FormData
-): Promise<StudentTcePdfActionState> {
+): Promise<StudentTceDocumentActionState> {
   const currentUser = await requireRole(["aluno"]);
   const configurationId = readField(formData, "configuration_id");
 
   if (!configurationId) {
-    return buildPdfErrorState("O TCE selecionado é inválido.");
+    return buildDocumentErrorState("O TCE selecionado é inválido.");
   }
 
   try {
-    const generated = await generateStudentTcePdf(currentUser, configurationId);
+    const generated = await generateStudentTceDocument(currentUser, configurationId);
 
     revalidatePath("/tce");
 
-    return buildPdfSuccessState(
-      "PDF gerado com sucesso. Você já pode abrir ou baixar o documento.",
+    return buildDocumentSuccessState(
+      "TCE gerado com sucesso. Você já pode baixar o documento em Word.",
       generated.tce.generatedAt
     );
   } catch (error) {
     if (error instanceof TceServiceError) {
-      return buildPdfErrorState(error.message, error.fieldErrors);
+      return buildDocumentErrorState(
+        getDocumentGenerationErrorMessage(error),
+        normalizeDocumentGenerationFieldErrors(error.fieldErrors)
+      );
     }
 
-    return buildPdfErrorState(
-      "Não foi possível gerar o PDF do TCE neste momento."
+    return buildDocumentErrorState(
+      "Não foi possível gerar o TCE neste momento."
     );
   }
 }

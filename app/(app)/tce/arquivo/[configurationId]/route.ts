@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentAppUser } from "@/lib/auth/session";
-import { getStudentTcePdfDownloadUrl } from "@/services/tce";
+import { getStudentTceDocumentDownloadUrl } from "@/services/tce";
 
 export const runtime = "nodejs";
 
@@ -15,17 +15,17 @@ export async function GET(
   const currentUser = await getCurrentAppUser();
 
   if (!currentUser || currentUser.role !== "aluno") {
-    return new NextResponse("NÃ£o autenticado.", { status: 401 });
+    return new NextResponse("Não autenticado.", { status: 401 });
   }
 
   const params = await props.params;
-  const download = await getStudentTcePdfDownloadUrl(
+  const download = await getStudentTceDocumentDownloadUrl(
     currentUser,
     params.configurationId
   );
 
   if (!download) {
-    return new NextResponse("PDF do TCE nÃ£o encontrado ou indisponÃ­vel.", {
+    return new NextResponse("TCE em Word não encontrado ou indisponível.", {
       status: 404
     });
   }

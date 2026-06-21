@@ -30,7 +30,7 @@ export interface StudentTceActionState {
   submittedAt?: number;
 }
 
-export interface StudentTcePdfActionState {
+export interface StudentTceDocumentActionState {
   status: "idle" | "success" | "error";
   message: string | null;
   fieldErrors: Record<string, string>;
@@ -103,7 +103,7 @@ export const initialStudentTceActionState: StudentTceActionState = {
   savedAt: null
 };
 
-export const initialStudentTcePdfActionState: StudentTcePdfActionState = {
+export const initialStudentTceDocumentActionState: StudentTceDocumentActionState = {
   status: "idle",
   message: null,
   fieldErrors: {},

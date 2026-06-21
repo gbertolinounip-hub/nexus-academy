@@ -241,7 +241,7 @@ export interface StudentTce {
   studentData: TceStudentData;
   configurationSnapshot: TceConfigurationSnapshot;
   templateVersionSnapshot: string | null;
-  generatedPdfPath: string | null;
+  generatedDocumentPath: string | null;
   generatedAt: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;

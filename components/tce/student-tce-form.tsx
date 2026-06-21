@@ -54,17 +54,17 @@ export function StudentTceForm({
       <div className="card">
         <div className="card-header">
           <div>
-            <h3>Dados do estagiÃ¡rio</h3>
+            <h3>Dados do estagiário</h3>
             <p>
-              Revise os campos abaixo. Sempre que possÃ­vel, o sistema jÃ¡ prÃ©-preenche os
-              dados bÃ¡sicos do seu cadastro acadÃªmico.
+              Revise os campos abaixo. Sempre que possível, o sistema já
+              pré-preenche os dados básicos do seu cadastro acadêmico.
             </p>
           </div>
         </div>
 
         <div className="management-tag-list">
           <span className="badge badge-muted">TCE: {entry.label}</span>
-          <span className="badge badge-muted">Ãrea: {entry.areaName}</span>
+          <span className="badge badge-muted">Área: {entry.areaName}</span>
           <span className="badge badge-muted">Semestre: {entry.semesterCode}</span>
         </div>
       </div>
@@ -137,7 +137,7 @@ export function StudentTceForm({
         </label>
 
         <label className={getFieldClassName("address")}>
-          <span>EndereÃ§o</span>
+          <span>Endereço</span>
           <input
             className={getInputClassName("address")}
             name="address"
@@ -147,12 +147,14 @@ export function StudentTceForm({
         </label>
 
         <label className={getFieldClassName("address_number")}>
-          <span>NÃºmero</span>
+          <span>Número</span>
           <input
             className={getInputClassName("address_number")}
             name="address_number"
             value={draft.address_number}
-            onChange={(event) => onChange("address_number", event.currentTarget.value)}
+            onChange={(event) =>
+              onChange("address_number", event.currentTarget.value)
+            }
           />
         </label>
 
@@ -162,7 +164,9 @@ export function StudentTceForm({
             className={getInputClassName("address_complement")}
             name="address_complement"
             value={draft.address_complement}
-            onChange={(event) => onChange("address_complement", event.currentTarget.value)}
+            onChange={(event) =>
+              onChange("address_complement", event.currentTarget.value)
+            }
           />
         </label>
 
@@ -177,7 +181,7 @@ export function StudentTceForm({
         </label>
 
         <label className={getFieldClassName("city")}>
-          <span>MunicÃ­pio</span>
+          <span>Município</span>
           <input
             className={getInputClassName("city")}
             name="city"
@@ -232,7 +236,7 @@ export function StudentTceForm({
       </div>
 
       <p className="field-help">
-        Salve os dados do estagiÃ¡rio antes de gerar o PDF final do TCE.
+        Salve os dados do estagiário antes de gerar a versão final do TCE em Word.
       </p>
 
       <div className="actions-row">

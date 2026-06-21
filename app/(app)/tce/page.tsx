@@ -28,7 +28,8 @@ export default async function StudentTcePage() {
         >
           <p className="field-help">
             Assim que a coordenação cadastrar a configuração do TCE para sua área e
-            semestre de estágio, esta tela exibirá o formulário e a prévia do documento.
+            semestre de estágio, esta tela exibirá o formulário e a prévia do
+            documento.
           </p>
         </SectionCard>
       </div>
@@ -42,7 +43,8 @@ export default async function StudentTcePage() {
         <h1>{pageData.student.name}</h1>
         <p>
           Confira o Termo de Compromisso de Estágio aplicável à sua área, revise os
-          dados do estagiário e acompanhe a prévia HTML antes da geração final em PDF.
+          dados do estagiário e acompanhe a prévia HTML antes da geração final do
+          documento em Word.
         </p>
       </section>
 

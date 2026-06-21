@@ -5,7 +5,7 @@ import {
   S3Client
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { buildStudentTcePdfBuffer } from "@/lib/tce/pdf";
+import { buildStudentTceDocxBuffer } from "@/lib/tce/docx";
 import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import {
   loadScopedOperationalGraph,
@@ -222,7 +222,7 @@ export interface SaveStudentTceDataInput {
   studentData: TceStudentData;
 }
 
-export interface GenerateStudentTcePdfResult {
+export interface GenerateStudentTceDocumentResult {
   tce: StudentTce;
   downloadFileName: string;
 }
@@ -388,29 +388,29 @@ function normalizeStorageFileName(fileName: string) {
   return extension ? `${normalizedBaseName}.${extension}` : normalizedBaseName;
 }
 
-function buildInlineDownloadDisposition(fileName: string) {
+function buildAttachmentDownloadDisposition(fileName: string) {
   const fallbackName = normalizeStorageFileName(fileName).replace(/"/g, "");
   const encodedName = encodeURIComponent(fileName);
 
-  return `inline; filename="${fallbackName}"; filename*=UTF-8''${encodedName}`;
+  return `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodedName}`;
 }
 
-function buildTcePdfFileName(input: {
+function buildTceGeneratedDocumentFileName(input: {
   areaName: string | null;
   semesterCode: string | null;
 }) {
   const areaSegment = normalizeStorageSegment(input.areaName, "estagio", 36);
   const semesterSegment = normalizeStorageSegment(input.semesterCode, "semestre", 24);
-  return `tce-${areaSegment}-${semesterSegment}.pdf`;
+  return `tce-${areaSegment}-${semesterSegment}.docx`;
 }
 
-function buildTcePdfStorageKey(input: {
+function buildTceGeneratedDocumentStorageKey(input: {
   studentId: string;
   tceId: string;
   areaName: string | null;
   semesterCode: string | null;
 }) {
-  const fileName = buildTcePdfFileName({
+  const fileName = buildTceGeneratedDocumentFileName({
     areaName: input.areaName,
     semesterCode: input.semesterCode
   });
@@ -423,14 +423,17 @@ function buildTcePdfStorageKey(input: {
   ].join("/");
 }
 
-async function uploadTcePdfBinary(input: {
+async function uploadTceGeneratedDocumentBinary(input: {
   storagePath: string;
   fileBuffer: Buffer;
 }) {
   const location = parseTceS3StoragePath(input.storagePath);
 
   if (!location) {
-    throw new TceServiceError("storage", "O caminho do PDF do TCE Ã© invÃ¡lido.");
+    throw new TceServiceError(
+      "storage",
+      "O caminho do arquivo gerado do TCE Ã© invÃ¡lido."
+    );
   }
 
   const s3Client = getTceS3Client();
@@ -439,12 +442,15 @@ async function uploadTcePdfBinary(input: {
       Bucket: location.bucket,
       Key: location.key,
       Body: input.fileBuffer,
-      ContentType: "application/pdf"
+      ContentType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     })
   );
 }
 
-async function removeTcePdfBinary(storagePath: string | null | undefined) {
+async function removeTceGeneratedDocumentBinary(
+  storagePath: string | null | undefined
+) {
   if (!storagePath) {
     return;
   }
@@ -464,7 +470,7 @@ async function removeTcePdfBinary(storagePath: string | null | undefined) {
   );
 }
 
-async function buildTcePdfDownloadUrl(input: {
+async function buildTceGeneratedDocumentDownloadUrl(input: {
   storagePath: string;
   fileName: string;
 }) {
@@ -481,8 +487,9 @@ async function buildTcePdfDownloadUrl(input: {
     new GetObjectCommand({
       Bucket: location.bucket,
       Key: location.key,
-      ResponseContentType: "application/pdf",
-      ResponseContentDisposition: buildInlineDownloadDisposition(input.fileName)
+      ResponseContentType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ResponseContentDisposition: buildAttachmentDownloadDisposition(input.fileName)
     }),
     { expiresIn: 60 }
   );
@@ -1666,7 +1673,7 @@ function mapStudentTceRowToDomain(row: StudentTceRow): StudentTce {
     studentData: toTceStudentData(row.dados_estagiario),
     configurationSnapshot: toTceConfigurationSnapshot(row.configuracao_snapshot),
     templateVersionSnapshot: row.template_version_snapshot,
-    generatedPdfPath: row.pdf_gerado_path,
+    generatedDocumentPath: row.pdf_gerado_path,
     generatedAt: row.gerado_em,
     metadata:
       row.metadata && typeof row.metadata === "object"
@@ -2591,10 +2598,10 @@ export async function loadStudentGeneratedTce(
   return row ? mapStudentTceRowToDomain(row) : null;
 }
 
-export async function generateStudentTcePdf(
+export async function generateStudentTceDocument(
   currentUser: SessionUser,
   configurationId: string
-): Promise<GenerateStudentTcePdfResult> {
+): Promise<GenerateStudentTceDocumentResult> {
   const availableEntry = await loadStudentTceByConfiguration(currentUser, configurationId);
   const savedTceRow = await loadStudentTceRowByConfiguration({
     currentUser,
@@ -2623,12 +2630,12 @@ export async function generateStudentTcePdf(
     savedTce,
     availableEntry
   });
-  const pdfBuffer = await buildStudentTcePdfBuffer({
+  const documentBuffer = await buildStudentTceDocxBuffer({
     snapshot: resolvedSnapshot,
     studentData: savedTce.studentData
   });
   const storagePath = buildPersistedS3TceStoragePath(
-    buildTcePdfStorageKey({
+    buildTceGeneratedDocumentStorageKey({
       studentId: currentUser.id,
       tceId: savedTce.id,
       areaName: resolvedSnapshot.context.areaName,
@@ -2636,17 +2643,17 @@ export async function generateStudentTcePdf(
     })
   );
 
-  await uploadTcePdfBinary({
+  await uploadTceGeneratedDocumentBinary({
     storagePath,
-    fileBuffer: pdfBuffer
+    fileBuffer: documentBuffer
   });
 
   try {
     if (
-      savedTce.generatedPdfPath &&
-      savedTce.generatedPdfPath !== storagePath
+      savedTce.generatedDocumentPath &&
+      savedTce.generatedDocumentPath !== storagePath
     ) {
-      await removeTcePdfBinary(savedTce.generatedPdfPath);
+      await removeTceGeneratedDocumentBinary(savedTce.generatedDocumentPath);
     }
   } catch {
     // Se a remoÃ§Ã£o do PDF anterior falhar, mantemos o novo arquivo salvo.
@@ -2674,14 +2681,14 @@ export async function generateStudentTcePdf(
 
   return {
     tce: mapStudentTceRowToDomain(data as StudentTceRow),
-    downloadFileName: buildTcePdfFileName({
+    downloadFileName: buildTceGeneratedDocumentFileName({
       areaName: resolvedSnapshot.context.areaName,
       semesterCode: resolvedSnapshot.context.semesterCode
     })
   };
 }
 
-export async function getStudentTcePdfDownloadUrl(
+export async function getStudentTceDocumentDownloadUrl(
   currentUser: SessionUser,
   configurationId: string
 ) {
@@ -2698,11 +2705,11 @@ export async function getStudentTcePdfDownloadUrl(
   const snapshot = hasMeaningfulTceSnapshot(mappedTce.configurationSnapshot)
     ? mappedTce.configurationSnapshot
     : null;
-  const fileName = buildTcePdfFileName({
+  const fileName = buildTceGeneratedDocumentFileName({
     areaName: snapshot?.context.areaName ?? null,
     semesterCode: snapshot?.context.semesterCode ?? null
   });
-  const downloadUrl = await buildTcePdfDownloadUrl({
+  const downloadUrl = await buildTceGeneratedDocumentDownloadUrl({
     storagePath: row.pdf_gerado_path,
     fileName
   });

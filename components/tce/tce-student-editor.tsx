@@ -8,14 +8,14 @@ import {
   useState
 } from "react";
 import {
-  generateStudentTcePdfAction,
+  generateStudentTceDocumentAction,
   saveStudentTceDataAction
 } from "@/app/(app)/tce/actions";
 import {
   areStudentTceFormValuesEqual,
   createStudentTceFormValuesFromData,
   initialStudentTceActionState,
-  initialStudentTcePdfActionState,
+  initialStudentTceDocumentActionState,
   type StudentTceFormValues
 } from "@/app/(app)/tce/state";
 import { StudentTceForm } from "@/components/tce/student-tce-form";
@@ -46,10 +46,10 @@ export function TceStudentEditor({ entry }: TceStudentEditorProps) {
       savedAt: entry.savedTce?.updatedAt ?? null
     }
   );
-  const [pdfState, pdfFormAction, pdfPending] = useActionState(
-    generateStudentTcePdfAction,
+  const [documentState, documentFormAction, documentPending] = useActionState(
+    generateStudentTceDocumentAction,
     {
-      ...initialStudentTcePdfActionState,
+      ...initialStudentTceDocumentActionState,
       generatedAt: entry.savedTce?.generatedAt ?? null
     }
   );
@@ -58,20 +58,20 @@ export function TceStudentEditor({ entry }: TceStudentEditorProps) {
     formValues: initialValues,
     savedAt: entry.savedTce?.updatedAt ?? null
   };
-  const safePdfState = pdfState ?? {
-    ...initialStudentTcePdfActionState,
+  const safeDocumentState = documentState ?? {
+    ...initialStudentTceDocumentActionState,
     generatedAt: entry.savedTce?.generatedAt ?? null
   };
   const [draft, setDraft] = useState<StudentTceFormValues>(initialValues);
   const [lastSavedValues, setLastSavedValues] =
     useState<StudentTceFormValues>(initialValues);
-  const [localPdfMessage, setLocalPdfMessage] = useState<string | null>(null);
+  const [localDocumentMessage, setLocalDocumentMessage] = useState<string | null>(null);
   const generateFormRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     setDraft(initialValues);
     setLastSavedValues(initialValues);
-    setLocalPdfMessage(null);
+    setLocalDocumentMessage(null);
   }, [initialValues]);
 
   useEffect(() => {
@@ -83,7 +83,7 @@ export function TceStudentEditor({ entry }: TceStudentEditorProps) {
   useEffect(() => {
     if (safeSaveState.status === "success" && safeSaveState.formValues) {
       setLastSavedValues(safeSaveState.formValues);
-      setLocalPdfMessage(null);
+      setLocalDocumentMessage(null);
     }
   }, [safeSaveState.formValues, safeSaveState.status, safeSaveState.submittedAt]);
 
@@ -96,31 +96,31 @@ export function TceStudentEditor({ entry }: TceStudentEditorProps) {
 
   const effectiveSavedAt = safeSaveState.savedAt ?? entry.savedTce?.updatedAt ?? null;
   const effectiveGeneratedAt =
-    safePdfState.generatedAt ?? entry.savedTce?.generatedAt ?? null;
+    safeDocumentState.generatedAt ?? entry.savedTce?.generatedAt ?? null;
   const hasPersistedSave = Boolean(effectiveSavedAt);
   const hasUnsavedChanges = !areStudentTceFormValuesEqual(draft, lastSavedValues);
-  const generatedPdfIsOutdated = Boolean(
+  const generatedDocumentIsOutdated = Boolean(
     effectiveGeneratedAt &&
       effectiveSavedAt &&
       new Date(effectiveSavedAt).getTime() > new Date(effectiveGeneratedAt).getTime()
   );
   const downloadHref = `/tce/arquivo/${entry.configuration.id}`;
-  const pdfFieldErrors = Object.values(safePdfState.fieldErrors ?? {});
+  const documentFieldErrors = Object.values(safeDocumentState.fieldErrors ?? {});
 
-  function handleGeneratePdfClick() {
+  function handleGenerateDocumentClick() {
     if (!hasPersistedSave) {
-      setLocalPdfMessage("Salve os dados do TCE antes de gerar o PDF.");
+      setLocalDocumentMessage("Salve os dados do TCE antes de gerar o documento.");
       return;
     }
 
     if (hasUnsavedChanges) {
-      setLocalPdfMessage(
-        "VocÃª alterou os dados do TCE. Salve novamente antes de gerar o PDF."
+      setLocalDocumentMessage(
+        "Você alterou os dados do TCE. Salve novamente antes de gerar o documento."
       );
       return;
     }
 
-    setLocalPdfMessage(null);
+    setLocalDocumentMessage(null);
     generateFormRef.current?.requestSubmit();
   }
 
@@ -142,7 +142,7 @@ export function TceStudentEditor({ entry }: TceStudentEditorProps) {
             )}
             {effectiveGeneratedAt ? (
               <span className="badge badge-muted">
-                PDF gerado em {formatDateTime(effectiveGeneratedAt)}
+                TCE gerado em {formatDateTime(effectiveGeneratedAt)}
               </span>
             ) : null}
           </div>
@@ -163,33 +163,35 @@ export function TceStudentEditor({ entry }: TceStudentEditorProps) {
           <div className="card form-stack">
             <div className="card-header">
               <div>
-                <h3>PDF do TCE</h3>
+                <h3>Documento final do TCE</h3>
                 <p>
-                  O PDF Ã© gerado a partir dos dados salvos e do snapshot da
-                  configuraÃ§Ã£o institucional congelado no seu TCE.
+                  O arquivo em Word é gerado a partir dos dados salvos e do snapshot
+                  institucional congelado no seu TCE.
                 </p>
               </div>
             </div>
 
-            {localPdfMessage ? (
-              <div className="form-notice form-notice-error">{localPdfMessage}</div>
+            {localDocumentMessage ? (
+              <div className="form-notice form-notice-error">
+                {localDocumentMessage}
+              </div>
             ) : null}
 
-            {safePdfState.message ? (
+            {safeDocumentState.message ? (
               <div
                 className={
-                  safePdfState.status === "success"
+                  safeDocumentState.status === "success"
                     ? "form-notice form-notice-success"
                     : "form-notice form-notice-error"
                 }
               >
-                {safePdfState.message}
+                {safeDocumentState.message}
               </div>
             ) : null}
 
-            {pdfFieldErrors.length ? (
+            {documentFieldErrors.length ? (
               <div className="stack compact-stack">
-                {pdfFieldErrors.map((error, index) => (
+                {documentFieldErrors.map((error, index) => (
                   <p key={`${error}-${index}`} className="field-help field-error">
                     {error}
                   </p>
@@ -199,31 +201,32 @@ export function TceStudentEditor({ entry }: TceStudentEditorProps) {
 
             {!hasPersistedSave ? (
               <p className="field-help">
-                Salve os dados do estagiÃ¡rio para habilitar a geraÃ§Ã£o do PDF.
+                Salve os dados do estagiário para habilitar a geração do TCE em
+                Word.
               </p>
             ) : hasUnsavedChanges ? (
               <p className="field-help">
-                Existem alteraÃ§Ãµes ainda nÃ£o salvas. Salve novamente antes de gerar
-                o PDF.
+                Existem alterações ainda não salvas. Salve novamente antes de gerar
+                o TCE.
               </p>
-            ) : generatedPdfIsOutdated ? (
+            ) : generatedDocumentIsOutdated ? (
               <p className="field-help">
-                Seus dados foram atualizados depois da Ãºltima geraÃ§Ã£o. Gere o PDF
-                novamente para refletir as informaÃ§Ãµes mais recentes.
+                Seus dados foram atualizados depois da última geração. Gere o TCE
+                novamente para refletir as informações mais recentes.
               </p>
             ) : effectiveGeneratedAt ? (
               <p className="field-help">
-                O PDF jÃ¡ foi gerado. VocÃª pode abrir ou baixar o arquivo e, se
-                alterar os dados, gerar uma nova versÃ£o.
+                O TCE já foi gerado. Você pode baixar o documento e, se alterar os
+                dados, gerar uma nova versão.
               </p>
             ) : (
               <p className="field-help">
-                Quando os dados estiverem conferidos e salvos, gere o PDF para
-                impressÃ£o e coleta de assinaturas externas.
+                Quando os dados estiverem conferidos e salvos, gere o TCE em Word
+                para impressão e coleta de assinaturas externas.
               </p>
             )}
 
-            <form ref={generateFormRef} action={pdfFormAction}>
+            <form ref={generateFormRef} action={documentFormAction}>
               <input
                 type="hidden"
                 name="configuration_id"
@@ -235,10 +238,10 @@ export function TceStudentEditor({ entry }: TceStudentEditorProps) {
               <button
                 className="button"
                 type="button"
-                onClick={handleGeneratePdfClick}
-                disabled={savePending || pdfPending}
+                onClick={handleGenerateDocumentClick}
+                disabled={savePending || documentPending}
               >
-                {pdfPending ? "Gerando PDF..." : "Gerar PDF"}
+                {documentPending ? "Gerando TCE..." : "Gerar TCE"}
               </button>
 
               {effectiveGeneratedAt ? (
@@ -248,7 +251,7 @@ export function TceStudentEditor({ entry }: TceStudentEditorProps) {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Abrir/Baixar PDF
+                  Baixar TCE em Word
                 </a>
               ) : null}
             </div>
