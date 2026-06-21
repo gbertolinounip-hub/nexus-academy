@@ -143,10 +143,6 @@ function escapeXml(value: string) {
     .replace(/'/g, "&apos;");
 }
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function toWordTextFragment(value: string) {
   if (!value) {
     return "";
@@ -155,28 +151,132 @@ function toWordTextFragment(value: string) {
   return escapeXml(value).replace(/\n/g, "</w:t><w:br/><w:t xml:space=\"preserve\">");
 }
 
+interface WordXmlTextToken {
+  type: "text";
+  attrs: string;
+  text: string;
+}
+
+interface WordXmlRawToken {
+  type: "raw";
+  value: string;
+}
+
+type WordXmlToken = WordXmlTextToken | WordXmlRawToken;
+
+function tokenizeWordTextNodes(xml: string): WordXmlToken[] {
+  const tokens: WordXmlToken[] = [];
+  const textNodePattern = /<w:t(?=[\s>])([^>]*)>([\s\S]*?)<\/w:t>/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null = null;
+
+  while ((match = textNodePattern.exec(xml))) {
+    if (match.index > lastIndex) {
+      tokens.push({
+        type: "raw",
+        value: xml.slice(lastIndex, match.index)
+      });
+    }
+
+    tokens.push({
+      type: "text",
+      attrs: match[1] ?? "",
+      text: match[2] ?? ""
+    });
+
+    lastIndex = textNodePattern.lastIndex;
+  }
+
+  if (lastIndex < xml.length) {
+    tokens.push({
+      type: "raw",
+      value: xml.slice(lastIndex)
+    });
+  }
+
+  return tokens;
+}
+
+function rebuildWordTextNodes(tokens: WordXmlToken[]) {
+  return tokens
+    .map((token) =>
+      token.type === "raw"
+        ? token.value
+        : `<w:t xml:space="preserve">${token.text}</w:t>`
+    )
+    .join("");
+}
+
+function countPlaceholderMarkers(text: string, marker: "{{" | "}}") {
+  return text.split(marker).length - 1;
+}
+
+function normalizeParagraphPlaceholders(
+  paragraphXml: string,
+  placeholderSet: ReadonlySet<string>
+) {
+  const tokens = tokenizeWordTextNodes(paragraphXml);
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const currentToken = tokens[index];
+
+    if (currentToken?.type !== "text" || !currentToken.text.includes("{")) {
+      continue;
+    }
+
+    let combinedText = currentToken.text;
+    let lastTokenIndex = index;
+
+    while (
+      (countPlaceholderMarkers(combinedText, "{{") === 0 ||
+        countPlaceholderMarkers(combinedText, "}}") <
+          countPlaceholderMarkers(combinedText, "{{")) &&
+      lastTokenIndex + 1 < tokens.length
+    ) {
+      lastTokenIndex += 1;
+      const nextToken = tokens[lastTokenIndex];
+
+      if (nextToken?.type === "text") {
+        combinedText += nextToken.text;
+      }
+    }
+
+    if (!combinedText.includes("{{") || !combinedText.includes("}}")) {
+      continue;
+    }
+
+    const normalizedPlaceholderText = combinedText.replace(
+      /\{\{([^{}]+)\}\}/g,
+      (_match, rawPlaceholderKey: string) => {
+        const normalizedKey = rawPlaceholderKey.replace(/\s+/g, "");
+        return placeholderSet.has(normalizedKey)
+          ? `{{${normalizedKey}}}`
+          : `{{${normalizedKey}}}`;
+      }
+    );
+
+    tokens.splice(index, lastTokenIndex - index + 1, {
+      type: "text",
+      attrs: currentToken.attrs,
+      text: normalizedPlaceholderText
+    });
+  }
+
+  return rebuildWordTextNodes(tokens);
+}
+
 function normalizeTemplateXmlPlaceholders(
   xml: string,
   placeholderKeys: readonly string[]
 ) {
-  let normalized = xml.replace(/<w:proofErr[^>]*\/>/g, "");
+  const normalizedXml = xml.replace(/<w:proofErr[^>]*\/>/g, "");
+  const placeholderSet = new Set(placeholderKeys);
 
-  for (const key of placeholderKeys) {
-    const splitPlaceholderPattern = new RegExp(
-      `<w:t[^>]*>([^<]*?)\\{\\{<\\/w:t>[\\s\\S]*?<w:t[^>]*>${escapeRegExp(
-        key
-      )}<\\/w:t>[\\s\\S]*?<w:t[^>]*>\\}\\}([^<]*?)<\\/w:t>`,
-      "g"
-    );
-
-    normalized = normalized.replace(
-      splitPlaceholderPattern,
-      (_match, prefix: string, suffix: string) =>
-        `<w:t xml:space="preserve">${prefix}{{${key}}}${suffix}</w:t>`
-    );
-  }
-
-  return normalized;
+  return normalizedXml.replace(
+    /<w:p\b[\s\S]*?<\/w:p>/g,
+    (paragraphXml: string) =>
+      normalizeParagraphPlaceholders(paragraphXml, placeholderSet)
+  );
 }
 
 function applyTemplateValues(xml: string, templateData: TceTemplateData) {
