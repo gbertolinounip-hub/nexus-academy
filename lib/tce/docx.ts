@@ -120,6 +120,22 @@ function formatWorkloadHours(value: string | null | undefined) {
   return normalizedValue;
 }
 
+function formatPhoneForTce(value: string | null | undefined) {
+  const normalizedValue = getOptionalText(value);
+
+  if (!normalizedValue) {
+    return "";
+  }
+
+  const digits = normalizedValue.replace(/\D/g, "");
+
+  if (digits.length === 10 || digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  }
+
+  return normalizedValue;
+}
+
 function getScheduleValue(
   scheduleData: TceScheduleData,
   day:
@@ -367,8 +383,8 @@ function buildStudentTceTemplateData(input: TceDocxRenderInput): TceTemplateData
     estagiario_uf: getOptionalText(studentData.state),
     estagiario_cep: getOptionalText(studentData.postalCode),
     estagiario_email: getOptionalText(studentData.email),
-    estagiario_telefone: getOptionalText(studentData.phone),
-    "estagiário_telefone": getOptionalText(studentData.phone),
+    estagiario_telefone: formatPhoneForTce(studentData.phone),
+    "estagiário_telefone": formatPhoneForTce(studentData.phone),
 
     vigencia_inicio_dia: startsAt?.day ?? "",
     vigencia_inicio_mes: startsAt?.month ?? "",

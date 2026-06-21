@@ -179,8 +179,19 @@ export function getNavigationForRole(role: ProfileCode) {
 
 export function getNavigationForUser(currentUser: SessionUser) {
   const links = [...getNavigationForRole(currentUser.role)];
+  const activeMasterCourseContext = getActiveMasterCourseContext(currentUser);
 
-  if (getActiveMasterCourseContext(currentUser)) {
+  if (activeMasterCourseContext) {
+    const hiddenCourseManagerLinks = new Set<Route>(["/gestao/tces" as Route]);
+
+    for (let index = links.length - 1; index >= 0; index -= 1) {
+      if (hiddenCourseManagerLinks.has(links[index]?.href ?? ("" as Route))) {
+        links.splice(index, 1);
+      }
+    }
+  }
+
+  if (activeMasterCourseContext) {
     const coordinatorDashboardIndex = links.findIndex(
       (link) => link.href === ("/coordenador" as Route)
     );

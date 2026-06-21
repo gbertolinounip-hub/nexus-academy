@@ -1,12 +1,19 @@
 import { TceConfigurationForm } from "@/components/forms/tce-configuration-form";
 import { TceConfigurationCard } from "@/components/forms/tce-configuration-card";
 import { SectionCard } from "@/components/common/section-card";
+import { redirect } from "next/navigation";
 import { createTceConfigurationAction } from "@/app/(app)/gestao/tces/actions";
+import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/session";
 import { loadCoordinatorTcePageData } from "@/services/tce";
 
 export default async function CoordinatorTceManagementPage() {
   const currentUser = await requireRole(["coordenador"]);
+
+  if (getActiveMasterCourseContext(currentUser)) {
+    redirect("/master-curso");
+  }
+
   const { pageData, emptyState } = await loadCoordinatorTcePageData(currentUser);
 
   return (
