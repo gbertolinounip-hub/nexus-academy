@@ -312,8 +312,6 @@ function buildStudentTceTemplateData(input: TceDocxRenderInput): TceTemplateData
   const scheduleData = snapshot.fixedData.scheduleData;
   const startsAt = parseDateParts(termData.startsAt);
   const endsAt = parseDateParts(termData.endsAt);
-  const weeklyOrSemesterWorkload =
-    snapshot.fixedData.weeklyWorkload ?? snapshot.fixedData.semesterWorkload;
 
   return {
     concedente_razao_social: getOptionalText(concedingPartyData.corporateName),
@@ -468,7 +466,7 @@ function buildStudentTceTemplateData(input: TceDocxRenderInput): TceTemplateData
     ),
 
     jornada_diaria: formatWorkloadHours(snapshot.fixedData.dailyWorkload),
-    jornada_semanal: formatWorkloadHours(weeklyOrSemesterWorkload),
+    jornada_semanal: formatWorkloadHours(snapshot.fixedData.weeklyWorkload),
 
     plano_atividades: normalizeMultilineText(snapshot.fixedData.activityPlan),
 

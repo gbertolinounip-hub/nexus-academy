@@ -149,6 +149,7 @@ export function TceConfigurationForm({
   return (
     <form action={formAction} className="form-stack">
       <input type="hidden" name="configuration_id" value={draft.configuration_id} />
+      <input type="hidden" name="jornada_semestral" value={draft.jornada_semestral} />
 
       {safeState.message ? (
         <div
@@ -671,17 +672,6 @@ export function TceConfigurationForm({
                 value={draft.jornada_semanal}
                 onChange={(event) => updateDraft("jornada_semanal", event.currentTarget.value)}
                 placeholder="Ex.: 30 horas"
-              />
-            </label>
-
-            <label className={getFieldClassName("jornada_semestral")}>
-              <span>Jornada semestral</span>
-              <input
-                className={getInputClassName("jornada_semestral")}
-                name="jornada_semestral"
-                value={draft.jornada_semestral}
-                onChange={(event) => updateDraft("jornada_semestral", event.currentTarget.value)}
-                placeholder="Ex.: 300 horas"
               />
             </label>
           </div>

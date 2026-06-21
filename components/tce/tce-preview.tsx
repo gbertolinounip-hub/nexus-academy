@@ -273,10 +273,6 @@ export function TcePreview({ entry, draft }: TcePreviewProps) {
               <span>Jornada semanal</span>
               <strong>{displayText(entry.configuration.weeklyWorkload)}</strong>
             </div>
-            <div>
-              <span>Jornada semestral</span>
-              <strong>{displayText(entry.configuration.semesterWorkload)}</strong>
-            </div>
           </div>
         </section>
 

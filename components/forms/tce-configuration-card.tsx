@@ -218,9 +218,6 @@ export function TceConfigurationCard({
               {configuration.weeklyWorkload
                 ? ` · ${configuration.weeklyWorkload}`
                 : ""}
-              {configuration.semesterWorkload
-                ? ` · ${configuration.semesterWorkload}`
-                : ""}
             </p>
           </div>
         </div>
