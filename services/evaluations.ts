@@ -243,6 +243,23 @@ interface EvaluationModelRuntimeBase {
   rubricGroups: EvaluationRubricGroup[];
 }
 
+interface EvaluationModelRuntimeDiagnostic {
+  modelId: string;
+  modelCode: string | null;
+  modelName: string | null;
+  modality: EvaluationModelMode;
+  missingGroups: boolean;
+  emptyGroupNames: string[];
+  missingLegacyMappings: Array<{
+    code: string;
+    name: string;
+  }>;
+  missingRubricOptions: Array<{
+    code: string;
+    name: string;
+  }>;
+}
+
 interface EnrollmentEvaluationSelectionContext extends EvaluationModelSelectionContext {
   enrollmentId: string;
   courseId: string | null;
@@ -696,6 +713,82 @@ function sortRubricOptionRows(
   return left.rotulo.localeCompare(right.rotulo, "pt-BR");
 }
 
+function normalizeEvaluationCriterionCode(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function normalizeEvaluationCriterionName(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasEvaluationModelRuntimeCompatibilityIssues(
+  diagnostic: EvaluationModelRuntimeDiagnostic
+) {
+  return (
+    diagnostic.missingGroups ||
+    diagnostic.emptyGroupNames.length > 0 ||
+    diagnostic.missingLegacyMappings.length > 0 ||
+    diagnostic.missingRubricOptions.length > 0
+  );
+}
+
+function buildEvaluationModelRuntimeCompatibilityMessage(input: {
+  model: Pick<CourseEvaluationModelRow, "id" | "nome" | "codigo" | "modalidade">;
+  diagnostic?: EvaluationModelRuntimeDiagnostic | null;
+  contextLabel:
+    | "regra aplicada"
+    | "modelo padrao do curso"
+    | "modelo originalmente associado a este lancamento";
+}) {
+  const modelLabel = input.model.nome?.trim() || input.model.codigo?.trim() || input.model.id;
+  const prefix = `O ${input.contextLabel} (${modelLabel})`;
+  const diagnostic = input.diagnostic ?? null;
+
+  if (!diagnostic) {
+    return `${prefix} nao possui criterios compatíveis para o runtime atual. Revise a configuracao no Master.`;
+  }
+
+  if (diagnostic.missingGroups || diagnostic.emptyGroupNames.length > 0) {
+    return `${prefix} nao possui grupos e criterios ativos suficientes para o lancamento. Revise os grupos e criterios no Master.`;
+  }
+
+  if (diagnostic.missingRubricOptions.length > 0) {
+    const missingOptionCriteria = diagnostic.missingRubricOptions
+      .slice(0, 3)
+      .map((criterion) => criterion.name)
+      .join(", ");
+    const suffix =
+      diagnostic.missingRubricOptions.length > 3 ? " e outros criterios" : "";
+
+    return `${prefix} nao possui opcoes de rubrica ativas para todos os criterios exigidos (${missingOptionCriteria}${suffix}). Revise as opcoes no Master.`;
+  }
+
+  if (diagnostic.missingLegacyMappings.length > 0) {
+    const incompatibleCriteria = diagnostic.missingLegacyMappings
+      .slice(0, 3)
+      .map((criterion) => criterion.code || criterion.name)
+      .join(", ");
+    const suffix =
+      diagnostic.missingLegacyMappings.length > 3 ? " e outros criterios" : "";
+
+    return `${prefix} usa criterios com codigos nao compativeis com a base legada de avaliacao (${incompatibleCriteria}${suffix}). Revise os codigos dos criterios no Master.`;
+  }
+
+  return `${prefix} nao possui criterios compatíveis para o runtime atual. Revise a configuracao no Master.`;
+}
+
 function buildEvaluationModelRuntimeBaseMap(input: {
   modelRows: CourseEvaluationModelRow[];
   modelGroupRows: CourseEvaluationGroupRow[];
@@ -731,32 +824,94 @@ function buildEvaluationModelRuntimeBaseMap(input: {
     );
   }
 
-  const legacyCriterionByCode = new Map<string, RubricCriterionRow>();
+  const legacyCriterionByExactCode = new Map<string, RubricCriterionRow>();
+  const legacyCriterionByNormalizedCode = new Map<string, RubricCriterionRow>();
+  const legacyCriterionByNormalizedName = new Map<string, RubricCriterionRow | null>();
 
   for (const runtimeCriterion of input.runtimeRubricCriteria) {
-    if (!legacyCriterionByCode.has(runtimeCriterion.codigo)) {
-      legacyCriterionByCode.set(runtimeCriterion.codigo, runtimeCriterion);
+    if (!legacyCriterionByExactCode.has(runtimeCriterion.codigo)) {
+      legacyCriterionByExactCode.set(runtimeCriterion.codigo, runtimeCriterion);
+    }
+
+    const normalizedCode = normalizeEvaluationCriterionCode(runtimeCriterion.codigo);
+
+    if (normalizedCode && !legacyCriterionByNormalizedCode.has(normalizedCode)) {
+      legacyCriterionByNormalizedCode.set(normalizedCode, runtimeCriterion);
+    }
+
+    const normalizedName = normalizeEvaluationCriterionName(runtimeCriterion.nome);
+
+    if (normalizedName) {
+      const currentCriterion = legacyCriterionByNormalizedName.get(normalizedName);
+
+      if (!currentCriterion) {
+        legacyCriterionByNormalizedName.set(normalizedName, runtimeCriterion);
+      } else if (currentCriterion.id !== runtimeCriterion.id) {
+        legacyCriterionByNormalizedName.set(normalizedName, null);
+      }
     }
   }
 
   const runtimeBaseByModelId = new Map<string, EvaluationModelRuntimeBase>();
+  const runtimeDiagnosticByModelId = new Map<string, EvaluationModelRuntimeDiagnostic>();
 
   for (const modelRow of input.modelRows) {
     const modelGroups = modelGroupsByModelId.get(modelRow.id) ?? [];
+    const diagnostic: EvaluationModelRuntimeDiagnostic = {
+      modelId: modelRow.id,
+      modelCode: modelRow.codigo,
+      modelName: modelRow.nome,
+      modality: modelRow.modalidade,
+      missingGroups: modelGroups.length === 0,
+      emptyGroupNames: [],
+      missingLegacyMappings: [],
+      missingRubricOptions: []
+    };
 
     if (!modelGroups.length) {
+      runtimeDiagnosticByModelId.set(modelRow.id, diagnostic);
       continue;
     }
 
-    let hasInvalidLegacyMapping = false;
     const rubricGroups = modelGroups
       .map((modelGroup) => {
-        const groupCriteria = (modelCriteriaByGroupId.get(modelGroup.id) ?? [])
+        const modelCriteria = modelCriteriaByGroupId.get(modelGroup.id) ?? [];
+        const groupCriteria = modelCriteria
           .map((modelCriterion) => {
-            const legacyCriterion = legacyCriterionByCode.get(modelCriterion.codigo);
+            const exactCodeMatch = legacyCriterionByExactCode.get(modelCriterion.codigo);
+            const normalizedCodeMatch = legacyCriterionByNormalizedCode.get(
+              normalizeEvaluationCriterionCode(modelCriterion.codigo)
+            );
+            const normalizedNameMatch =
+              legacyCriterionByNormalizedName.get(
+                normalizeEvaluationCriterionName(modelCriterion.nome)
+              ) ?? null;
+            const legacyCriterion =
+              exactCodeMatch ?? normalizedCodeMatch ?? normalizedNameMatch ?? null;
+            const criterionOptions = [...(modelOptionsByCriterionId.get(modelCriterion.id) ?? [])]
+              .sort(sortRubricOptionRows)
+              .map((optionRow) => ({
+                id: optionRow.id,
+                label: optionRow.rotulo,
+                description: optionRow.descricao,
+                scoreValue: Number(optionRow.valor_nota),
+                order: optionRow.ordem,
+                active: optionRow.ativo
+              }));
 
             if (!legacyCriterion) {
-              hasInvalidLegacyMapping = true;
+              diagnostic.missingLegacyMappings.push({
+                code: modelCriterion.codigo,
+                name: modelCriterion.nome
+              });
+              return null;
+            }
+
+            if (modelRow.modalidade === "rubrica" && criterionOptions.length === 0) {
+              diagnostic.missingRubricOptions.push({
+                code: modelCriterion.codigo,
+                name: modelCriterion.nome
+              });
               return null;
             }
 
@@ -769,21 +924,13 @@ function buildEvaluationModelRuntimeBaseMap(input: {
               description: modelCriterion.descricao,
               weightPercentage: Number(modelCriterion.peso_percentual),
               maxScore: Number(modelCriterion.escala_maxima),
-              options: [...(modelOptionsByCriterionId.get(modelCriterion.id) ?? [])]
-                .sort(sortRubricOptionRows)
-                .map((optionRow) => ({
-                  id: optionRow.id,
-                  label: optionRow.rotulo,
-                  description: optionRow.descricao,
-                  scoreValue: Number(optionRow.valor_nota),
-                  order: optionRow.ordem,
-                  active: optionRow.ativo
-                }))
+              options: criterionOptions
             } satisfies EvaluationRubricCriterion;
           })
           .filter(Boolean) as EvaluationRubricCriterion[];
 
         if (!groupCriteria.length) {
+          diagnostic.emptyGroupNames.push(modelGroup.nome);
           return null;
         }
 
@@ -797,7 +944,8 @@ function buildEvaluationModelRuntimeBaseMap(input: {
       })
       .filter(Boolean) as EvaluationRubricGroup[];
 
-    if (hasInvalidLegacyMapping || !rubricGroups.length) {
+    if (hasEvaluationModelRuntimeCompatibilityIssues(diagnostic) || !rubricGroups.length) {
+      runtimeDiagnosticByModelId.set(modelRow.id, diagnostic);
       continue;
     }
 
@@ -812,7 +960,8 @@ function buildEvaluationModelRuntimeBaseMap(input: {
 
   return {
     modelRowById,
-    runtimeBaseByModelId
+    runtimeBaseByModelId,
+    runtimeDiagnosticByModelId
   };
 }
 
@@ -1121,7 +1270,11 @@ export async function loadEvaluationRuntimeContextsForEnrollments(
 
   const applicationRuleRows =
     (applicationRuleRowsData ?? []) as CourseEvaluationModelApplicationRuleRow[];
-  const { modelRowById, runtimeBaseByModelId } = buildEvaluationModelRuntimeBaseMap({
+  const {
+    modelRowById,
+    runtimeBaseByModelId,
+    runtimeDiagnosticByModelId
+  } = buildEvaluationModelRuntimeBaseMap({
     modelRows,
     modelGroupRows,
     modelCriterionRows,
@@ -1182,8 +1335,15 @@ export async function loadEvaluationRuntimeContextsForEnrollments(
       const modelBase = runtimeBaseByModelId.get(topRule.modelId);
 
       if (!modelBase) {
+        const topRuleModel = modelRowById.get(topRule.modelId);
         throw new Error(
-          "A regra aplicável do modelo de avaliação aponta para um modelo sem critérios compatíveis. Revise as regras no Master."
+          topRuleModel
+            ? buildEvaluationModelRuntimeCompatibilityMessage({
+                model: topRuleModel,
+                diagnostic: runtimeDiagnosticByModelId.get(topRule.modelId) ?? null,
+                contextLabel: "regra aplicada"
+              })
+            : "A regra aplicável do modelo de avaliação aponta para um modelo sem critérios compatíveis. Revise as regras no Master."
         );
       }
 
@@ -1407,7 +1567,7 @@ export async function loadEvaluationRuntimeContextForSelection(input: {
     );
   }
 
-  const { runtimeBaseByModelId } = buildEvaluationModelRuntimeBaseMap({
+  const { runtimeBaseByModelId, runtimeDiagnosticByModelId } = buildEvaluationModelRuntimeBaseMap({
     modelRows: [modelRow],
     modelGroupRows,
     modelCriterionRows,
@@ -1419,7 +1579,11 @@ export async function loadEvaluationRuntimeContextForSelection(input: {
 
   if (!modelBase) {
     throw new Error(
-      "O modelo originalmente associado a este lançamento não possui critérios compatíveis para o runtime atual. Revise a configuração no Master."
+      buildEvaluationModelRuntimeCompatibilityMessage({
+        model: modelRow,
+        diagnostic: runtimeDiagnosticByModelId.get(modelRow.id) ?? null,
+        contextLabel: "modelo originalmente associado a este lancamento"
+      })
     );
   }
 

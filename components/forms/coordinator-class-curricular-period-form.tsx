@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { updateCoordinatorClassCurricularPeriodAction } from "@/app/(app)/gestao/alunos/actions";
 import {
   initialClassCurricularPeriodActionState
@@ -22,13 +23,29 @@ export function CoordinatorClassCurricularPeriodForm({
   selectionMessage: string | null;
   selectionBlocked: boolean;
 }) {
+  const router = useRouter();
   const [state, formAction] = useActionState(
     updateCoordinatorClassCurricularPeriodAction,
     initialClassCurricularPeriodActionState
   );
   const safeState = state ?? initialClassCurricularPeriodActionState;
   const fieldErrors = safeState.fieldErrors ?? {};
-  const currentValue = curricularPeriod ? String(curricularPeriod) : "";
+  const persistedValue = curricularPeriod ? String(curricularPeriod) : "";
+  const [selectedValue, setSelectedValue] = useState(persistedValue);
+
+  useEffect(() => {
+    setSelectedValue(persistedValue);
+  }, [persistedValue]);
+
+  useEffect(() => {
+    if (safeState.status !== "success" || !safeState.submittedAt) {
+      return;
+    }
+
+    router.refresh();
+  }, [router, safeState.status, safeState.submittedAt]);
+
+  const currentValue = selectedValue;
   const currentValueIsAllowed = !currentValue
     ? true
     : options.some((option) => String(option.value) === currentValue);
@@ -36,7 +53,7 @@ export function CoordinatorClassCurricularPeriodForm({
     ? [
         {
           value: Number(currentValue),
-          label: `${currentValue}º periodo - valor atual fora das regras liberadas`,
+          label: `${currentValue} periodo - valor atual fora das regras liberadas`,
           modelNames: [],
           hasMultipleModels: false
         } satisfies ManagementCurricularPeriodOption,
@@ -52,8 +69,9 @@ export function CoordinatorClassCurricularPeriodForm({
         className={fieldErrors.periodo_curricular ? "input input-invalid" : "input"}
         name="periodo_curricular"
         aria-label={`Periodo curricular da turma ${className}`}
-        defaultValue={currentValue}
+        value={selectedValue}
         disabled={isSelectionDisabled}
+        onChange={(event) => setSelectedValue(event.currentTarget.value)}
       >
         <option value="">Selecione o periodo curricular</option>
         {effectiveOptions.map((option) => (
