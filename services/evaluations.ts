@@ -260,6 +260,17 @@ interface EvaluationModelRuntimeDiagnostic {
   }>;
 }
 
+interface LegacyRubricCriterionSearchEntry {
+  criterion: RubricCriterionRow;
+  groupCodeKey: string;
+  groupNameKey: string;
+  codeKey: string;
+  codeCompactKey: string;
+  nameKey: string;
+  nameCompactKey: string;
+  strongTokens: string[];
+}
+
 interface EnrollmentEvaluationSelectionContext extends EvaluationModelSelectionContext {
   enrollmentId: string;
   courseId: string | null;
@@ -713,24 +724,161 @@ function sortRubricOptionRows(
   return left.rotulo.localeCompare(right.rotulo, "pt-BR");
 }
 
-function normalizeEvaluationCriterionCode(value: string | null | undefined) {
-  return (value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9_-]+/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
+const evaluationCriterionTokenStopwords = new Set([
+  "a",
+  "ao",
+  "aos",
+  "as",
+  "com",
+  "da",
+  "das",
+  "de",
+  "do",
+  "dos",
+  "e",
+  "em",
+  "na",
+  "nas",
+  "no",
+  "nos",
+  "o",
+  "os",
+  "ou",
+  "para",
+  "por"
+]);
 
-function normalizeEvaluationCriterionName(value: string | null | undefined) {
+function normalizeCriterionKey(value: string | null | undefined) {
   return (value ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, " ")
+    .toLowerCase()
+    .replace(/[_\-/.,;:()[\]{}]+/g, " ")
+    .replace(/[^a-z0-9 ]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function compactCriterionKey(value: string | null | undefined) {
+  return normalizeCriterionKey(value).replace(/\s+/g, "");
+}
+
+function extractCriterionStrongTokens(value: string | null | undefined) {
+  return [...new Set(
+    normalizeCriterionKey(value)
+      .split(" ")
+      .map((token) => token.trim())
+      .filter(
+        (token) =>
+          token.length >= 3 && !evaluationCriterionTokenStopwords.has(token)
+      )
+  )];
+}
+
+function countSharedCriterionTokens(leftTokens: string[], rightTokens: string[]) {
+  const rightTokenSet = new Set(rightTokens);
+  return leftTokens.reduce(
+    (count, token) => count + (rightTokenSet.has(token) ? 1 : 0),
+    0
+  );
+}
+
+function resolveLegacyCriterionForModelCriterion(input: {
+  legacyEntries: LegacyRubricCriterionSearchEntry[];
+  legacyCriterionByExactCode: Map<string, RubricCriterionRow>;
+  legacyCriterionByNormalizedCode: Map<string, RubricCriterionRow>;
+  legacyCriterionByCompactCode: Map<string, RubricCriterionRow>;
+  legacyCriterionByNormalizedName: Map<string, RubricCriterionRow | null>;
+  legacyCriterionByCompactName: Map<string, RubricCriterionRow | null>;
+  modelGroup: Pick<CourseEvaluationGroupRow, "codigo" | "nome">;
+  modelCriterion: Pick<CourseEvaluationCriterionRow, "codigo" | "nome">;
+}) {
+  const exactCodeMatch = input.legacyCriterionByExactCode.get(input.modelCriterion.codigo);
+
+  if (exactCodeMatch) {
+    return exactCodeMatch;
+  }
+
+  const normalizedCode = normalizeCriterionKey(input.modelCriterion.codigo);
+  const compactCode = compactCriterionKey(input.modelCriterion.codigo);
+  const normalizedName = normalizeCriterionKey(input.modelCriterion.nome);
+  const compactName = compactCriterionKey(input.modelCriterion.nome);
+  const normalizedCodeMatch =
+    input.legacyCriterionByNormalizedCode.get(normalizedCode) ??
+    input.legacyCriterionByCompactCode.get(compactCode) ??
+    null;
+
+  if (normalizedCodeMatch) {
+    return normalizedCodeMatch;
+  }
+
+  const normalizedNameMatch =
+    input.legacyCriterionByNormalizedName.get(normalizedName) ??
+    input.legacyCriterionByCompactName.get(compactName) ??
+    null;
+
+  if (normalizedNameMatch) {
+    return normalizedNameMatch;
+  }
+
+  const modelTokens = [
+    ...new Set([
+      ...extractCriterionStrongTokens(input.modelCriterion.codigo),
+      ...extractCriterionStrongTokens(input.modelCriterion.nome)
+    ])
+  ];
+
+  if (!modelTokens.length) {
+    return null;
+  }
+
+  const modelGroupCodeKey = normalizeCriterionKey(input.modelGroup.codigo);
+  const modelGroupNameKey = normalizeCriterionKey(input.modelGroup.nome);
+  const sameGroupEntries = input.legacyEntries.filter(
+    (entry) =>
+      entry.groupCodeKey === modelGroupCodeKey || entry.groupNameKey === modelGroupNameKey
+  );
+  const candidateEntries = sameGroupEntries.length ? sameGroupEntries : input.legacyEntries;
+  const scoredCandidates = candidateEntries
+    .map((entry) => {
+      const sharedTokens = countSharedCriterionTokens(modelTokens, entry.strongTokens);
+      const firstTokenMatches = modelTokens[0] ? entry.strongTokens.includes(modelTokens[0]) : false;
+      const compactStartsMatch =
+        compactCode.length >= 5 &&
+        (entry.codeCompactKey.startsWith(compactCode) ||
+          compactName.length >= 5 && entry.nameCompactKey.startsWith(compactName));
+
+      let score = sharedTokens * 10;
+
+      if (firstTokenMatches) {
+        score += 5;
+      }
+
+      if (compactStartsMatch) {
+        score += 3;
+      }
+
+      return {
+        entry,
+        score,
+        sharedTokens
+      };
+    })
+    .filter((candidate) => candidate.sharedTokens > 0)
+    .sort((left, right) => right.score - left.score);
+
+  const topCandidate = scoredCandidates[0] ?? null;
+  const secondCandidate = scoredCandidates[1] ?? null;
+
+  if (!topCandidate || topCandidate.score <= 0) {
+    return null;
+  }
+
+  if (secondCandidate && secondCandidate.score === topCandidate.score) {
+    return null;
+  }
+
+  return topCandidate.entry.criterion;
 }
 
 function hasEvaluationModelRuntimeCompatibilityIssues(
@@ -748,12 +896,12 @@ function buildEvaluationModelRuntimeCompatibilityMessage(input: {
   model: Pick<CourseEvaluationModelRow, "id" | "nome" | "codigo" | "modalidade">;
   diagnostic?: EvaluationModelRuntimeDiagnostic | null;
   contextLabel:
-    | "regra aplicada"
-    | "modelo padrao do curso"
-    | "modelo originalmente associado a este lancamento";
+    | "A regra aplicada"
+    | "O modelo padrao do curso"
+    | "O modelo originalmente associado a este lancamento";
 }) {
   const modelLabel = input.model.nome?.trim() || input.model.codigo?.trim() || input.model.id;
-  const prefix = `O ${input.contextLabel} (${modelLabel})`;
+  const prefix = `${input.contextLabel} (${modelLabel})`;
   const diagnostic = input.diagnostic ?? null;
 
   if (!diagnostic) {
@@ -794,6 +942,7 @@ function buildEvaluationModelRuntimeBaseMap(input: {
   modelGroupRows: CourseEvaluationGroupRow[];
   modelCriterionRows: CourseEvaluationCriterionRow[];
   modelCriterionOptionRows: CourseEvaluationCriterionOptionRow[];
+  runtimeRubricGroups: RubricGroupRow[];
   runtimeRubricCriteria: RubricCriterionRow[];
 }) {
   const modelRowById = new Map(input.modelRows.map((modelRow) => [modelRow.id, modelRow]));
@@ -824,32 +973,72 @@ function buildEvaluationModelRuntimeBaseMap(input: {
     );
   }
 
+  const runtimeRubricGroupById = new Map(
+    input.runtimeRubricGroups.map((groupRow) => [groupRow.id, groupRow])
+  );
+  const legacyEntries: LegacyRubricCriterionSearchEntry[] = [];
   const legacyCriterionByExactCode = new Map<string, RubricCriterionRow>();
   const legacyCriterionByNormalizedCode = new Map<string, RubricCriterionRow>();
+  const legacyCriterionByCompactCode = new Map<string, RubricCriterionRow>();
   const legacyCriterionByNormalizedName = new Map<string, RubricCriterionRow | null>();
+  const legacyCriterionByCompactName = new Map<string, RubricCriterionRow | null>();
 
   for (const runtimeCriterion of input.runtimeRubricCriteria) {
     if (!legacyCriterionByExactCode.has(runtimeCriterion.codigo)) {
       legacyCriterionByExactCode.set(runtimeCriterion.codigo, runtimeCriterion);
     }
 
-    const normalizedCode = normalizeEvaluationCriterionCode(runtimeCriterion.codigo);
+    const normalizedCode = normalizeCriterionKey(runtimeCriterion.codigo);
+    const compactCode = compactCriterionKey(runtimeCriterion.codigo);
 
     if (normalizedCode && !legacyCriterionByNormalizedCode.has(normalizedCode)) {
       legacyCriterionByNormalizedCode.set(normalizedCode, runtimeCriterion);
     }
 
-    const normalizedName = normalizeEvaluationCriterionName(runtimeCriterion.nome);
+    if (compactCode && !legacyCriterionByCompactCode.has(compactCode)) {
+      legacyCriterionByCompactCode.set(compactCode, runtimeCriterion);
+    }
+
+    const normalizedName = normalizeCriterionKey(runtimeCriterion.nome);
+    const compactName = compactCriterionKey(runtimeCriterion.nome);
 
     if (normalizedName) {
       const currentCriterion = legacyCriterionByNormalizedName.get(normalizedName);
 
-      if (!currentCriterion) {
+      if (currentCriterion === undefined) {
         legacyCriterionByNormalizedName.set(normalizedName, runtimeCriterion);
-      } else if (currentCriterion.id !== runtimeCriterion.id) {
+      } else if (currentCriterion && currentCriterion.id !== runtimeCriterion.id) {
         legacyCriterionByNormalizedName.set(normalizedName, null);
       }
     }
+
+    if (compactName) {
+      const currentCriterion = legacyCriterionByCompactName.get(compactName);
+
+      if (currentCriterion === undefined) {
+        legacyCriterionByCompactName.set(compactName, runtimeCriterion);
+      } else if (currentCriterion && currentCriterion.id !== runtimeCriterion.id) {
+        legacyCriterionByCompactName.set(compactName, null);
+      }
+    }
+
+    const legacyGroup = runtimeRubricGroupById.get(runtimeCriterion.grupo_id);
+
+    legacyEntries.push({
+      criterion: runtimeCriterion,
+      groupCodeKey: normalizeCriterionKey(legacyGroup?.codigo),
+      groupNameKey: normalizeCriterionKey(legacyGroup?.nome),
+      codeKey: normalizedCode,
+      codeCompactKey: compactCode,
+      nameKey: normalizedName,
+      nameCompactKey: compactName,
+      strongTokens: [
+        ...new Set([
+          ...extractCriterionStrongTokens(runtimeCriterion.codigo),
+          ...extractCriterionStrongTokens(runtimeCriterion.nome)
+        ])
+      ]
+    });
   }
 
   const runtimeBaseByModelId = new Map<string, EvaluationModelRuntimeBase>();
@@ -878,16 +1067,16 @@ function buildEvaluationModelRuntimeBaseMap(input: {
         const modelCriteria = modelCriteriaByGroupId.get(modelGroup.id) ?? [];
         const groupCriteria = modelCriteria
           .map((modelCriterion) => {
-            const exactCodeMatch = legacyCriterionByExactCode.get(modelCriterion.codigo);
-            const normalizedCodeMatch = legacyCriterionByNormalizedCode.get(
-              normalizeEvaluationCriterionCode(modelCriterion.codigo)
-            );
-            const normalizedNameMatch =
-              legacyCriterionByNormalizedName.get(
-                normalizeEvaluationCriterionName(modelCriterion.nome)
-              ) ?? null;
-            const legacyCriterion =
-              exactCodeMatch ?? normalizedCodeMatch ?? normalizedNameMatch ?? null;
+            const legacyCriterion = resolveLegacyCriterionForModelCriterion({
+              legacyEntries,
+              legacyCriterionByExactCode,
+              legacyCriterionByNormalizedCode,
+              legacyCriterionByCompactCode,
+              legacyCriterionByNormalizedName,
+              legacyCriterionByCompactName,
+              modelGroup,
+              modelCriterion
+            });
             const criterionOptions = [...(modelOptionsByCriterionId.get(modelCriterion.id) ?? [])]
               .sort(sortRubricOptionRows)
               .map((optionRow) => ({
@@ -1279,6 +1468,7 @@ export async function loadEvaluationRuntimeContextsForEnrollments(
     modelGroupRows,
     modelCriterionRows,
     modelCriterionOptionRows,
+    runtimeRubricGroups,
     runtimeRubricCriteria
   });
   const applicationRulesByCourseId = new Map<string, EvaluationModelApplicationRule[]>();
@@ -1341,7 +1531,7 @@ export async function loadEvaluationRuntimeContextsForEnrollments(
             ? buildEvaluationModelRuntimeCompatibilityMessage({
                 model: topRuleModel,
                 diagnostic: runtimeDiagnosticByModelId.get(topRule.modelId) ?? null,
-                contextLabel: "regra aplicada"
+                contextLabel: "A regra aplicada"
               })
             : "A regra aplicável do modelo de avaliação aponta para um modelo sem critérios compatíveis. Revise as regras no Master."
         );
@@ -1555,13 +1745,16 @@ export async function loadEvaluationRuntimeContextForSelection(input: {
     );
   }
 
-  const { data: runtimeRubricCriteriaData, error: runtimeRubricCriteriaError } = await adminClient
-    .from("criterios_avaliacao")
-    .select("*")
-    .eq("ativo", true)
-    .order("ordem", { ascending: true });
+  const [runtimeRubricGroupsResult, runtimeRubricCriteriaResult] = await Promise.all([
+    adminClient.from("grupos_avaliacao").select("*").eq("ativo", true).order("ordem", {
+      ascending: true
+    }),
+    adminClient.from("criterios_avaliacao").select("*").eq("ativo", true).order("ordem", {
+      ascending: true
+    })
+  ]);
 
-  if (runtimeRubricCriteriaError) {
+  if (runtimeRubricGroupsResult.error || runtimeRubricCriteriaResult.error) {
     throw new Error(
       "Nao foi possivel carregar os critérios legados necessários para abrir o lançamento salvo."
     );
@@ -1573,7 +1766,8 @@ export async function loadEvaluationRuntimeContextForSelection(input: {
     modelCriterionRows,
     modelCriterionOptionRows:
       (modelCriterionOptionRowsData ?? []) as CourseEvaluationCriterionOptionRow[],
-    runtimeRubricCriteria: (runtimeRubricCriteriaData ?? []) as RubricCriterionRow[]
+    runtimeRubricGroups: (runtimeRubricGroupsResult.data ?? []) as RubricGroupRow[],
+    runtimeRubricCriteria: (runtimeRubricCriteriaResult.data ?? []) as RubricCriterionRow[]
   });
   const modelBase = runtimeBaseByModelId.get(modelRow.id);
 
@@ -1582,7 +1776,7 @@ export async function loadEvaluationRuntimeContextForSelection(input: {
       buildEvaluationModelRuntimeCompatibilityMessage({
         model: modelRow,
         diagnostic: runtimeDiagnosticByModelId.get(modelRow.id) ?? null,
-        contextLabel: "modelo originalmente associado a este lancamento"
+        contextLabel: "O modelo originalmente associado a este lancamento"
       })
     );
   }
