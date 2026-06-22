@@ -5,7 +5,12 @@ import {
   type ResolvedSessionDataScope
 } from "@/lib/auth/data-scope";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { formatMaskedFirstName } from "@/lib/utils/format";
+import {
+  formatMaskedFirstName,
+  getClinicalWeekdayFromDateOnly,
+  getDateValueTimestamp,
+  normalizeDateOnlyValue
+} from "@/lib/utils/format";
 import {
   findActiveExceptionalRelease,
   loadActiveExceptionalReleaseRowsForUser,
@@ -14,9 +19,13 @@ import {
 } from "@/services/exceptional-releases";
 import type { Database } from "@/types/database";
 import type {
+  ClinicalAttendanceEvolutionStatus,
+  ClinicalAttendancePresenceStatus,
+  ClinicalAttendanceSummary,
   ClinicalCaseSection,
   ClinicalCaseScheduleSlot,
   ClinicalCaseSummary,
+  ClinicalWeekday,
   ClinicalEvaluationContent,
   ClinicalEvaluationRecord,
   ClinicalEvolutionContent,
@@ -26,6 +35,7 @@ import type {
   ClinicalNotificationCenter,
   ClinicalNotificationSummary,
   ClinicalNotificationType,
+  ClinicalPendingEvolutionSummary,
   ClinicalPatientHistoryCaseItem,
   ClinicalPatientSummary,
   ClinicalRecordType,
@@ -51,6 +61,8 @@ type ClinicalPatientRow = Database["public"]["Tables"]["pacientes_clinica"]["Row
 type ClinicalCaseRow = Database["public"]["Tables"]["casos_clinicos"]["Row"];
 type ClinicalCaseScheduleRow =
   Database["public"]["Tables"]["casos_clinicos_horarios"]["Row"];
+type ClinicalAttendanceRow =
+  Database["public"]["Tables"]["atendimentos_clinicos"]["Row"];
 type ClinicalRecordRow = Database["public"]["Tables"]["registros_clinicos"]["Row"];
 type ClinicalNotificationRow =
   Database["public"]["Tables"]["notificacoes_clinicas"]["Row"];
@@ -101,6 +113,7 @@ export interface ClinicalSupervisionProfessorPageData {
   professor: ProfessorClinicalContext["professor"];
   studentOptions: ClinicalStudentOption[];
   cases: ClinicalCaseSummary[];
+  attendancePendings: ClinicalPendingEvolutionSummary[];
   notifications: ClinicalNotificationCenter;
   metrics: {
     totalCases: number;
@@ -118,6 +131,7 @@ export interface ClinicalSupervisionStudentPageData {
     email: string;
   };
   cases: ClinicalCaseSummary[];
+  attendancePendings: ClinicalPendingEvolutionSummary[];
   notifications: ClinicalNotificationCenter;
   metrics: {
     totalCases: number;
@@ -242,6 +256,8 @@ export interface ClinicalEvolutionPageData {
   caseItem: ClinicalCaseSummary;
   exceptionalReleaseNotice?: ExceptionalReleaseVisualNotice | null;
   evolution: ClinicalEvolutionRecord | null;
+  linkedAttendance: ClinicalPendingEvolutionSummary | null;
+  initialSessionDate: string | null;
   studentCanEdit: boolean;
   studentReadOnlyMessage: string | null;
 }
@@ -257,6 +273,51 @@ export interface ClinicalEvolutionListPageData {
   caseItem: ClinicalCaseSummary;
   exceptionalReleaseNotice?: ExceptionalReleaseVisualNotice | null;
   evolutions: ClinicalEvolutionRecord[];
+}
+
+export interface ClinicalDailyAttendancePageData {
+  view: "professor" | "secretaria";
+  viewerName: string;
+  selectedDate: string;
+  filters: {
+    areaId: string;
+    professorId: string;
+    status: string;
+  };
+  filterOptions: {
+    areas: Array<{ id: string; name: string }>;
+    professors: Array<{ id: string; name: string }>;
+    statuses: Array<{ value: string; label: string }>;
+  };
+  metrics: {
+    scheduledCount: number;
+    presentCount: number;
+    absentCount: number;
+    pendingCount: number;
+  };
+  items: ClinicalAttendanceSummary[];
+  pendingFilters: {
+    areaId: string;
+    studentId: string;
+    status: string;
+  };
+  pendingFilterOptions: {
+    areas: Array<{ id: string; name: string }>;
+    students: Array<{ id: string; name: string }>;
+    statuses: Array<{ value: string; label: string }>;
+  };
+  pendingMetrics: {
+    totalOpenCount: number;
+    pendingCount: number;
+    sentCount: number;
+    adjustmentCount: number;
+  };
+  pendingItems: ClinicalPendingEvolutionSummary[];
+}
+
+export interface ClinicalDailyAttendanceLoadResult {
+  pageData: ClinicalDailyAttendancePageData | null;
+  emptyState: EmptyState | null;
 }
 
 export interface ClinicalEvolutionListLoadResult {
@@ -785,6 +846,35 @@ function getTodayInSaoPaulo() {
     month: "2-digit",
     day: "2-digit"
   }).format(new Date());
+}
+
+function getClinicalWeekdayFromDate(value: string): ClinicalWeekday | null {
+  const normalizedValue = normalizeDateOnlyValue(value);
+  return normalizedValue ? getClinicalWeekdayFromDateOnly(normalizedValue) : null;
+}
+
+function resolveClinicalAttendanceEvolutionStatusFromRecordStatus(
+  value?: ClinicalRecordStatus | null
+): ClinicalAttendanceEvolutionStatus {
+  switch (value) {
+    case "enviado":
+      return "enviada";
+    case "ajustes_solicitados":
+      return "ajustes_solicitados";
+    case "aprovado":
+      return "aprovada";
+    case "rascunho":
+    default:
+      return "pendente";
+  }
+}
+
+function buildClinicalAttendanceCaseKey(input: {
+  caseId: string;
+  attendanceDate: string;
+  scheduleId?: string | null;
+}) {
+  return `${input.caseId}:${input.attendanceDate}:${input.scheduleId ?? "sem-horario"}`;
 }
 
 function normalizeTime(value: string) {
@@ -2236,6 +2326,7 @@ async function loadClinicalReferenceBundle(
 async function loadAccessibleClinicalCaseRows(input: {
   currentUser: SessionUser;
   caseId?: string;
+  caseIds?: string[];
   patientId?: string;
   onlyActive?: boolean;
 }) {
@@ -2249,6 +2340,10 @@ async function loadAccessibleClinicalCaseRows(input: {
 
   if (input.caseId) {
     query = query.eq("id", input.caseId);
+  }
+
+  if (input.caseIds?.length) {
+    query = query.in("id", uniqueStringValues(input.caseIds));
   }
 
   if (input.patientId) {
@@ -2331,6 +2426,127 @@ async function loadAccessibleClinicalCaseRow(
   return caseRows[0] ?? null;
 }
 
+async function loadClinicalPendingEvolutionSummaries(
+  currentUser: SessionUser
+): Promise<ClinicalPendingEvolutionSummary[]> {
+  if (
+    currentUser.role !== "professor" &&
+    currentUser.role !== "aluno" &&
+    currentUser.role !== "secretaria"
+  ) {
+    return [];
+  }
+
+  const pendingStatuses =
+    currentUser.role === "professor" || currentUser.role === "secretaria"
+      ? ([
+          "pendente",
+          "enviada",
+          "ajustes_solicitados"
+        ] satisfies ClinicalAttendanceEvolutionStatus[])
+      : (["pendente", "ajustes_solicitados"] satisfies ClinicalAttendanceEvolutionStatus[]);
+  const attendanceRows = await loadClinicalAttendanceRowsByStatus({
+    currentUser,
+    studentId: currentUser.role === "aluno" ? currentUser.id : undefined,
+    professorId: currentUser.role === "professor" ? currentUser.id : undefined,
+    evolutionStatuses: pendingStatuses
+  });
+
+  if (!attendanceRows.length) {
+    return [];
+  }
+
+  const caseRows = await loadAccessibleClinicalCaseRows({
+    currentUser,
+    caseIds: uniqueStringValues(attendanceRows.map((row) => row.caso_clinico_id))
+  });
+
+  if (!caseRows.length) {
+    return [];
+  }
+
+  const bundle = await loadClinicalReferenceBundle(caseRows, currentUser);
+  const caseSummaries = mapClinicalCaseSummaries(caseRows, bundle);
+  const caseMap = new Map(caseSummaries.map((caseItem) => [caseItem.id, caseItem]));
+  const recordRows = await loadClinicalRecordRowsByAttendanceIds({
+    currentUser,
+    attendanceIds: uniqueStringValues(attendanceRows.map((row) => row.id))
+  });
+  const recordMap = new Map(
+    recordRows.map((recordRow) => [
+      recordRow.atendimento_clinico_id ?? "",
+      recordRow
+    ])
+  );
+
+  return attendanceRows
+    .map((attendanceRow) => {
+      const caseItem = caseMap.get(attendanceRow.caso_clinico_id);
+
+      if (!caseItem) {
+        return null;
+      }
+
+      const schedule =
+        caseItem.schedules.find(
+          (slot) => slot.id === attendanceRow.caso_clinico_horario_id
+        ) ?? caseItem.schedules[0] ?? null;
+      const summary = buildClinicalAttendanceSummary({
+        caseItem,
+        attendanceDate: attendanceRow.data_atendimento,
+        scheduleId: attendanceRow.caso_clinico_horario_id,
+        appointmentTime: schedule?.appointmentTime ?? caseItem.appointmentTime,
+        attendanceRow,
+        evolutionRecord: recordMap.get(attendanceRow.id) ?? null
+      });
+
+      return buildClinicalPendingEvolutionSummary(summary);
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const dateDiff = left!.appointmentDate.localeCompare(right!.appointmentDate);
+
+      if (dateDiff !== 0) {
+        return dateDiff;
+      }
+
+      return left!.appointmentTime.localeCompare(right!.appointmentTime, "pt-BR");
+    }) as ClinicalPendingEvolutionSummary[];
+}
+
+async function loadScopedClinicalAttendanceRow(input: {
+  currentUser: SessionUser;
+  caseId: string;
+  attendanceId: string;
+}) {
+  const supabase =
+    input.currentUser.role === "coordenador_master" ||
+    input.currentUser.role === "secretaria"
+      ? createSupabaseAdminClient()
+      : await createSupabaseServerClient();
+  let query = supabase
+    .from("atendimentos_clinicos")
+    .select("*")
+    .eq("id", input.attendanceId)
+    .eq("caso_clinico_id", input.caseId);
+
+  if (input.currentUser.role === "aluno") {
+    query = query.eq("aluno_id", input.currentUser.id);
+  } else if (input.currentUser.role === "professor") {
+    query = query.eq("professor_id", input.currentUser.id);
+  } else if (input.currentUser.role === "coordenador" && input.currentUser.unitId) {
+    query = query.eq("unidade_id", input.currentUser.unitId);
+  }
+
+  const { data, error } = await query.maybeSingle();
+
+  if (error) {
+    throw new Error("clinical-attendance-scope-load-failed");
+  }
+
+  return (data ?? null) as ClinicalAttendanceRow | null;
+}
+
 function mapClinicalCaseSummaries(
   caseRows: ClinicalCaseRow[],
   bundle: ClinicalReferenceBundle
@@ -2390,6 +2606,195 @@ function mapClinicalCaseSummaries(
     .sort((left, right) =>
       right!.updatedAt.localeCompare(left!.updatedAt)
     ) as ClinicalCaseSummary[];
+}
+
+function isClinicalCaseScheduledOnDate(input: {
+  caseRow: ClinicalCaseRow;
+  attendanceDate: string;
+  weekday: ClinicalWeekday;
+  schedules: ClinicalCaseScheduleSlot[];
+}) {
+  if (!input.caseRow.data_inicio || input.caseRow.data_inicio > input.attendanceDate) {
+    return false;
+  }
+
+  if (input.caseRow.data_fim && input.caseRow.data_fim < input.attendanceDate) {
+    return false;
+  }
+
+  const schedules =
+    input.schedules.length > 0
+      ? input.schedules
+      : [
+          {
+            id: `legacy-${input.caseRow.id}`,
+            weekday: input.caseRow.dia_semana,
+            appointmentTime: normalizeTime(input.caseRow.horario_atendimento)
+          } satisfies ClinicalCaseScheduleSlot
+        ];
+
+  return schedules.some((schedule) => schedule.weekday === input.weekday);
+}
+
+async function loadClinicalAttendanceRowsByDate(input: {
+  currentUser: SessionUser;
+  date: string;
+  caseIds: string[];
+}) {
+  if (!input.caseIds.length) {
+    return [] as ClinicalAttendanceRow[];
+  }
+
+  const supabase =
+    input.currentUser.role === "coordenador_master" ||
+    input.currentUser.role === "secretaria"
+      ? createSupabaseAdminClient()
+      : await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("atendimentos_clinicos")
+    .select("*")
+    .in("caso_clinico_id", input.caseIds)
+    .eq("data_atendimento", input.date);
+
+  if (error) {
+    throw new Error("clinical-attendance-load-failed");
+  }
+
+  return (data ?? []) as ClinicalAttendanceRow[];
+}
+
+async function loadClinicalAttendanceRowsByStatus(input: {
+  currentUser: SessionUser;
+  studentId?: string;
+  professorId?: string;
+  evolutionStatuses: ClinicalAttendanceEvolutionStatus[];
+}) {
+  const supabase =
+    input.currentUser.role === "coordenador_master" ||
+    input.currentUser.role === "secretaria"
+      ? createSupabaseAdminClient()
+      : await createSupabaseServerClient();
+  let query = supabase
+    .from("atendimentos_clinicos")
+    .select("*")
+    .eq("status_presenca", "presente")
+    .in("status_evolucao", input.evolutionStatuses)
+    .order("data_atendimento", { ascending: true });
+
+  if (input.studentId) {
+    query = query.eq("aluno_id", input.studentId);
+  }
+
+  if (input.professorId) {
+    query = query.eq("professor_id", input.professorId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error("clinical-pending-attendance-load-failed");
+  }
+
+  return (data ?? []) as ClinicalAttendanceRow[];
+}
+
+async function loadClinicalRecordRowsByAttendanceIds(input: {
+  currentUser: SessionUser;
+  attendanceIds: string[];
+}) {
+  if (!input.attendanceIds.length) {
+    return [] as ClinicalRecordRow[];
+  }
+
+  const supabase =
+    input.currentUser.role === "coordenador_master" ||
+    input.currentUser.role === "secretaria"
+      ? createSupabaseAdminClient()
+      : await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("registros_clinicos")
+    .select("*")
+    .eq("tipo", "evolucao")
+    .in("atendimento_clinico_id", input.attendanceIds);
+
+  if (error) {
+    throw new Error("clinical-attendance-record-load-failed");
+  }
+
+  return (data ?? []) as ClinicalRecordRow[];
+}
+
+function buildClinicalAttendanceSummary(input: {
+  caseItem: ClinicalCaseSummary;
+  attendanceDate: string;
+  scheduleId: string | null;
+  appointmentTime: string;
+  attendanceRow?: ClinicalAttendanceRow | null;
+  evolutionRecord?: ClinicalRecordRow | null;
+}): ClinicalAttendanceSummary {
+  const attendanceRow = input.attendanceRow ?? null;
+  const evolutionRecord = input.evolutionRecord ?? null;
+  const presenceStatus = attendanceRow?.status_presenca ?? null;
+  const evolutionStatus =
+    presenceStatus === "presente"
+      ? evolutionRecord
+        ? resolveClinicalAttendanceEvolutionStatusFromRecordStatus(
+            evolutionRecord.status
+          )
+        : attendanceRow?.status_evolucao ?? null
+      : attendanceRow?.status_evolucao ?? null;
+
+  return {
+    attendanceId: attendanceRow?.id ?? null,
+    caseItem: input.caseItem,
+    appointmentDate: input.attendanceDate,
+    scheduleId: input.scheduleId,
+    appointmentTime: input.appointmentTime,
+    presenceStatus,
+    evolutionStatus,
+    administrativeNote: attendanceRow?.observacao_administrativa ?? null,
+    recordedAt: attendanceRow?.registrado_em ?? null,
+    recordedById: attendanceRow?.registrado_por ?? null,
+    evolutionRecordId: evolutionRecord?.id ?? null
+  };
+}
+
+function getClinicalOpenDaysSinceAttendanceDate(value: string) {
+  const todayTimestamp = getDateValueTimestamp(getTodayInSaoPaulo());
+  const appointmentTimestamp = getDateValueTimestamp(value);
+
+  if (todayTimestamp === null || appointmentTimestamp === null) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    Math.floor((todayTimestamp - appointmentTimestamp) / (1000 * 60 * 60 * 24))
+  );
+}
+
+function buildClinicalPendingEvolutionSummary(
+  attendance: ClinicalAttendanceSummary
+): ClinicalPendingEvolutionSummary | null {
+  if (
+    !attendance.attendanceId ||
+    attendance.presenceStatus !== "presente" ||
+    !attendance.evolutionStatus
+  ) {
+    return null;
+  }
+
+  return {
+    attendanceId: attendance.attendanceId,
+    caseItem: attendance.caseItem,
+    appointmentDate: attendance.appointmentDate,
+    scheduleId: attendance.scheduleId,
+    appointmentTime: attendance.appointmentTime,
+    evolutionStatus: attendance.evolutionStatus,
+    administrativeNote: attendance.administrativeNote,
+    evolutionRecordId: attendance.evolutionRecordId,
+    openDays: getClinicalOpenDaysSinceAttendanceDate(attendance.appointmentDate)
+  };
 }
 
 export async function getClinicalUnreadNotificationCount(
@@ -2729,10 +3134,10 @@ export async function getClinicalSupervisionPageData(
     try {
       const bundle = await loadClinicalReferenceBundle(caseRows, currentUser);
       const baseCases = mapClinicalCaseSummaries(caseRows, bundle);
-      const notificationCenter = await loadClinicalNotificationCenter(
-        currentUser,
-        baseCases
-      );
+      const [notificationCenter, attendancePendings] = await Promise.all([
+        loadClinicalNotificationCenter(currentUser, baseCases),
+        loadClinicalPendingEvolutionSummaries(currentUser)
+      ]);
       const cases = baseCases.map((caseItem) => {
         const pendingNotification = notificationCenter.pendingCaseMap.get(caseItem.id);
 
@@ -2750,6 +3155,7 @@ export async function getClinicalSupervisionPageData(
           professor: context.professor,
           studentOptions: context.studentOptions,
           cases,
+          attendancePendings,
           notifications: notificationCenter.center,
           metrics: {
             totalCases: cases.length,
@@ -2797,10 +3203,10 @@ export async function getClinicalSupervisionPageData(
         mapClinicalCaseSummaries(caseRows, bundle),
         currentUser
       );
-      const notificationCenter = await loadClinicalNotificationCenter(
-        currentUser,
-        cases
-      );
+      const [notificationCenter, attendancePendings] = await Promise.all([
+        loadClinicalNotificationCenter(currentUser, cases),
+        loadClinicalPendingEvolutionSummaries(currentUser)
+      ]);
       const casesWithNotifications = cases.map((caseItem) => {
         const pendingNotification = notificationCenter.pendingCaseMap.get(caseItem.id);
 
@@ -2821,6 +3227,7 @@ export async function getClinicalSupervisionPageData(
             email: currentUser.email
           },
           cases: casesWithNotifications,
+          attendancePendings,
           notifications: notificationCenter.center,
           metrics: {
             totalCases: casesWithNotifications.length,
@@ -2956,6 +3363,472 @@ export async function getClinicalSupervisionPageData(
       "Nesta fase, a Clínica Supervisionada está disponível apenas para professores e alunos."
     )
   };
+}
+
+function normalizeClinicalAttendanceStatusFilter(value?: string | null) {
+  const normalizedValue = value?.trim() ?? "";
+
+  return ["todos", "aguardando_marcacao", "paciente_presente", "paciente_ausente"].includes(
+    normalizedValue
+  )
+    ? normalizedValue
+    : "todos";
+}
+
+function matchesClinicalAttendanceStatusFilter(
+  item: ClinicalAttendanceSummary,
+  filterValue: string
+) {
+  switch (filterValue) {
+    case "aguardando_marcacao":
+      return item.presenceStatus === null;
+    case "paciente_presente":
+      return item.presenceStatus === "presente";
+    case "paciente_ausente":
+      return item.presenceStatus === "ausente";
+    default:
+      return true;
+  }
+}
+
+function normalizeClinicalPendingEvolutionStatusFilter(value?: string | null) {
+  const normalizedValue = value?.trim() ?? "";
+
+  return ["todos", "pendente", "enviada", "ajustes_solicitados"].includes(
+    normalizedValue
+  )
+    ? normalizedValue
+    : "todos";
+}
+
+export async function getClinicalDailyAttendancePageData(
+  currentUser: SessionUser,
+  filters?: {
+    date?: string | null;
+    areaId?: string | null;
+    professorId?: string | null;
+    status?: string | null;
+    pendingAreaId?: string | null;
+    pendingStudentId?: string | null;
+    pendingStatus?: string | null;
+  }
+): Promise<ClinicalDailyAttendanceLoadResult> {
+  if (currentUser.role !== "professor" && currentUser.role !== "secretaria") {
+    return {
+      pageData: null,
+      emptyState: buildEmptyState(
+        "MÃ³dulo indisponÃ­vel para este perfil",
+        "Nesta fase, os atendimentos do dia podem ser acompanhados apenas por professores e secretaria."
+      )
+    };
+  }
+
+  const selectedDate = normalizeDateOnlyValue(filters?.date) ?? getTodayInSaoPaulo();
+  const weekday = getClinicalWeekdayFromDate(selectedDate);
+
+  if (!weekday) {
+    return {
+      pageData: {
+        view: currentUser.role,
+        viewerName: currentUser.name,
+        selectedDate,
+        filters: {
+          areaId: "",
+          professorId: "",
+          status: "todos"
+        },
+        filterOptions: {
+          areas: [],
+          professors: [],
+          statuses: [{ value: "todos", label: "Todos os status" }]
+        },
+        metrics: {
+          scheduledCount: 0,
+          presentCount: 0,
+          absentCount: 0,
+          pendingCount: 0
+        },
+        items: [],
+        pendingFilters: {
+          areaId: "",
+          studentId: "",
+          status: "todos"
+        },
+        pendingFilterOptions: {
+          areas: [],
+          students: [],
+          statuses: [{ value: "todos", label: "Todos os status" }]
+        },
+        pendingMetrics: {
+          totalOpenCount: 0,
+          pendingCount: 0,
+          sentCount: 0,
+          adjustmentCount: 0
+        },
+        pendingItems: []
+      },
+      emptyState: null
+    };
+  }
+
+  let caseRows: ClinicalCaseRow[] = [];
+
+  try {
+    caseRows = await loadAccessibleClinicalCaseRows({
+      currentUser
+    });
+  } catch {
+    return {
+      pageData: null,
+      emptyState: buildEmptyState(
+        "NÃ£o foi possÃ­vel carregar os casos clÃ­nicos",
+        "Houve um problema ao consultar o escopo operacional necessÃ¡rio para montar os atendimentos do dia."
+      )
+    };
+  }
+
+  if (!caseRows.length) {
+    return {
+      pageData: {
+        view: currentUser.role,
+        viewerName: currentUser.name,
+        selectedDate,
+        filters: {
+          areaId: "",
+          professorId: "",
+          status: "todos"
+        },
+        filterOptions: {
+          areas: [],
+          professors: [],
+          statuses: [{ value: "todos", label: "Todos os status" }]
+        },
+        metrics: {
+          scheduledCount: 0,
+          presentCount: 0,
+          absentCount: 0,
+          pendingCount: 0
+        },
+        items: [],
+        pendingFilters: {
+          areaId: "",
+          studentId: "",
+          status: "todos"
+        },
+        pendingFilterOptions: {
+          areas: [],
+          students: [],
+          statuses: [{ value: "todos", label: "Todos os status" }]
+        },
+        pendingMetrics: {
+          totalOpenCount: 0,
+          pendingCount: 0,
+          sentCount: 0,
+          adjustmentCount: 0
+        },
+        pendingItems: []
+      },
+      emptyState: null
+    };
+  }
+
+  try {
+    const bundle = await loadClinicalReferenceBundle(caseRows, currentUser);
+    const caseSummaries = mapClinicalCaseSummaries(caseRows, bundle);
+    const pendingSummaries = await loadClinicalPendingEvolutionSummaries(currentUser);
+    const caseMap = new Map(caseSummaries.map((caseItem) => [caseItem.id, caseItem]));
+    const attendanceRows = await loadClinicalAttendanceRowsByDate({
+      currentUser,
+      date: selectedDate,
+      caseIds: caseSummaries.map((caseItem) => caseItem.id)
+    });
+    const attendanceMap = new Map(
+      attendanceRows.map((attendanceRow) => [
+        buildClinicalAttendanceCaseKey({
+          caseId: attendanceRow.caso_clinico_id,
+          attendanceDate: attendanceRow.data_atendimento,
+          scheduleId: attendanceRow.caso_clinico_horario_id
+        }),
+        attendanceRow
+      ])
+    );
+    const recordRows = await loadClinicalRecordRowsByAttendanceIds({
+      currentUser,
+      attendanceIds: uniqueStringValues(attendanceRows.map((attendanceRow) => attendanceRow.id))
+    });
+    const recordMap = new Map(
+      recordRows.map((recordRow) => [recordRow.atendimento_clinico_id ?? "", recordRow])
+    );
+    const scheduledItems: ClinicalAttendanceSummary[] = [];
+
+    for (const caseRow of caseRows) {
+      const caseItem = caseMap.get(caseRow.id);
+
+      if (!caseItem) {
+        continue;
+      }
+
+      if (
+        !isClinicalCaseScheduledOnDate({
+          caseRow,
+          attendanceDate: selectedDate,
+          weekday,
+          schedules: caseItem.schedules
+        })
+      ) {
+        continue;
+      }
+
+      const matchingSchedules = (
+        caseItem.schedules.length
+          ? caseItem.schedules.filter((schedule) => schedule.weekday === weekday)
+          : [
+              {
+                id: `legacy-${caseItem.id}`,
+                weekday,
+                appointmentTime: caseItem.appointmentTime
+              } satisfies ClinicalCaseScheduleSlot
+            ]
+      ).sort((left, right) =>
+        left.appointmentTime.localeCompare(right.appointmentTime, "pt-BR")
+      );
+
+      for (const schedule of matchingSchedules) {
+        const attendanceRow =
+          attendanceMap.get(
+            buildClinicalAttendanceCaseKey({
+              caseId: caseItem.id,
+              attendanceDate: selectedDate,
+              scheduleId: schedule.id
+            })
+          ) ?? null;
+        scheduledItems.push(
+          buildClinicalAttendanceSummary({
+            caseItem,
+            attendanceDate: selectedDate,
+            scheduleId: schedule.id,
+            appointmentTime: schedule.appointmentTime,
+            attendanceRow,
+            evolutionRecord: attendanceRow ? recordMap.get(attendanceRow.id) ?? null : null
+          })
+        );
+      }
+    }
+
+    for (const attendanceRow of attendanceRows) {
+      const caseItem = caseMap.get(attendanceRow.caso_clinico_id);
+
+      if (!caseItem) {
+        continue;
+      }
+
+      const uniqueKey = buildClinicalAttendanceCaseKey({
+        caseId: attendanceRow.caso_clinico_id,
+        attendanceDate: attendanceRow.data_atendimento,
+        scheduleId: attendanceRow.caso_clinico_horario_id
+      });
+
+      if (
+        scheduledItems.some(
+          (item) =>
+            buildClinicalAttendanceCaseKey({
+              caseId: item.caseItem.id,
+              attendanceDate: item.appointmentDate,
+              scheduleId: item.scheduleId
+            }) === uniqueKey
+        )
+      ) {
+        continue;
+      }
+
+      const schedule =
+        caseItem.schedules.find(
+          (slot) => slot.id === attendanceRow.caso_clinico_horario_id
+        ) ?? caseItem.schedules[0] ?? null;
+
+      scheduledItems.push(
+        buildClinicalAttendanceSummary({
+          caseItem,
+          attendanceDate: attendanceRow.data_atendimento,
+          scheduleId: attendanceRow.caso_clinico_horario_id,
+          appointmentTime: schedule?.appointmentTime ?? caseItem.appointmentTime,
+          attendanceRow,
+          evolutionRecord: recordMap.get(attendanceRow.id) ?? null
+        })
+      );
+    }
+
+    const areaOptions = Array.from(
+      new Map(
+        scheduledItems
+          .filter((item) => item.caseItem.areaId)
+          .map((item) => [
+            item.caseItem.areaId as string,
+            { id: item.caseItem.areaId as string, name: item.caseItem.areaName }
+          ])
+      ).values()
+    ).sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+    const professorOptions = Array.from(
+      new Map(
+        scheduledItems.map((item) => [
+          item.caseItem.professorId,
+          { id: item.caseItem.professorId, name: item.caseItem.professorName }
+        ])
+      ).values()
+    ).sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+    const normalizedAreaId = areaOptions.some((option) => option.id === filters?.areaId)
+      ? filters?.areaId?.trim() ?? ""
+      : "";
+    const normalizedProfessorId =
+      currentUser.role === "secretaria" &&
+      professorOptions.some((option) => option.id === filters?.professorId)
+        ? filters?.professorId?.trim() ?? ""
+        : currentUser.role === "professor"
+          ? currentUser.id
+          : "";
+    const normalizedStatus = normalizeClinicalAttendanceStatusFilter(filters?.status);
+    const filteredItems = scheduledItems
+      .filter((item) =>
+        normalizedAreaId ? item.caseItem.areaId === normalizedAreaId : true
+      )
+      .filter((item) =>
+        normalizedProfessorId
+          ? item.caseItem.professorId === normalizedProfessorId
+          : true
+      )
+      .filter((item) => matchesClinicalAttendanceStatusFilter(item, normalizedStatus))
+      .sort((left, right) => {
+        const timeDiff = left.appointmentTime.localeCompare(
+          right.appointmentTime,
+          "pt-BR"
+        );
+
+        if (timeDiff !== 0) {
+          return timeDiff;
+        }
+
+        return left.caseItem.patient.name.localeCompare(
+          right.caseItem.patient.name,
+          "pt-BR"
+        );
+      });
+    const pendingAreaOptions = Array.from(
+      new Map(
+        pendingSummaries
+          .filter((item) => item.caseItem.areaId)
+          .map((item) => [
+            item.caseItem.areaId as string,
+            { id: item.caseItem.areaId as string, name: item.caseItem.areaName }
+          ])
+      ).values()
+    ).sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+    const pendingStudentOptions = Array.from(
+      new Map(
+        pendingSummaries.map((item) => [
+          item.caseItem.studentId,
+          { id: item.caseItem.studentId, name: item.caseItem.studentName }
+        ])
+      ).values()
+    ).sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+    const normalizedPendingAreaId = pendingAreaOptions.some(
+      (option) => option.id === filters?.pendingAreaId
+    )
+      ? filters?.pendingAreaId?.trim() ?? ""
+      : "";
+    const normalizedPendingStudentId = pendingStudentOptions.some(
+      (option) => option.id === filters?.pendingStudentId
+    )
+      ? filters?.pendingStudentId?.trim() ?? ""
+      : "";
+    const normalizedPendingStatus = normalizeClinicalPendingEvolutionStatusFilter(
+      filters?.pendingStatus
+    );
+    const filteredPendingItems = pendingSummaries
+      .filter((item) =>
+        normalizedPendingAreaId ? item.caseItem.areaId === normalizedPendingAreaId : true
+      )
+      .filter((item) =>
+        normalizedPendingStudentId
+          ? item.caseItem.studentId === normalizedPendingStudentId
+          : true
+      )
+      .filter((item) =>
+        normalizedPendingStatus === "todos"
+          ? true
+          : item.evolutionStatus === normalizedPendingStatus
+      );
+
+    return {
+      pageData: {
+        view: currentUser.role,
+        viewerName: currentUser.name,
+        selectedDate,
+        filters: {
+          areaId: normalizedAreaId,
+          professorId: currentUser.role === "professor" ? "" : normalizedProfessorId,
+          status: normalizedStatus
+        },
+        filterOptions: {
+          areas: areaOptions,
+          professors: currentUser.role === "secretaria" ? professorOptions : [],
+          statuses: [
+            { value: "todos", label: "Todos os status" },
+            { value: "aguardando_marcacao", label: "Aguardando marcação" },
+            { value: "paciente_presente", label: "Paciente presente" },
+            { value: "paciente_ausente", label: "Paciente ausente" }
+          ]
+        },
+        metrics: {
+          scheduledCount: filteredItems.length,
+          presentCount: filteredItems.filter((item) => item.presenceStatus === "presente")
+            .length,
+          absentCount: filteredItems.filter((item) => item.presenceStatus === "ausente")
+            .length,
+          pendingCount: filteredItems.filter(
+            (item) => item.evolutionStatus === "pendente"
+          ).length
+        },
+        items: filteredItems,
+        pendingFilters: {
+          areaId: normalizedPendingAreaId,
+          studentId: normalizedPendingStudentId,
+          status: normalizedPendingStatus
+        },
+        pendingFilterOptions: {
+          areas: pendingAreaOptions,
+          students: pendingStudentOptions,
+          statuses: [
+            { value: "todos", label: "Todos os status" },
+            { value: "pendente", label: "Pendentes" },
+            { value: "enviada", label: "Enviadas para revisão" },
+            { value: "ajustes_solicitados", label: "Ajustes solicitados" }
+          ]
+        },
+        pendingMetrics: {
+          totalOpenCount: filteredPendingItems.length,
+          pendingCount: filteredPendingItems.filter(
+            (item) => item.evolutionStatus === "pendente"
+          ).length,
+          sentCount: filteredPendingItems.filter(
+            (item) => item.evolutionStatus === "enviada"
+          ).length,
+          adjustmentCount: filteredPendingItems.filter(
+            (item) => item.evolutionStatus === "ajustes_solicitados"
+          ).length
+        },
+        pendingItems: filteredPendingItems
+      },
+      emptyState: null
+    };
+  } catch {
+    return {
+      pageData: null,
+      emptyState: buildEmptyState(
+        "NÃ£o foi possÃ­vel montar os atendimentos do dia",
+        "Os casos clÃ­nicos foram encontrados, mas a agenda prevista e os registros diÃ¡rios ainda nÃ£o puderam ser consolidados."
+      )
+    };
+  }
 }
 
 function createEmptyClinicalCaseInitialValues(): ClinicalCaseFormInitialValues {
@@ -3814,12 +4687,7 @@ function hasClinicalInstitutionalPendingStatus(
 }
 
 function getDateTimestamp(value: string | null | undefined) {
-  if (!value) {
-    return null;
-  }
-
-  const timestamp = new Date(value).getTime();
-  return Number.isNaN(timestamp) ? null : timestamp;
+  return getDateValueTimestamp(value);
 }
 
 function shouldReplaceLatestEvolutionDate(currentValue: string | null, candidateValue: string) {
@@ -4890,7 +5758,10 @@ export async function getClinicalEvolutionListPageData(
 export async function getClinicalEvolutionPageData(
   currentUser: SessionUser,
   caseId: string,
-  recordId?: string | null
+  recordId?: string | null,
+  options?: {
+    attendanceId?: string | null;
+  }
 ): Promise<ClinicalEvolutionLoadResult> {
   if (
     currentUser.role !== "professor" &&
@@ -4979,7 +5850,50 @@ export async function getClinicalEvolutionPageData(
     semesterStatus
   );
 
-  let evolution: ClinicalEvolutionRecord | null = null;
+  let linkedAttendanceRow: ClinicalAttendanceRow | null = null;
+
+  if (options?.attendanceId) {
+    try {
+      linkedAttendanceRow = await loadScopedClinicalAttendanceRow({
+        currentUser,
+        caseId,
+        attendanceId: options.attendanceId
+      });
+    } catch {
+      return {
+        pageData: null,
+        emptyState: buildEmptyState(
+          "Atendimento diário indisponível",
+          "Não foi possível localizar o atendimento diário selecionado dentro do seu escopo clínico."
+        )
+      };
+    }
+
+    if (!linkedAttendanceRow) {
+      return {
+        pageData: null,
+        emptyState: buildEmptyState(
+          "Atendimento diário indisponível",
+          "O atendimento diário informado não pertence a este caso clínico ou não está disponível para o perfil autenticado."
+        )
+      };
+    }
+
+    if (
+      currentUser.role === "aluno" &&
+      linkedAttendanceRow.status_presenca !== "presente"
+    ) {
+      return {
+        pageData: null,
+        emptyState: buildEmptyState(
+          "Evolução dispensada para este atendimento",
+          "Este atendimento foi marcado como ausência do paciente e não exige registro de evolução."
+        )
+      };
+    }
+  }
+
+  let evolutionRecordRow: ClinicalRecordRow | null = null;
 
   if (recordId) {
     const { data: recordRowData, error: recordError } = await supabase
@@ -5000,8 +5914,55 @@ export async function getClinicalEvolutionPageData(
       };
     }
 
-    evolution = buildClinicalEvolutionRecord(recordRowData as ClinicalRecordRow);
+    evolutionRecordRow = recordRowData as ClinicalRecordRow;
+  } else if (linkedAttendanceRow?.id) {
+    try {
+      const linkedRecordRows = await loadClinicalRecordRowsByAttendanceIds({
+        currentUser,
+        attendanceIds: [linkedAttendanceRow.id]
+      });
+      evolutionRecordRow = linkedRecordRows[0] ?? null;
+    } catch {
+      return {
+        pageData: null,
+        emptyState: buildEmptyState(
+          "Atendimento diário indisponível",
+          "Não foi possível consolidar a evolução já vinculada a este atendimento diário."
+        )
+      };
+    }
   }
+
+  if (!linkedAttendanceRow && evolutionRecordRow?.atendimento_clinico_id) {
+    try {
+      linkedAttendanceRow = await loadScopedClinicalAttendanceRow({
+        currentUser,
+        caseId,
+        attendanceId: evolutionRecordRow.atendimento_clinico_id
+      });
+    } catch {
+      linkedAttendanceRow = null;
+    }
+  }
+
+  const evolution = evolutionRecordRow
+    ? buildClinicalEvolutionRecord(evolutionRecordRow)
+    : null;
+  const linkedAttendance =
+    linkedAttendanceRow &&
+    buildClinicalPendingEvolutionSummary(
+      buildClinicalAttendanceSummary({
+        caseItem,
+        attendanceDate: linkedAttendanceRow.data_atendimento,
+        scheduleId: linkedAttendanceRow.caso_clinico_horario_id,
+        appointmentTime:
+          caseItem.schedules.find(
+            (schedule) => schedule.id === linkedAttendanceRow?.caso_clinico_horario_id
+          )?.appointmentTime ?? caseItem.appointmentTime,
+        attendanceRow: linkedAttendanceRow,
+        evolutionRecord: evolutionRecordRow
+      })
+    );
 
   const studentCanEdit =
     currentUser.role === "aluno" &&
@@ -5032,6 +5993,11 @@ export async function getClinicalEvolutionPageData(
       caseItem,
       exceptionalReleaseNotice,
       evolution,
+      linkedAttendance: linkedAttendance ?? null,
+      initialSessionDate:
+        linkedAttendanceRow?.data_atendimento ??
+        evolution?.content.sessionDate ??
+        getTodayInSaoPaulo(),
       studentCanEdit,
       studentReadOnlyMessage
     },

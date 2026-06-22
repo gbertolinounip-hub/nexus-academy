@@ -1611,11 +1611,105 @@ export interface Database {
         };
         Relationships: [];
       };
+      atendimentos_clinicos: {
+        Row: {
+          id: string;
+          caso_clinico_id: string;
+          paciente_id: string;
+          data_atendimento: string;
+          caso_clinico_horario_id: string | null;
+          matricula_turma_id: string | null;
+          turma_id: string | null;
+          semestre_id: string | null;
+          area_estagio_id: string | null;
+          unidade_id: string | null;
+          oferta_curso_unidade_id: string | null;
+          curso_id: string | null;
+          instituicao_id: string | null;
+          professor_id: string | null;
+          aluno_id: string | null;
+          status_presenca: "presente" | "ausente" | "cancelado";
+          status_evolucao:
+            | "dispensada"
+            | "pendente"
+            | "enviada"
+            | "ajustes_solicitados"
+            | "aprovada"
+            | "reprovada";
+          observacao_administrativa: string | null;
+          registrado_por: string | null;
+          registrado_em: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          caso_clinico_id: string;
+          paciente_id: string;
+          data_atendimento: string;
+          caso_clinico_horario_id?: string | null;
+          matricula_turma_id?: string | null;
+          turma_id?: string | null;
+          semestre_id?: string | null;
+          area_estagio_id?: string | null;
+          unidade_id?: string | null;
+          oferta_curso_unidade_id?: string | null;
+          curso_id?: string | null;
+          instituicao_id?: string | null;
+          professor_id?: string | null;
+          aluno_id?: string | null;
+          status_presenca: "presente" | "ausente" | "cancelado";
+          status_evolucao:
+            | "dispensada"
+            | "pendente"
+            | "enviada"
+            | "ajustes_solicitados"
+            | "aprovada"
+            | "reprovada";
+          observacao_administrativa?: string | null;
+          registrado_por?: string | null;
+          registrado_em?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          caso_clinico_id?: string;
+          paciente_id?: string;
+          data_atendimento?: string;
+          caso_clinico_horario_id?: string | null;
+          matricula_turma_id?: string | null;
+          turma_id?: string | null;
+          semestre_id?: string | null;
+          area_estagio_id?: string | null;
+          unidade_id?: string | null;
+          oferta_curso_unidade_id?: string | null;
+          curso_id?: string | null;
+          instituicao_id?: string | null;
+          professor_id?: string | null;
+          aluno_id?: string | null;
+          status_presenca?: "presente" | "ausente" | "cancelado";
+          status_evolucao?:
+            | "dispensada"
+            | "pendente"
+            | "enviada"
+            | "ajustes_solicitados"
+            | "aprovada"
+            | "reprovada";
+          observacao_administrativa?: string | null;
+          registrado_por?: string | null;
+          registrado_em?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       registros_clinicos: {
         Row: {
           id: string;
           unidade_id: string | null;
           caso_clinico_id: string;
+          atendimento_clinico_id: string | null;
           tipo: "avaliacao" | "plano_tratamento" | "evolucao";
           status: "rascunho" | "enviado" | "aprovado" | "ajustes_solicitados";
           conteudo_json: Record<string, unknown>;
@@ -1631,6 +1725,7 @@ export interface Database {
           id?: string;
           unidade_id?: string | null;
           caso_clinico_id: string;
+          atendimento_clinico_id?: string | null;
           tipo: "avaliacao" | "plano_tratamento" | "evolucao";
           status?: "rascunho" | "enviado" | "aprovado" | "ajustes_solicitados";
           conteudo_json?: Record<string, unknown>;
@@ -1646,6 +1741,7 @@ export interface Database {
           id?: string;
           unidade_id?: string | null;
           caso_clinico_id?: string;
+          atendimento_clinico_id?: string | null;
           tipo?: "avaliacao" | "plano_tratamento" | "evolucao";
           status?: "rascunho" | "enviado" | "aprovado" | "ajustes_solicitados";
           conteudo_json?: Record<string, unknown>;

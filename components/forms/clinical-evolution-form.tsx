@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect } from "react";
 import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
@@ -18,9 +18,11 @@ import { formatClinicalRecordStatus } from "@/lib/utils/format";
 interface ClinicalEvolutionFormProps {
   caseId: string;
   recordId?: string;
+  attendanceId?: string | null;
   initialContent: ClinicalEvolutionContent;
   currentStatus?: ClinicalRecordStatus | null;
   canEdit: boolean;
+  lockSessionDate?: boolean;
   readOnlyMessage?: string | null;
 }
 
@@ -28,11 +30,13 @@ function buildResolvedFormValues(
   caseId: string,
   initialContent: ClinicalEvolutionContent,
   recordId?: string,
+  attendanceId?: string | null,
   submittedValues?: ClinicalEvolutionFormValues
 ) {
   return {
     record_id: submittedValues?.record_id ?? recordId ?? "",
     case_id: submittedValues?.case_id ?? caseId,
+    attendance_id: submittedValues?.attendance_id ?? attendanceId ?? "",
     session_date: submittedValues?.session_date ?? initialContent.sessionDate,
     progress_and_conduct:
       submittedValues?.progress_and_conduct ?? initialContent.progressAndConduct,
@@ -67,13 +71,14 @@ function SubmitButton({
 export function ClinicalEvolutionForm({
   caseId,
   recordId,
+  attendanceId,
   initialContent,
   currentStatus,
   canEdit,
+  lockSessionDate = false,
   readOnlyMessage
 }: ClinicalEvolutionFormProps) {
   const router = useRouter();
-  const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction] = useActionState(
     saveClinicalEvolutionAction,
     initialClinicalEvolutionActionState
@@ -83,6 +88,7 @@ export function ClinicalEvolutionForm({
     caseId,
     initialContent,
     recordId,
+    attendanceId,
     safeState.status === "error" ? safeState.formValues : undefined
   );
   const fieldErrors = safeState.fieldErrors ?? {};
@@ -115,8 +121,11 @@ export function ClinicalEvolutionForm({
   }
 
   return (
-    <form ref={formRef} action={formAction} className="form-stack" key={formRenderKey}>
+    <form action={formAction} className="form-stack" key={formRenderKey}>
       <input type="hidden" name="case_id" value={resolvedValues.case_id} />
+      {resolvedValues.attendance_id ? (
+        <input type="hidden" name="attendance_id" value={resolvedValues.attendance_id} />
+      ) : null}
       {resolvedValues.record_id ? (
         <input type="hidden" name="record_id" value={resolvedValues.record_id} />
       ) : null}
@@ -151,8 +160,21 @@ export function ClinicalEvolutionForm({
               type="date"
               name="session_date"
               defaultValue={resolvedValues.session_date}
-              disabled={!canEdit}
+              disabled={!canEdit || lockSessionDate}
             />
+            {lockSessionDate ? (
+              <input
+                type="hidden"
+                name="session_date"
+                value={resolvedValues.session_date}
+              />
+            ) : null}
+            {lockSessionDate ? (
+              <span className="field-help">
+                Esta data foi definida pelo atendimento diário marcado como paciente
+                presente.
+              </span>
+            ) : null}
             {fieldErrors.session_date ? (
               <span className="field-error">{fieldErrors.session_date}</span>
             ) : null}

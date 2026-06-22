@@ -3,6 +3,7 @@ import type { ClinicalRecordStatus } from "@/types/domain";
 export interface ClinicalEvolutionFormValues {
   record_id?: string;
   case_id: string;
+  attendance_id?: string;
   session_date: string;
   progress_and_conduct: string;
   observations: string;
@@ -40,6 +41,7 @@ export const initialClinicalEvolutionActionState: ClinicalEvolutionActionState =
   fieldErrors: {},
   formValues: {
     case_id: "",
+    attendance_id: "",
     session_date: "",
     progress_and_conduct: "",
     observations: "",

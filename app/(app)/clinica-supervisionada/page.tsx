@@ -6,6 +6,7 @@ import { ClinicalCaseCard } from "@/components/cards/clinical-case-card";
 import { ClinicalNotificationFeed } from "@/components/cards/clinical-notification-feed";
 import { ClinicalScheduleBoard } from "@/components/tables/clinical-schedule-board";
 import { ClinicalCaseTable } from "@/components/tables/clinical-case-table";
+import { ClinicalPendingEvolutionTable } from "@/components/tables/clinical-pending-evolution-table";
 import { requireRole } from "@/lib/auth/session";
 import { getClinicalSupervisionPageData } from "@/services/clinical-supervision";
 
@@ -65,7 +66,7 @@ export default async function ClinicalSupervisionPage(props: {
             ? "Cadastre pacientes, atribua-os aos estagiários da sua supervisão e acompanhe a agenda semanal fixa dos atendimentos."
             : pageData.view === "aluno"
               ? "Acompanhe apenas os pacientes atribuídos ao seu estágio e visualize a agenda semanal fixa dos seus atendimentos clínicos."
-              : "Apoie a rotina administrativa da unidade com cadastro de pacientes, atribuição operacional e consulta da agenda semanal da Clínica Supervisionada."}
+              : "Apoie a rotina administrativa da unidade com cadastro de pacientes, atribuição operacional, controle diário de presença e consulta da agenda clínica."}
         </p>
         {notice ? (
           <p
@@ -110,6 +111,25 @@ export default async function ClinicalSupervisionPage(props: {
 
       {pageData.view === "professor" ? (
         <>
+          <SectionCard
+            title="Pendências de evolução"
+            description="Atendimentos reais já marcados como paciente presente e que ainda aguardam registro ou revisão de evolução."
+            actions={
+              <Link
+                href={"/clinica-supervisionada/atendimentos" as Route}
+                className="button button-secondary button-small"
+              >
+                Atendimentos do dia
+              </Link>
+            }
+          >
+            <ClinicalPendingEvolutionTable
+              items={pageData.attendancePendings}
+              viewerRole="professor"
+              emptyMessage="Nenhuma pendência diária de evolução foi registrada para os seus atendimentos no momento."
+            />
+          </SectionCard>
+
           <div className="metrics-grid">
             <MetricCard
               label="Casos registrados"
@@ -128,6 +148,24 @@ export default async function ClinicalSupervisionPage(props: {
               hint="Número de estagiários com ao menos um caso clínico atribuído."
             />
           </div>
+
+          <SectionCard
+            title="Atendimentos do dia"
+            description="Use esta rotina para registrar presença ou ausência do paciente na data real e gerar a pendência diária de evolução para o aluno."
+            actions={
+              <Link
+                href={"/clinica-supervisionada/atendimentos" as Route}
+                className="button"
+              >
+                Abrir atendimentos do dia
+              </Link>
+            }
+          >
+            <p className="empty-message">
+              O registro diário não substitui a agenda recorrente do caso. Ele apenas
+              registra a ocorrência real do atendimento naquela data.
+            </p>
+          </SectionCard>
 
           <SectionCard
             title="Cadastro e atribuição de paciente"
@@ -149,6 +187,14 @@ export default async function ClinicalSupervisionPage(props: {
           <SectionCard
             title="Pacientes agendados"
             description="Agenda semanal fixa dos pacientes supervisionados nesta Clínica Supervisionada."
+            actions={
+              <Link
+                href={"/clinica-supervisionada/atendimentos" as Route}
+                className="button button-secondary button-small"
+              >
+                Controle diário
+              </Link>
+            }
           >
             {pageData.cases.length ? (
               <ClinicalScheduleBoard cases={pageData.cases} enableProfessorFilters />
@@ -195,6 +241,24 @@ export default async function ClinicalSupervisionPage(props: {
           </div>
 
           <SectionCard
+            title="Atendimentos do dia"
+            description="Registre presença ou ausência dos pacientes previstos na unidade e acompanhe as pendências diárias de evolução."
+            actions={
+              <Link
+                href={"/clinica-supervisionada/atendimentos" as Route}
+                className="button"
+              >
+                Abrir atendimentos do dia
+              </Link>
+            }
+          >
+            <p className="empty-message">
+              A secretaria pode registrar a ocorrência do atendimento, mas não revisa
+              o conteúdo clínico da evolução.
+            </p>
+          </SectionCard>
+
+          <SectionCard
             title="Cadastro e atribuição de paciente"
             description="Cadastre o paciente, escolha a área de estágio, filtre o estagiário correto e configure os atendimentos semanais fixos do novo caso."
             actions={
@@ -214,6 +278,14 @@ export default async function ClinicalSupervisionPage(props: {
           <SectionCard
             title="Pacientes agendados"
             description="Agenda semanal fixa dos pacientes da unidade, com filtro por área de estágio e estagiário."
+            actions={
+              <Link
+                href={"/clinica-supervisionada/atendimentos" as Route}
+                className="button button-secondary button-small"
+              >
+                Controle diário
+              </Link>
+            }
           >
             {pageData.cases.length ? (
               <ClinicalScheduleBoard
@@ -243,6 +315,17 @@ export default async function ClinicalSupervisionPage(props: {
         </>
       ) : (
         <>
+          <SectionCard
+            title="Evoluções pendentes"
+            description="Atendimentos reais já marcados como paciente presente e que ainda dependem do seu registro diário de evolução."
+          >
+            <ClinicalPendingEvolutionTable
+              items={pageData.attendancePendings}
+              viewerRole="aluno"
+              emptyMessage="Nenhuma evolução diária está pendente para os seus atendimentos no momento."
+            />
+          </SectionCard>
+
           <div className="metrics-grid">
             <MetricCard
               label="Meus pacientes"

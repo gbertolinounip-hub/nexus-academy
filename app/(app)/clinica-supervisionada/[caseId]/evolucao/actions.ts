@@ -9,6 +9,7 @@ import {
   resolveExceptionalReleaseGate
 } from "@/services/exceptional-releases";
 import type { Database } from "@/types/database";
+import type { ClinicalAttendanceEvolutionStatus } from "@/types/domain";
 import type {
   ClinicalEvolutionActionState,
   ClinicalEvolutionFormValues,
@@ -16,6 +17,8 @@ import type {
   ClinicalEvolutionReviewFormValues
 } from "@/app/(app)/clinica-supervisionada/[caseId]/evolucao/state";
 
+type ClinicalAttendanceRow =
+  Database["public"]["Tables"]["atendimentos_clinicos"]["Row"];
 type ClinicalRecordRow = Database["public"]["Tables"]["registros_clinicos"]["Row"];
 type ClinicalRecordInsert =
   Database["public"]["Tables"]["registros_clinicos"]["Insert"];
@@ -37,6 +40,10 @@ type SemesterRow = Pick<
 const clinicalEvolutionSchema = z.object({
   record_id: z.string().trim(),
   case_id: z.string().uuid("Caso clínico inválido."),
+  attendance_id: z.union([
+    z.literal(""),
+    z.string().uuid("Atendimento clínico inválido.")
+  ]),
   session_date: z
     .string()
     .trim()
@@ -76,6 +83,7 @@ function buildEvolutionFormValues(formData: FormData): ClinicalEvolutionFormValu
   return {
     record_id: readStringField(formData, "record_id"),
     case_id: readStringField(formData, "case_id"),
+    attendance_id: readStringField(formData, "attendance_id"),
     session_date: readStringField(formData, "session_date"),
     progress_and_conduct: readStringField(formData, "progress_and_conduct"),
     observations: readStringField(formData, "observations"),
@@ -167,7 +175,23 @@ function validateEvolutionForSubmission(
   return fieldErrors;
 }
 
-async function hasDuplicateEvolutionDate(args: {
+function resolveClinicalAttendanceEvolutionStatusFromRecordStatus(
+  value: ClinicalRecordRow["status"]
+): ClinicalAttendanceEvolutionStatus {
+  switch (value) {
+    case "enviado":
+      return "enviada";
+    case "ajustes_solicitados":
+      return "ajustes_solicitados";
+    case "aprovado":
+      return "aprovada";
+    case "rascunho":
+    default:
+      return "pendente";
+  }
+}
+
+async function hasDuplicateLegacyEvolutionDate(args: {
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
   caseId: string;
   sessionDate: string;
@@ -175,15 +199,18 @@ async function hasDuplicateEvolutionDate(args: {
 }) {
   const { data, error } = await args.supabase
     .from("registros_clinicos")
-    .select("id, conteudo_json")
+    .select("id, conteudo_json, atendimento_clinico_id")
     .eq("caso_clinico_id", args.caseId)
-    .eq("tipo", "evolucao");
+    .eq("tipo", "evolucao")
+    .is("atendimento_clinico_id", null);
 
   if (error) {
     return { hasDuplicate: false, failed: true };
   }
 
-  const rows = (data ?? []) as Array<Pick<ClinicalRecordRow, "id" | "conteudo_json">>;
+  const rows = (data ?? []) as Array<
+    Pick<ClinicalRecordRow, "id" | "conteudo_json" | "atendimento_clinico_id">
+  >;
   const hasDuplicate = rows.some((row) => {
     if (args.currentRecordId && row.id === args.currentRecordId) {
       return false;
@@ -202,8 +229,97 @@ async function hasDuplicateEvolutionDate(args: {
   return { hasDuplicate, failed: false };
 }
 
+async function loadClinicalEvolutionRecordByAttendanceId(args: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  attendanceId: string;
+}) {
+  const { data, error } = await args.supabase
+    .from("registros_clinicos")
+    .select("*")
+    .eq("tipo", "evolucao")
+    .eq("atendimento_clinico_id", args.attendanceId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error("Nao foi possivel localizar a evolucao vinculada a este atendimento.");
+  }
+
+  return (data ?? null) as ClinicalRecordRow | null;
+}
+
+async function loadScopedStudentAttendanceRow(args: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  attendanceId: string;
+  caseId: string;
+  studentId: string;
+}) {
+  const { data, error } = await args.supabase
+    .from("atendimentos_clinicos")
+    .select("*")
+    .eq("id", args.attendanceId)
+    .eq("caso_clinico_id", args.caseId)
+    .eq("aluno_id", args.studentId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error("Nao foi possivel localizar o atendimento diario informado.");
+  }
+
+  return (data ?? null) as ClinicalAttendanceRow | null;
+}
+
+async function findImplicitStudentAttendanceRow(args: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  caseId: string;
+  studentId: string;
+  sessionDate: string;
+}) {
+  const { data, error } = await args.supabase
+    .from("atendimentos_clinicos")
+    .select("*")
+    .eq("caso_clinico_id", args.caseId)
+    .eq("aluno_id", args.studentId)
+    .eq("data_atendimento", args.sessionDate)
+    .eq("status_presenca", "presente");
+
+  if (error) {
+    throw new Error("Nao foi possivel consolidar o atendimento diario desta evolucao.");
+  }
+
+  const rows = (data ?? []) as ClinicalAttendanceRow[];
+
+  if (rows.length === 1) {
+    return {
+      row: rows[0],
+      ambiguous: false
+    };
+  }
+
+  return {
+    row: null,
+    ambiguous: rows.length > 1
+  };
+}
+
+async function syncAttendanceEvolutionStatus(args: {
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>;
+  attendanceId: string;
+  evolutionStatus: ClinicalAttendanceEvolutionStatus;
+}) {
+  const { error } = await (args.supabase.from("atendimentos_clinicos") as any)
+    .update({
+      status_evolucao: args.evolutionStatus
+    })
+    .eq("id", args.attendanceId);
+
+  if (error) {
+    throw new Error("Nao foi possivel sincronizar o status da pendencia de evolucao.");
+  }
+}
+
 function revalidateClinicalEvolutionPaths(caseId: string, recordId?: string) {
   revalidatePath("/clinica-supervisionada");
+  revalidatePath("/clinica-supervisionada/atendimentos");
   revalidatePath("/clinica-supervisionada/historico");
   revalidatePath(`/clinica-supervisionada/${caseId}`);
   revalidatePath(`/clinica-supervisionada/${caseId}/avaliacao`);
@@ -215,6 +331,7 @@ function revalidateClinicalEvolutionPaths(caseId: string, recordId?: string) {
   }
   revalidatePath("/aluno");
   revalidatePath("/professor");
+  revalidatePath("/secretaria");
 }
 
 function appendExceptionalReleaseNotice(message: string, noticeMessage?: string | null) {
@@ -239,19 +356,21 @@ async function loadClinicalCaseExceptionalScope(
     );
   }
 
-  const [{ data: enrollmentData, error: enrollmentError }, { data: semesterData, error: semesterError }] =
-    await Promise.all([
-      supabase
-        .from("matriculas_turma")
-        .select("id, aluno_id")
-        .eq("id", caseRow.matricula_turma_id)
-        .maybeSingle(),
-      supabase
-        .from("semestres")
-        .select("id, status")
-        .eq("id", caseRow.semestre_id)
-        .maybeSingle()
-    ]);
+  const [
+    { data: enrollmentData, error: enrollmentError },
+    { data: semesterData, error: semesterError }
+  ] = await Promise.all([
+    supabase
+      .from("matriculas_turma")
+      .select("id, aluno_id")
+      .eq("id", caseRow.matricula_turma_id)
+      .maybeSingle(),
+    supabase
+      .from("semestres")
+      .select("id, status")
+      .eq("id", caseRow.semestre_id)
+      .maybeSingle()
+  ]);
 
   const enrollment = (enrollmentData ?? null) as EnrollmentRow | null;
   const semester = (semesterData ?? null) as SemesterRow | null;
@@ -340,6 +459,7 @@ export async function saveClinicalEvolutionAction(
       submittedFormValues
     );
   }
+
   const { data: caseRowData, error: caseError } = await supabase
     .from("casos_clinicos")
     .select("id, unidade_id")
@@ -403,41 +523,174 @@ export async function saveClinicalEvolutionAction(
     );
   }
 
-  const duplicateDateCheck = await hasDuplicateEvolutionDate({
-    supabase,
-    caseId: parsedData.data.case_id,
-    sessionDate: parsedData.data.session_date,
-    currentRecordId: existingRecord?.id
-  });
+  let linkedAttendanceRow: ClinicalAttendanceRow | null = null;
 
-  if (duplicateDateCheck.failed) {
-    return buildEvolutionErrorState(
-      "Não foi possível validar a data deste atendimento.",
-      {},
-      submittedFormValues
-    );
+  if (parsedData.data.attendance_id) {
+    try {
+      linkedAttendanceRow = await loadScopedStudentAttendanceRow({
+        supabase,
+        attendanceId: parsedData.data.attendance_id,
+        caseId: parsedData.data.case_id,
+        studentId: currentUser.id
+      });
+    } catch (error) {
+      return buildEvolutionErrorState(
+        error instanceof Error
+          ? error.message
+          : "Nao foi possivel localizar o atendimento diario informado.",
+        {},
+        submittedFormValues
+      );
+    }
+
+    if (!linkedAttendanceRow) {
+      return buildEvolutionErrorState(
+        "O atendimento diário informado não pertence ao aluno autenticado.",
+        {},
+        submittedFormValues
+      );
+    }
+  } else if (existingRecord?.atendimento_clinico_id) {
+    try {
+      linkedAttendanceRow = await loadScopedStudentAttendanceRow({
+        supabase,
+        attendanceId: existingRecord.atendimento_clinico_id,
+        caseId: parsedData.data.case_id,
+        studentId: currentUser.id
+      });
+    } catch {
+      linkedAttendanceRow = null;
+    }
+  } else {
+    try {
+      const implicitAttendance = await findImplicitStudentAttendanceRow({
+        supabase,
+        caseId: parsedData.data.case_id,
+        studentId: currentUser.id,
+        sessionDate: parsedData.data.session_date
+      });
+
+      if (implicitAttendance.ambiguous) {
+        return buildEvolutionErrorState(
+          "Há mais de um atendimento diário presente para esta data. Abra a pendência correta na Clínica Supervisionada antes de registrar a evolução.",
+          {
+            session_date:
+              "Use a pendência diária correta para vincular a evolução ao atendimento exato."
+          },
+          submittedFormValues
+        );
+      }
+
+      linkedAttendanceRow = implicitAttendance.row;
+    } catch (error) {
+      return buildEvolutionErrorState(
+        error instanceof Error
+          ? error.message
+          : "Nao foi possivel consolidar o atendimento diario desta evolucao.",
+        {},
+        submittedFormValues
+      );
+    }
   }
 
-  if (duplicateDateCheck.hasDuplicate) {
-    return buildEvolutionErrorState(
-      "Já existe uma evolução registrada para esta data neste caso clínico.",
-      {
-        session_date:
-          "Use outra data ou abra a evolução já existente para este atendimento."
-      },
-      submittedFormValues
-    );
+  if (linkedAttendanceRow) {
+    if (linkedAttendanceRow.status_presenca !== "presente") {
+      return buildEvolutionErrorState(
+        "Este atendimento foi marcado como ausência do paciente e não exige evolução.",
+        {
+          session_date:
+            "Somente atendimentos marcados como paciente presente podem receber evolução."
+        },
+        submittedFormValues
+      );
+    }
+
+    if (parsedData.data.session_date !== linkedAttendanceRow.data_atendimento) {
+      return buildEvolutionErrorState(
+        "A data da evolução deve corresponder à data do atendimento diário vinculado.",
+        {
+          session_date:
+            "Revise a data do atendimento diário antes de salvar a evolução."
+        },
+        submittedFormValues
+      );
+    }
+
+    let linkedRecord: ClinicalRecordRow | null = null;
+
+    try {
+      linkedRecord = await loadClinicalEvolutionRecordByAttendanceId({
+        supabase,
+        attendanceId: linkedAttendanceRow.id
+      });
+    } catch (error) {
+      return buildEvolutionErrorState(
+        error instanceof Error
+          ? error.message
+          : "Nao foi possivel validar a evolucao vinculada a este atendimento.",
+        {},
+        submittedFormValues
+      );
+    }
+
+    if (linkedRecord && linkedRecord.id !== existingRecord?.id) {
+      return buildEvolutionErrorState(
+        "Já existe uma evolução vinculada a este atendimento diário.",
+        {
+          session_date:
+            "Abra o registro já existente para este atendimento em vez de criar outro."
+        },
+        submittedFormValues
+      );
+    }
+  } else {
+    const duplicateDateCheck = await hasDuplicateLegacyEvolutionDate({
+      supabase,
+      caseId: parsedData.data.case_id,
+      sessionDate: parsedData.data.session_date,
+      currentRecordId: existingRecord?.id
+    });
+
+    if (duplicateDateCheck.failed) {
+      return buildEvolutionErrorState(
+        "Não foi possível validar a data deste atendimento.",
+        {},
+        submittedFormValues
+      );
+    }
+
+    if (duplicateDateCheck.hasDuplicate) {
+      return buildEvolutionErrorState(
+        "Já existe uma evolução registrada para esta data neste caso clínico.",
+        {
+          session_date:
+            "Use outra data ou abra a evolução já existente para este atendimento."
+        },
+        submittedFormValues
+      );
+    }
   }
 
   const nextStatus = parsedData.data.intent;
   const nowIso = new Date().toISOString();
-  const contentPayload = buildClinicalEvolutionPayload(parsedData.data);
+  const normalizedSessionDate =
+    linkedAttendanceRow?.data_atendimento ?? parsedData.data.session_date;
+  const contentPayload = buildClinicalEvolutionPayload({
+    attendance_id: linkedAttendanceRow?.id ?? parsedData.data.attendance_id,
+    session_date: normalizedSessionDate,
+    progress_and_conduct: parsedData.data.progress_and_conduct,
+    observations: parsedData.data.observations
+  });
+  const nextAttendanceEvolutionStatus =
+    resolveClinicalAttendanceEvolutionStatusFromRecordStatus(nextStatus);
 
   if (existingRecord) {
     const updatePayload: ClinicalRecordUpdate = {
       status: nextStatus,
       conteudo_json: contentPayload,
-      enviado_em: nextStatus === "enviado" ? nowIso : null
+      enviado_em: nextStatus === "enviado" ? nowIso : null,
+      atendimento_clinico_id:
+        linkedAttendanceRow?.id ?? existingRecord.atendimento_clinico_id ?? null
     };
 
     const { error: updateError } = await (supabase.from("registros_clinicos") as any)
@@ -452,6 +705,27 @@ export async function saveClinicalEvolutionAction(
         {},
         submittedFormValues
       );
+    }
+
+    const attendanceIdToSync =
+      linkedAttendanceRow?.id ?? existingRecord.atendimento_clinico_id ?? null;
+
+    if (attendanceIdToSync) {
+      try {
+        await syncAttendanceEvolutionStatus({
+          supabase,
+          attendanceId: attendanceIdToSync,
+          evolutionStatus: nextAttendanceEvolutionStatus
+        });
+      } catch (error) {
+        return buildEvolutionErrorState(
+          error instanceof Error
+            ? error.message
+            : "Nao foi possivel sincronizar a pendencia de evolucao.",
+          {},
+          submittedFormValues
+        );
+      }
     }
 
     if (exceptionalReleaseGate.release) {
@@ -485,6 +759,7 @@ export async function saveClinicalEvolutionAction(
     id: createdRecordId,
     unidade_id: caseContext.unidade_id,
     caso_clinico_id: parsedData.data.case_id,
+    atendimento_clinico_id: linkedAttendanceRow?.id ?? null,
     tipo: "evolucao",
     status: nextStatus,
     conteudo_json: contentPayload,
@@ -503,6 +778,24 @@ export async function saveClinicalEvolutionAction(
       {},
       submittedFormValues
     );
+  }
+
+  if (linkedAttendanceRow) {
+    try {
+      await syncAttendanceEvolutionStatus({
+        supabase,
+        attendanceId: linkedAttendanceRow.id,
+        evolutionStatus: nextAttendanceEvolutionStatus
+      });
+    } catch (error) {
+      return buildEvolutionErrorState(
+        error instanceof Error
+          ? error.message
+          : "Nao foi possivel sincronizar a pendencia de evolucao.",
+        {},
+        submittedFormValues
+      );
+    }
   }
 
   if (exceptionalReleaseGate.release) {
@@ -621,6 +914,7 @@ export async function reviewClinicalEvolutionAction(
     );
   }
 
+  const recordRow = recordRowData as ClinicalRecordRow;
   const updatePayload: ClinicalRecordUpdate = {
     status: parsedData.data.status,
     parecer_supervisor: parsedData.data.supervisor_feedback || null,
@@ -640,6 +934,26 @@ export async function reviewClinicalEvolutionAction(
       {},
       submittedFormValues
     );
+  }
+
+  if (recordRow.atendimento_clinico_id) {
+    try {
+      await syncAttendanceEvolutionStatus({
+        supabase,
+        attendanceId: recordRow.atendimento_clinico_id,
+        evolutionStatus: resolveClinicalAttendanceEvolutionStatusFromRecordStatus(
+          parsedData.data.status
+        )
+      });
+    } catch (error) {
+      return buildReviewErrorState(
+        error instanceof Error
+          ? error.message
+          : "Nao foi possivel sincronizar a pendencia de evolucao.",
+        {},
+        submittedFormValues
+      );
+    }
   }
 
   if (exceptionalReleaseGate.release) {

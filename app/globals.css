@@ -1300,12 +1300,37 @@ select {
   color: var(--accent);
 }
 
+.status-pendente {
+  background: rgba(var(--alert-rgb), 0.14);
+  color: var(--alert);
+}
+
+.status-presente {
+  background: rgba(var(--success-rgb), 0.12);
+  color: var(--success);
+}
+
+.status-ausente {
+  background: rgba(var(--danger-rgb), 0.12);
+  color: var(--danger);
+}
+
+.status-dispensada {
+  background: rgba(var(--line-rgb), 0.8);
+  color: var(--muted);
+}
+
 .status-aprovado {
   background: rgba(var(--success-rgb), 0.12);
   color: var(--success);
 }
 
 .status-reprovado {
+  background: rgba(var(--danger-rgb), 0.12);
+  color: var(--danger);
+}
+
+.status-reprovada {
   background: rgba(var(--danger-rgb), 0.12);
   color: var(--danger);
 }
@@ -5361,6 +5386,126 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
   gap: 0.55rem;
 }
 
+.link-subtle {
+  color: var(--brand);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.link-subtle:hover,
+.link-subtle:focus-visible {
+  text-decoration: underline;
+}
+
+.clinical-attendance-filter-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: end;
+}
+
+.clinical-attendance-filter-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.clinical-attendance-table-wrap {
+  overflow-x: auto;
+}
+
+.clinical-attendance-table {
+  min-width: 1280px;
+}
+
+.clinical-attendance-table td {
+  vertical-align: top;
+}
+
+.clinical-attendance-status-stack {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.clinical-attendance-table-actions-cell {
+  min-width: 320px;
+}
+
+.clinical-attendance-status-form {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 280px;
+}
+
+.clinical-attendance-status-form-note textarea {
+  min-height: 92px;
+}
+
+.clinical-attendance-status-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.clinical-pending-evolution-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.clinical-pending-evolution-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.9rem;
+  align-items: start;
+  padding: 1rem;
+  border: 1px solid rgba(var(--brand-rgb), 0.14);
+  border-radius: 18px;
+  background: rgba(var(--highlight-rgb), 0.12);
+}
+
+.clinical-pending-evolution-copy {
+  display: grid;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.clinical-pending-evolution-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.clinical-pending-evolution-header p,
+.clinical-pending-evolution-note {
+  margin: 0;
+}
+
+.clinical-pending-evolution-header p,
+.clinical-pending-evolution-meta,
+.clinical-pending-evolution-note {
+  color: var(--muted);
+}
+
+.clinical-pending-evolution-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 1rem;
+  font-size: 0.92rem;
+}
+
+.clinical-pending-evolution-note {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.clinical-pending-evolution-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
 .clinical-schedule-board-wrap {
   width: 100%;
   max-width: 100%;
@@ -5715,6 +5860,22 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
 
   .clinical-evolution-list-header {
     align-items: flex-start;
+  }
+
+  .clinical-attendance-filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .clinical-attendance-filter-actions {
+    justify-content: flex-start;
+  }
+
+  .clinical-pending-evolution-item {
+    grid-template-columns: 1fr;
+  }
+
+  .clinical-pending-evolution-actions {
+    justify-content: flex-start;
   }
 
   .clinical-schedule-board-filters {

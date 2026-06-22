@@ -7,6 +7,7 @@ import { ClinicalEvolutionContentCard } from "@/components/cards/clinical-evolut
 import { ClinicalEvolutionForm } from "@/components/forms/clinical-evolution-form";
 import { ClinicalEvolutionReviewForm } from "@/components/forms/clinical-evolution-review-form";
 import {
+  formatClinicalAttendanceEvolutionStatus,
   formatClinicalRecordStatus,
   formatClinicalScheduleLabel,
   formatDate
@@ -31,6 +32,7 @@ export function ClinicalEvolutionRecordScreen({
 }: ClinicalEvolutionRecordScreenProps) {
   const evolutionStatus = pageData.evolution?.status ?? "rascunho";
   const supervisorFeedback = pageData.evolution?.supervisorFeedback ?? null;
+  const linkedAttendance = pageData.linkedAttendance;
 
   return (
     <div className="stack clinical-supervision-page clinical-evaluation-page">
@@ -105,6 +107,27 @@ export function ClinicalEvolutionRecordScreen({
               {formatClinicalRecordStatus(evolutionStatus)}
             </strong>
           </div>
+          {linkedAttendance ? (
+            <>
+              <div className="report-mini-card">
+                <span>Atendimento diário</span>
+                <strong>
+                  {formatDate(linkedAttendance.appointmentDate)} -{" "}
+                  {linkedAttendance.appointmentTime}
+                </strong>
+              </div>
+              <div className="report-mini-card">
+                <span>Status da pendência</span>
+                <strong
+                  className={`status-pill status-${linkedAttendance.evolutionStatus}`}
+                >
+                  {formatClinicalAttendanceEvolutionStatus(
+                    linkedAttendance.evolutionStatus
+                  )}
+                </strong>
+              </div>
+            </>
+          ) : null}
           <div className="report-mini-card">
             <span>Atendimentos</span>
             <strong className="clinical-case-summary-schedule-list">
@@ -138,15 +161,17 @@ export function ClinicalEvolutionRecordScreen({
             <ClinicalEvolutionForm
               caseId={pageData.caseItem.id}
               recordId={pageData.evolution?.id}
+              attendanceId={linkedAttendance?.attendanceId ?? null}
               initialContent={
                 pageData.evolution?.content ?? {
-                  sessionDate: getTodayInSaoPaulo(),
+                  sessionDate: pageData.initialSessionDate ?? getTodayInSaoPaulo(),
                   progressAndConduct: "",
                   observations: ""
                 }
               }
               currentStatus={pageData.evolution?.status ?? null}
               canEdit={pageData.studentCanEdit}
+              lockSessionDate={Boolean(linkedAttendance?.attendanceId)}
               readOnlyMessage={pageData.studentReadOnlyMessage}
             />
           </SectionCard>
@@ -214,7 +239,8 @@ export function ClinicalEvolutionRecordScreen({
               <ClinicalEvolutionContentCard content={pageData.evolution.content} />
             ) : (
               <p className="empty-message">
-                O aluno ainda não preencheu o Registro de Evolução e Conduta deste caso.
+                O aluno ainda não preencheu o Registro de Evolução e Conduta deste
+                caso.
               </p>
             )}
           </SectionCard>

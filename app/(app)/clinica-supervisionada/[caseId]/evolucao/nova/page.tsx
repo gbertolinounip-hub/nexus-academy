@@ -5,12 +5,20 @@ import { ClinicalEvolutionRecordScreen } from "@/app/(app)/clinica-supervisionad
 
 export default async function ClinicalNewEvolutionPage(props: {
   params: Promise<{ caseId: string }>;
+  searchParams?: Promise<{
+    attendanceId?: string;
+  }>;
 }) {
   const currentUser = await requireRole(["aluno"]);
   const params = await props.params;
+  const searchParams = (await props.searchParams) ?? {};
   const { pageData, emptyState } = await getClinicalEvolutionPageData(
     currentUser,
-    params.caseId
+    params.caseId,
+    null,
+    {
+      attendanceId: searchParams.attendanceId ?? null
+    }
   );
 
   if (!pageData || emptyState) {

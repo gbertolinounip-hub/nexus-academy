@@ -656,6 +656,17 @@ export type ClinicalRecordStatus =
   | "enviado"
   | "aprovado"
   | "ajustes_solicitados";
+export type ClinicalAttendancePresenceStatus =
+  | "presente"
+  | "ausente"
+  | "cancelado";
+export type ClinicalAttendanceEvolutionStatus =
+  | "dispensada"
+  | "pendente"
+  | "enviada"
+  | "ajustes_solicitados"
+  | "aprovada"
+  | "reprovada";
 export type ClinicalInstitutionalViewerRole =
   | "coordenador"
   | "coordenador_master";
@@ -868,6 +879,32 @@ export interface ClinicalCaseSummary {
   startedAt: string;
   endedAt: string | null;
   updatedAt: string;
+}
+
+export interface ClinicalAttendanceSummary {
+  attendanceId: string | null;
+  caseItem: ClinicalCaseSummary;
+  appointmentDate: string;
+  scheduleId: string | null;
+  appointmentTime: string;
+  presenceStatus: ClinicalAttendancePresenceStatus | null;
+  evolutionStatus: ClinicalAttendanceEvolutionStatus | null;
+  administrativeNote: string | null;
+  recordedAt: string | null;
+  recordedById: string | null;
+  evolutionRecordId: string | null;
+}
+
+export interface ClinicalPendingEvolutionSummary {
+  attendanceId: string;
+  caseItem: ClinicalCaseSummary;
+  appointmentDate: string;
+  scheduleId: string | null;
+  appointmentTime: string;
+  evolutionStatus: ClinicalAttendanceEvolutionStatus;
+  administrativeNote: string | null;
+  evolutionRecordId: string | null;
+  openDays: number;
 }
 
 export interface ClinicalPatientHistoryCaseItem {

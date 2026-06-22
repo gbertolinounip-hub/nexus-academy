@@ -6,29 +6,128 @@ export function formatGradeOutOfTen(value: number) {
   return value.toFixed(2).replace(".", ",");
 }
 
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+export function normalizeDateOnlyValue(value?: string | null) {
+  const normalizedValue = typeof value === "string" ? value.trim() : "";
+  return DATE_ONLY_PATTERN.test(normalizedValue) ? normalizedValue : null;
+}
+
+function buildUtcNoonDateFromDateOnly(value: string) {
+  const normalizedValue = normalizeDateOnlyValue(value);
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const [year, month, day] = normalizedValue.split("-").map(Number);
+  const parsedDate = new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
+
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+}
+
+export function parseDateValue(value?: string | null) {
+  const normalizedValue = typeof value === "string" ? value.trim() : "";
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const dateOnly = buildUtcNoonDateFromDateOnly(normalizedValue);
+
+  if (dateOnly) {
+    return dateOnly;
+  }
+
+  const parsedDate = new Date(normalizedValue);
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+}
+
+export function getDateValueTimestamp(value?: string | null) {
+  return parseDateValue(value)?.getTime() ?? null;
+}
+
+export function getClinicalWeekdayFromDateOnly(
+  value: string
+): "segunda" | "terca" | "quarta" | "quinta" | "sexta" | "sabado" | null {
+  const referenceDate = buildUtcNoonDateFromDateOnly(value);
+
+  if (!referenceDate) {
+    return null;
+  }
+
+  switch (referenceDate.getUTCDay()) {
+    case 1:
+      return "segunda";
+    case 2:
+      return "terca";
+    case 3:
+      return "quarta";
+    case 4:
+      return "quinta";
+    case 5:
+      return "sexta";
+    case 6:
+      return "sabado";
+    default:
+      return null;
+  }
+}
+
 export function formatDate(value: string) {
+  const dateOnlyValue = normalizeDateOnlyValue(value);
+
+  if (dateOnlyValue) {
+    const [year, month, day] = dateOnlyValue.split("-");
+    return `${day}/${month}/${year}`;
+  }
+
+  const parsedDate = parseDateValue(value);
+
+  if (!parsedDate) {
+    return value;
+  }
+
   return new Intl.DateTimeFormat("pt-BR", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric"
-  }).format(new Date(value));
+  }).format(parsedDate);
 }
 
 export function formatDateTime(value: string) {
+  const dateOnlyValue = normalizeDateOnlyValue(value);
+
+  if (dateOnlyValue) {
+    return formatDate(dateOnlyValue);
+  }
+
+  const parsedDate = parseDateValue(value);
+
+  if (!parsedDate) {
+    return value;
+  }
+
   return new Intl.DateTimeFormat("pt-BR", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit"
-  }).format(new Date(value));
+  }).format(parsedDate);
 }
 
 export function formatTime(value: string) {
+  const parsedDate = parseDateValue(value);
+
+  if (!parsedDate) {
+    return value;
+  }
+
   return new Intl.DateTimeFormat("pt-BR", {
     hour: "2-digit",
     minute: "2-digit"
-  }).format(new Date(value));
+  }).format(parsedDate);
 }
 
 export function formatLaunchType(value: string) {
@@ -95,6 +194,38 @@ export function formatClinicalRecordStatus(value: string) {
       return "Aprovado";
     case "ajustes_solicitados":
       return "Ajustes solicitados";
+    default:
+      return value;
+  }
+}
+
+export function formatClinicalAttendancePresenceStatus(value: string) {
+  switch (value) {
+    case "presente":
+      return "Paciente presente";
+    case "ausente":
+      return "Paciente ausente";
+    case "cancelado":
+      return "Atendimento cancelado";
+    default:
+      return value;
+  }
+}
+
+export function formatClinicalAttendanceEvolutionStatus(value: string) {
+  switch (value) {
+    case "dispensada":
+      return "Dispensada";
+    case "pendente":
+      return "Pendente";
+    case "enviada":
+      return "Enviada";
+    case "ajustes_solicitados":
+      return "Ajustes solicitados";
+    case "aprovada":
+      return "Aprovada";
+    case "reprovada":
+      return "Reprovada";
     default:
       return value;
   }
@@ -295,13 +426,7 @@ export function formatStageAssignmentLabel(input: {
 }
 
 function isValidDateValue(value?: string | null) {
-  const normalizedValue = normalizeText(value);
-
-  if (!normalizedValue) {
-    return false;
-  }
-
-  return !Number.isNaN(new Date(normalizedValue).getTime());
+  return parseDateValue(normalizeText(value)) !== null;
 }
 
 export function resolveLaunchIdentity(input: {
