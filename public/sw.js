@@ -1,4 +1,4 @@
-const STATIC_CACHE = "nexus-pwa-static-v2";
+const STATIC_CACHE = "nexus-pwa-static-v3";
 const STATIC_ASSETS = [
   "/offline.html",
   "/manifest.webmanifest",
