@@ -117,6 +117,57 @@ interface StudentDashboardPageLoadResult {
   } | null;
 }
 
+export interface StudentEvaluationDetailPageData {
+  evaluation: {
+    id: string;
+    launchType: EvaluationLaunch["launchType"];
+    publishedAt: string;
+    reference: string;
+    isLegacyRecord: boolean;
+    professorId: string;
+    professorName: string | null;
+    notes: string | null;
+  };
+  dashboard: StudentDashboardData;
+  area: {
+    enrollmentId: string;
+    areaName: string;
+    blockName: string | null;
+    className: string;
+  };
+}
+
+interface StudentEvaluationDetailLoadResult {
+  pageData: StudentEvaluationDetailPageData | null;
+  emptyState: {
+    title: string;
+    description: string;
+  } | null;
+}
+
+interface StudentCurrentSemesterSnapshot {
+  studentRow: StudentRow;
+  selectedSemester: SemesterRow;
+  currentSemesterEnrollments: EnrollmentRow[];
+  classMap: Map<string, ClassRow>;
+  areaById: Map<string, AreaRow>;
+  blockById: Map<number, BlockRow>;
+  professorLinks: ProfessorLinkRow[];
+  professorUserMap: Map<string, UserRow>;
+  evaluationRowsByEnrollmentId: Map<string, EvaluationRow[]>;
+  evaluationItemsByEnrollmentId: Map<string, EvaluationItemRow[]>;
+  absenceRowsByEnrollmentId: Map<string, AbsenceRow[]>;
+  criterionRows: CriterionRow[];
+}
+
+interface StudentCurrentSemesterSnapshotLoadResult {
+  snapshot: StudentCurrentSemesterSnapshot | null;
+  emptyState: {
+    title: string;
+    description: string;
+  } | null;
+}
+
 interface ProfessorDashboardLoadResult {
   dashboard: ProfessorDashboardData | null;
   emptyState: {
@@ -706,6 +757,97 @@ export function buildStudentDashboardFromRows(input: {
   });
 }
 
+function compareEvaluationLaunchRecords(
+  left: EvaluationLaunch,
+  right: EvaluationLaunch
+) {
+  const publishedDifference = left.publishedAt.localeCompare(right.publishedAt);
+
+  if (publishedDifference !== 0) {
+    return publishedDifference;
+  }
+
+  const createdDifference = (left.createdAt ?? left.publishedAt).localeCompare(
+    right.createdAt ?? right.publishedAt
+  );
+
+  if (createdDifference !== 0) {
+    return createdDifference;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function buildStudentHistoricalEvaluationDetailFromRows(input: {
+  currentUserName?: string;
+  studentUser: UserRow;
+  studentRow: StudentRow;
+  enrollment: EnrollmentRow;
+  semester: SemesterRow;
+  classGroup: ClassRow;
+  professorLinks: ProfessorLinkRow[];
+  linkedProfessorUsers: UserRow[];
+  evaluationRows: EvaluationRow[];
+  evaluationItemRows: EvaluationItemRow[];
+  criterionRows: CriterionRow[];
+  absenceRows: AbsenceRow[];
+  evaluationId: string;
+}) {
+  const professorIds = input.professorLinks.map((link) => link.professor_id);
+  const sortedTimelineEvaluations = buildEvaluationLaunches(
+    input.evaluationRows,
+    input.evaluationItemRows,
+    input.criterionRows,
+    input.enrollment.id
+  ).sort(compareEvaluationLaunchRecords);
+  const selectedEvaluationIndex = sortedTimelineEvaluations.findIndex(
+    (evaluation) => evaluation.id === input.evaluationId
+  );
+
+  if (selectedEvaluationIndex === -1) {
+    return null;
+  }
+
+  const selectedEvaluation = sortedTimelineEvaluations[selectedEvaluationIndex];
+  const evaluationSlice = sortedTimelineEvaluations.slice(0, selectedEvaluationIndex + 1);
+  const dashboard = buildStudentDashboardData({
+    student: buildStudentRecordFromRows({
+      currentUserName: input.currentUserName,
+      studentUser: input.studentUser,
+      studentRow: input.studentRow,
+      enrollment: input.enrollment,
+      semester: input.semester,
+      classGroup: input.classGroup,
+      professorIds
+    }),
+    semester: {
+      id: input.semester.id,
+      code: input.semester.codigo,
+      name: input.semester.nome,
+      startsAt: input.semester.data_inicio,
+      endsAt: input.semester.data_fim
+    },
+    classGroup: {
+      id: input.classGroup.id,
+      code: input.classGroup.codigo,
+      name: input.classGroup.nome,
+      internshipArea: input.classGroup.area_estagio
+    },
+    professors: buildProfessorRecords(
+      input.linkedProfessorUsers,
+      input.professorLinks
+    ),
+    evaluations: evaluationSlice,
+    effectiveEvaluations: evaluationSlice,
+    absences: buildAbsenceRecords(input.absenceRows, input.enrollment.id)
+  });
+
+  return {
+    dashboard,
+    selectedEvaluation
+  };
+}
+
 function resolveClassAreaSummary(
   classGroup: ClassRow,
   areaById: Map<string, AreaRow>,
@@ -757,6 +899,379 @@ function selectPrimarySemester(semesters: SemesterRow[]) {
       new Date(right.data_inicio).getTime() - new Date(left.data_inicio).getTime()
     );
   })[0];
+}
+
+function buildCurrentUserStudentUserRow(currentUser: SessionUser): UserRow {
+  return {
+    id: currentUser.id,
+    perfil_id: 0,
+    unidade_id: currentUser.unitId ?? null,
+    contexto_padrao_id: currentUser.contextoPadraoId ?? null,
+    email: currentUser.email,
+    nome_completo: currentUser.name,
+    ativo: true,
+    created_at: "",
+    updated_at: ""
+  };
+}
+
+function mapRowsByEnrollmentId<T extends { matricula_turma_id: string }>(rows: T[]) {
+  const rowsByEnrollmentId = new Map<string, T[]>();
+
+  for (const row of rows) {
+    const currentRows = rowsByEnrollmentId.get(row.matricula_turma_id) ?? [];
+    currentRows.push(row);
+    rowsByEnrollmentId.set(row.matricula_turma_id, currentRows);
+  }
+
+  return rowsByEnrollmentId;
+}
+
+function mapEvaluationItemsByEnrollmentId(
+  evaluationRows: EvaluationRow[],
+  evaluationItemRows: EvaluationItemRow[]
+) {
+  const enrollmentIdByEvaluationId = new Map(
+    evaluationRows.map((evaluation) => [evaluation.id, evaluation.matricula_turma_id])
+  );
+  const rowsByEnrollmentId = new Map<string, EvaluationItemRow[]>();
+
+  for (const item of evaluationItemRows) {
+    const enrollmentId = enrollmentIdByEvaluationId.get(item.avaliacao_id);
+
+    if (!enrollmentId) {
+      continue;
+    }
+
+    const currentRows = rowsByEnrollmentId.get(enrollmentId) ?? [];
+    currentRows.push(item);
+    rowsByEnrollmentId.set(enrollmentId, currentRows);
+  }
+
+  return rowsByEnrollmentId;
+}
+
+async function loadAuthenticatedStudentCurrentSemesterSnapshot(
+  currentUser: SessionUser
+): Promise<StudentCurrentSemesterSnapshotLoadResult> {
+  const supabase = await createSupabaseServerClient();
+
+  const { data: studentRowData, error: studentError } = await supabase
+    .from("alunos")
+    .select("*")
+    .eq("usuario_id", currentUser.id)
+    .maybeSingle();
+
+  if (studentError) {
+    return {
+      snapshot: null,
+      emptyState: {
+        title: "Não foi possível carregar seus dados acadêmicos",
+        description:
+          "Houve um problema ao consultar o cadastro do aluno. Tente novamente em instantes."
+      }
+    };
+  }
+
+  const studentRow = (studentRowData ?? null) as StudentRow | null;
+
+  if (!studentRow) {
+    return {
+      snapshot: null,
+      emptyState: {
+        title: "Dados acadêmicos ainda não disponíveis",
+        description:
+          "Seu usuário está autenticado, mas ainda não encontramos um cadastro em `public.alunos` vinculado a esta conta."
+      }
+    };
+  }
+
+  const { data: enrollmentRowsData, error: enrollmentError } = await supabase
+    .from("matriculas_turma")
+    .select("*")
+    .eq("aluno_id", currentUser.id);
+
+  if (enrollmentError) {
+    return {
+      snapshot: null,
+      emptyState: {
+        title: "Não foi possível carregar suas matrículas",
+        description:
+          "Houve um problema ao consultar as matrículas do seu estágio. Tente novamente em instantes."
+      }
+    };
+  }
+
+  const enrollmentRows = (enrollmentRowsData ?? []) as EnrollmentRow[];
+
+  if (!enrollmentRows.length) {
+    return {
+      snapshot: null,
+      emptyState: {
+        title: "Dados acadêmicos ainda não disponíveis",
+        description:
+          "Ainda não há matrículas vinculadas ao seu usuário para montar a navegação por área."
+      }
+    };
+  }
+
+  const classIds = [...new Set(enrollmentRows.map((row) => row.turma_id))];
+  const { data: classRowsData, error: classError } = await supabase
+    .from("turmas")
+    .select("*")
+    .in("id", classIds);
+
+  if (classError) {
+    return {
+      snapshot: null,
+      emptyState: {
+        title: "Não foi possível carregar suas turmas",
+        description:
+          "Houve um problema ao consultar as turmas vinculadas ao seu estágio."
+      }
+    };
+  }
+
+  const classRows = (classRowsData ?? []) as ClassRow[];
+  const semesterIds = [...new Set(classRows.map((row) => row.semestre_id))];
+  const semesterResult = semesterIds.length
+    ? await supabase.from("semestres").select("*").in("id", semesterIds)
+    : { data: [], error: null };
+
+  if (semesterResult.error) {
+    return {
+      snapshot: null,
+      emptyState: {
+        title: "Não foi possível carregar o semestre",
+        description:
+          "Houve um problema ao consultar o semestre acadêmico das suas turmas."
+      }
+    };
+  }
+
+  const semesterRows = filterSemestersToCurrentUnit(
+    (semesterResult.data ?? []) as SemesterRow[],
+    currentUser
+  );
+  const visibleClassRows = filterClassesToSemesters(classRows, semesterRows);
+  const classMap = new Map(visibleClassRows.map((classGroup) => [classGroup.id, classGroup]));
+  const visibleEnrollmentRows = filterEnrollmentsToClasses(
+    enrollmentRows,
+    visibleClassRows
+  );
+  const selectedSemester = selectPrimarySemester(semesterRows);
+
+  if (!selectedSemester) {
+    return {
+      snapshot: null,
+      emptyState: {
+        title: "Dados acadêmicos ainda não disponíveis",
+        description:
+          "Encontramos seu cadastro, mas ainda não há semestre consistente para montar a navegação."
+      }
+    };
+  }
+
+  const currentSemesterEnrollments = visibleEnrollmentRows.filter((enrollment) => {
+    const classGroup = classMap.get(enrollment.turma_id);
+
+    return (
+      classGroup?.semestre_id === selectedSemester.id &&
+      enrollment.status !== "cancelada"
+    );
+  });
+
+  if (!currentSemesterEnrollments.length) {
+    return {
+      snapshot: null,
+      emptyState: {
+        title: "Nenhuma área encontrada para o semestre atual",
+        description:
+          "Seu cadastro foi encontrado, mas ainda não há áreas de estágio vinculadas a você no semestre principal."
+      }
+    };
+  }
+
+  const currentSemesterClassIds = [
+    ...new Set(currentSemesterEnrollments.map((enrollment) => enrollment.turma_id))
+  ];
+  const currentSemesterClasses = visibleClassRows.filter((classGroup) =>
+    currentSemesterClassIds.includes(classGroup.id)
+  );
+  const areaIds = [
+    ...new Set(
+      currentSemesterClasses
+        .map((classGroup) => classGroup.area_estagio_id)
+        .filter(Boolean)
+    )
+  ] as string[];
+
+  const [areaRowsResult, blockRowsResult] = await Promise.all([
+    areaIds.length
+      ? supabase.from("areas_estagio").select("*").in("id", areaIds)
+      : Promise.resolve({ data: [], error: null }),
+    supabase.from("blocos_estagio").select("*").order("ordem", { ascending: true })
+  ]);
+
+  if (areaRowsResult.error || blockRowsResult.error) {
+    return {
+      snapshot: null,
+      emptyState: {
+        title: "Não foi possível carregar as áreas de estágio",
+        description:
+          "Encontramos suas matrículas do semestre, mas faltou contexto de áreas e blocos para montar a navegação."
+      }
+    };
+  }
+
+  const currentSemesterEnrollmentIds = currentSemesterEnrollments.map(
+    (enrollment) => enrollment.id
+  );
+  const [professorLinksResult, evaluationsResult, absencesResult] = await Promise.all([
+    supabase
+      .from("vinculos_professor_aluno")
+      .select("*")
+      .in("matricula_turma_id", currentSemesterEnrollmentIds)
+      .eq("ativo", true),
+    supabase
+      .from("avaliacoes")
+      .select("*")
+      .in("matricula_turma_id", currentSemesterEnrollmentIds)
+      .eq("status", "publicado")
+      .order("avaliado_em", { ascending: true }),
+    supabase
+      .from("ausencias")
+      .select("*")
+      .in("matricula_turma_id", currentSemesterEnrollmentIds)
+      .order("data_ausencia", { ascending: true })
+  ]);
+
+  if (professorLinksResult.error || evaluationsResult.error || absencesResult.error) {
+    return {
+      snapshot: null,
+      emptyState: {
+        title: "Não foi possível carregar seu histórico acadêmico",
+        description:
+          "Houve um problema ao consultar professores, avaliações ou ausências das suas áreas de estágio."
+      }
+    };
+  }
+
+  const professorLinks = (professorLinksResult.data ?? []) as ProfessorLinkRow[];
+  const evaluationRows = (evaluationsResult.data ?? []) as EvaluationRow[];
+  const absenceRows = (absencesResult.data ?? []) as AbsenceRow[];
+  const areaRows = (areaRowsResult.data ?? []) as AreaRow[];
+  const blockRows = (blockRowsResult.data ?? []) as BlockRow[];
+  const professorIds = [...new Set(professorLinks.map((link) => link.professor_id))];
+  const evaluationIds = [...new Set(evaluationRows.map((evaluation) => evaluation.id))];
+
+  const [professorUsersResult, evaluationItemsResult] = await Promise.all([
+    professorIds.length
+      ? currentUser.unitId
+        ? supabase
+            .from("usuarios")
+            .select("*")
+            .in("id", professorIds)
+            .eq("unidade_id", currentUser.unitId)
+        : supabase.from("usuarios").select("*").in("id", professorIds)
+      : Promise.resolve({ data: [], error: null }),
+    evaluationIds.length
+      ? supabase
+          .from("itens_avaliados")
+          .select("*")
+          .in("avaliacao_id", evaluationIds)
+      : Promise.resolve({ data: [], error: null })
+  ]);
+
+  if (evaluationItemsResult.error) {
+    return {
+      snapshot: null,
+      emptyState: {
+        title: "Não foi possível carregar os itens avaliados",
+        description:
+          "As avaliações foram encontradas, mas os subitens necessários para montar a visão por área não puderam ser consultados."
+      }
+    };
+  }
+
+  const linkedProfessorUsers = (professorUsersResult.data ?? []) as UserRow[];
+  const evaluationItemRows = (evaluationItemsResult.data ?? []) as EvaluationItemRow[];
+  const criterionIds = [...new Set(evaluationItemRows.map((item) => item.criterio_id))];
+  const criteriaResult = criterionIds.length
+    ? await supabase.from("criterios_avaliacao").select("*").in("id", criterionIds)
+    : { data: [], error: null };
+
+  if (criteriaResult.error) {
+    return {
+      snapshot: null,
+      emptyState: {
+        title: "Não foi possível carregar a rubrica de avaliação",
+        description:
+          "Os critérios de avaliação não puderam ser consultados para montar o detalhamento por área."
+      }
+    };
+  }
+
+  return {
+    snapshot: {
+      studentRow,
+      selectedSemester,
+      currentSemesterEnrollments,
+      classMap,
+      areaById: new Map(areaRows.map((area) => [area.id, area])),
+      blockById: new Map(blockRows.map((block) => [block.id, block])),
+      professorLinks,
+      professorUserMap: new Map(linkedProfessorUsers.map((user) => [user.id, user])),
+      evaluationRowsByEnrollmentId: mapRowsByEnrollmentId(evaluationRows),
+      evaluationItemsByEnrollmentId: mapEvaluationItemsByEnrollmentId(
+        evaluationRows,
+        evaluationItemRows
+      ),
+      absenceRowsByEnrollmentId: mapRowsByEnrollmentId(absenceRows),
+      criterionRows: (criteriaResult.data ?? []) as CriterionRow[]
+    },
+    emptyState: null
+  };
+}
+
+function buildStudentDashboardForCurrentSemesterEnrollment(input: {
+  currentUser: SessionUser;
+  snapshot: StudentCurrentSemesterSnapshot;
+  enrollment: EnrollmentRow;
+}) {
+  const classGroup = input.snapshot.classMap.get(input.enrollment.turma_id);
+
+  if (!classGroup) {
+    return null;
+  }
+
+  const enrollmentProfessorLinks = input.snapshot.professorLinks.filter(
+    (link) => link.matricula_turma_id === input.enrollment.id
+  );
+  const enrollmentProfessorUsers = enrollmentProfessorLinks
+    .map((link) => input.snapshot.professorUserMap.get(link.professor_id))
+    .filter(Boolean) as UserRow[];
+  const enrollmentEvaluations =
+    input.snapshot.evaluationRowsByEnrollmentId.get(input.enrollment.id) ?? [];
+  const enrollmentEvaluationItems =
+    input.snapshot.evaluationItemsByEnrollmentId.get(input.enrollment.id) ?? [];
+  const enrollmentAbsences =
+    input.snapshot.absenceRowsByEnrollmentId.get(input.enrollment.id) ?? [];
+
+  return buildStudentDashboardFromRows({
+    currentUserName: input.currentUser.name,
+    studentUser: buildCurrentUserStudentUserRow(input.currentUser),
+    studentRow: input.snapshot.studentRow,
+    enrollment: input.enrollment,
+    semester: input.snapshot.selectedSemester,
+    classGroup,
+    professorLinks: enrollmentProfessorLinks,
+    linkedProfessorUsers: enrollmentProfessorUsers,
+    evaluationRows: enrollmentEvaluations,
+    evaluationItemRows: enrollmentEvaluationItems,
+    criterionRows: input.snapshot.criterionRows,
+    absenceRows: enrollmentAbsences
+  });
 }
 
 function getYearMonthInSaoPaulo(value: string | Date) {
@@ -1034,273 +1549,41 @@ export async function getAuthenticatedStudentDashboardPageData(
   currentUser: SessionUser,
   requestedEnrollmentId?: string | null
 ): Promise<StudentDashboardPageLoadResult> {
-  const supabase = await createSupabaseServerClient();
+  const { snapshot, emptyState } =
+    await loadAuthenticatedStudentCurrentSemesterSnapshot(currentUser);
 
-  const { data: studentRowData, error: studentError } = await supabase
-    .from("alunos")
-    .select("*")
-    .eq("usuario_id", currentUser.id)
-    .maybeSingle();
-
-  if (studentError) {
-    return buildStudentPageEmptyState(
-      "Não foi possível carregar seus dados acadêmicos",
-      "Houve um problema ao consultar o cadastro do aluno. Tente novamente em instantes."
-    );
+  if (!snapshot || emptyState) {
+    return {
+      pageData: null,
+      emptyState
+    };
   }
 
-  const studentRow = (studentRowData ?? null) as StudentRow | null;
-
-  if (!studentRow) {
-    return buildStudentPageEmptyState(
-      "Dados acadêmicos ainda não disponíveis",
-      "Seu usuário está autenticado, mas ainda não encontramos um cadastro em `public.alunos` vinculado a esta conta."
-    );
-  }
-
-  const { data: enrollmentRowsData, error: enrollmentError } = await supabase
-    .from("matriculas_turma")
-    .select("*")
-    .eq("aluno_id", currentUser.id);
-
-  if (enrollmentError) {
-    return buildStudentPageEmptyState(
-      "Não foi possível carregar suas matrículas",
-      "Houve um problema ao consultar as matrículas do seu estágio. Tente novamente em instantes."
-    );
-  }
-
-  const enrollmentRows = (enrollmentRowsData ?? []) as EnrollmentRow[];
-
-  if (!enrollmentRows.length) {
-    return buildStudentPageEmptyState(
-      "Dados acadêmicos ainda não disponíveis",
-      "Ainda não há matrículas vinculadas ao seu usuário para montar a navegação por área."
-    );
-  }
-
-  const classIds = [...new Set(enrollmentRows.map((row) => row.turma_id))];
-  const { data: classRowsData, error: classError } = await supabase
-    .from("turmas")
-    .select("*")
-    .in("id", classIds);
-
-  if (classError) {
-    return buildStudentPageEmptyState(
-      "Não foi possível carregar suas turmas",
-      "Houve um problema ao consultar as turmas vinculadas ao seu estágio."
-    );
-  }
-
-  const classRows = (classRowsData ?? []) as ClassRow[];
-  const semesterIds = [...new Set(classRows.map((row) => row.semestre_id))];
-  const semesterResult = semesterIds.length
-    ? await supabase.from("semestres").select("*").in("id", semesterIds)
-    : { data: [], error: null };
-
-  if (semesterResult.error) {
-    return buildStudentPageEmptyState(
-      "Não foi possível carregar o semestre",
-      "Houve um problema ao consultar o semestre acadêmico das suas turmas."
-    );
-  }
-
-  const semesterRows = filterSemestersToCurrentUnit(
-    (semesterResult.data ?? []) as SemesterRow[],
-    currentUser
-  );
-  const visibleClassRows = filterClassesToSemesters(classRows, semesterRows);
-  const classMap = new Map(visibleClassRows.map((classGroup) => [classGroup.id, classGroup]));
-  const visibleEnrollmentRows = filterEnrollmentsToClasses(
-    enrollmentRows,
-    visibleClassRows
-  );
-  const selectedSemester = selectPrimarySemester(semesterRows);
-
-  if (!selectedSemester) {
-    return buildStudentPageEmptyState(
-      "Dados acadêmicos ainda não disponíveis",
-      "Encontramos seu cadastro, mas ainda não há semestre consistente para montar a navegação."
-    );
-  }
-
-  const currentSemesterEnrollments = visibleEnrollmentRows.filter((enrollment) => {
-    const classGroup = classMap.get(enrollment.turma_id);
-
-    return (
-      classGroup?.semestre_id === selectedSemester.id &&
-      enrollment.status !== "cancelada"
-    );
-  });
-
-  if (!currentSemesterEnrollments.length) {
-    return buildStudentPageEmptyState(
-      "Nenhuma área encontrada para o semestre atual",
-      "Seu cadastro foi encontrado, mas ainda não há áreas de estágio vinculadas a você no semestre principal."
-    );
-  }
-
-  const currentSemesterClassIds = [
-    ...new Set(currentSemesterEnrollments.map((enrollment) => enrollment.turma_id))
-  ];
-  const currentSemesterClasses = visibleClassRows.filter((classGroup) =>
-    currentSemesterClassIds.includes(classGroup.id)
-  );
-  const areaIds = [
-    ...new Set(
-      currentSemesterClasses
-        .map((classGroup) => classGroup.area_estagio_id)
-        .filter(Boolean)
-    )
-  ] as string[];
-
-  const [areaRowsResult, blockRowsResult] = await Promise.all([
-    areaIds.length
-      ? supabase.from("areas_estagio").select("*").in("id", areaIds)
-      : Promise.resolve({ data: [], error: null }),
-    supabase.from("blocos_estagio").select("*").order("ordem", { ascending: true })
-  ]);
-
-  if (areaRowsResult.error || blockRowsResult.error) {
-    return buildStudentPageEmptyState(
-      "Não foi possível carregar as áreas de estágio",
-      "Encontramos suas matrículas do semestre, mas faltou contexto de áreas e blocos para montar a navegação."
-    );
-  }
-
-  const currentSemesterEnrollmentIds = currentSemesterEnrollments.map(
-    (enrollment) => enrollment.id
-  );
-  const [professorLinksResult, evaluationsResult, absencesResult] = await Promise.all([
-    supabase
-      .from("vinculos_professor_aluno")
-      .select("*")
-      .in("matricula_turma_id", currentSemesterEnrollmentIds)
-      .eq("ativo", true),
-    supabase
-      .from("avaliacoes")
-      .select("*")
-      .in("matricula_turma_id", currentSemesterEnrollmentIds)
-      .eq("status", "publicado")
-      .order("avaliado_em", { ascending: true }),
-    supabase
-      .from("ausencias")
-      .select("*")
-      .in("matricula_turma_id", currentSemesterEnrollmentIds)
-      .order("data_ausencia", { ascending: true })
-  ]);
-
-  if (professorLinksResult.error || evaluationsResult.error || absencesResult.error) {
-    return buildStudentPageEmptyState(
-      "Não foi possível carregar seu histórico acadêmico",
-      "Houve um problema ao consultar professores, avaliações ou ausências das suas áreas de estágio."
-    );
-  }
-
-  const professorLinks = (professorLinksResult.data ?? []) as ProfessorLinkRow[];
-  const evaluationRows = (evaluationsResult.data ?? []) as EvaluationRow[];
-  const absenceRows = (absencesResult.data ?? []) as AbsenceRow[];
-  const areaRows = (areaRowsResult.data ?? []) as AreaRow[];
-  const blockRows = (blockRowsResult.data ?? []) as BlockRow[];
-  const professorIds = [...new Set(professorLinks.map((link) => link.professor_id))];
-  const evaluationIds = [...new Set(evaluationRows.map((evaluation) => evaluation.id))];
-
-  const [professorUsersResult, evaluationItemsResult] = await Promise.all([
-    professorIds.length
-      ? currentUser.unitId
-        ? supabase
-            .from("usuarios")
-            .select("*")
-            .in("id", professorIds)
-            .eq("unidade_id", currentUser.unitId)
-        : supabase.from("usuarios").select("*").in("id", professorIds)
-      : Promise.resolve({ data: [], error: null }),
-    evaluationIds.length
-      ? supabase
-          .from("itens_avaliados")
-          .select("*")
-          .in("avaliacao_id", evaluationIds)
-      : Promise.resolve({ data: [], error: null })
-  ]);
-
-  if (evaluationItemsResult.error) {
-    return buildStudentPageEmptyState(
-      "Não foi possível carregar os itens avaliados",
-      "As avaliações foram encontradas, mas os subitens necessários para montar a visão por área não puderam ser consultados."
-    );
-  }
-
-  const linkedProfessorUsers = (professorUsersResult.data ?? []) as UserRow[];
-  const evaluationItemRows = (evaluationItemsResult.data ?? []) as EvaluationItemRow[];
-  const criterionIds = [...new Set(evaluationItemRows.map((item) => item.criterio_id))];
-  const criteriaResult = criterionIds.length
-    ? await supabase.from("criterios_avaliacao").select("*").in("id", criterionIds)
-    : { data: [], error: null };
-
-  if (criteriaResult.error) {
-    return buildStudentPageEmptyState(
-      "Não foi possível carregar a rubrica de avaliação",
-      "Os critérios de avaliação não puderam ser consultados para montar o detalhamento por área."
-    );
-  }
-
-  const criterionRows = (criteriaResult.data ?? []) as CriterionRow[];
-  const areaById = new Map(areaRows.map((área) => [área.id, área]));
-  const blockById = new Map(blockRows.map((block) => [block.id, block]));
-  const professorUserMap = new Map(linkedProfessorUsers.map((user) => [user.id, user]));
   const dashboardsByEnrollmentId = new Map<string, StudentDashboardData>();
   const recentUpdateAtByEnrollmentId = new Map<string, string | null>();
   const areaSummaries: StudentSemesterAreaSummary[] = [];
 
-  for (const enrollment of currentSemesterEnrollments) {
-    const classGroup = classMap.get(enrollment.turma_id);
+  for (const enrollment of snapshot.currentSemesterEnrollments) {
+    const classGroup = snapshot.classMap.get(enrollment.turma_id);
+    const enrollmentDashboard = buildStudentDashboardForCurrentSemesterEnrollment({
+      currentUser,
+      snapshot,
+      enrollment
+    });
 
-    if (!classGroup) {
+    if (!classGroup || !enrollmentDashboard) {
       continue;
     }
 
-    const enrollmentProfessorLinks = professorLinks.filter(
+    const enrollmentProfessorLinks = snapshot.professorLinks.filter(
       (link) => link.matricula_turma_id === enrollment.id
     );
-    const enrollmentProfessorUsers = enrollmentProfessorLinks
-      .map((link) => professorUserMap.get(link.professor_id))
-      .filter(Boolean) as UserRow[];
-    const enrollmentEvaluations = evaluationRows.filter(
-      (evaluation) => evaluation.matricula_turma_id === enrollment.id
-    );
-    const enrollmentEvaluationIds = new Set(
-      enrollmentEvaluations.map((evaluation) => evaluation.id)
-    );
-    const enrollmentEvaluationItems = evaluationItemRows.filter((item) =>
-      enrollmentEvaluationIds.has(item.avaliacao_id)
-    );
-    const enrollmentAbsences = absenceRows.filter(
-      (absence) => absence.matricula_turma_id === enrollment.id
-    );
-    const enrollmentDashboard = buildStudentDashboardFromRows({
-      currentUserName: currentUser.name,
-      studentUser: {
-        id: currentUser.id,
-        perfil_id: 0,
-        unidade_id: currentUser.unitId ?? null,
-        contexto_padrao_id: currentUser.contextoPadraoId ?? null,
-        email: currentUser.email,
-        nome_completo: currentUser.name,
-        ativo: true,
-        created_at: "",
-        updated_at: ""
-      },
-      studentRow,
-      enrollment,
-      semester: selectedSemester,
-      classGroup,
-      professorLinks: enrollmentProfessorLinks,
-      linkedProfessorUsers: enrollmentProfessorUsers,
-      evaluationRows: enrollmentEvaluations,
-      evaluationItemRows: enrollmentEvaluationItems,
-      criterionRows,
-      absenceRows: enrollmentAbsences
-    });
+    const enrollmentEvaluations =
+      snapshot.evaluationRowsByEnrollmentId.get(enrollment.id) ?? [];
+    const enrollmentEvaluationItems =
+      snapshot.evaluationItemsByEnrollmentId.get(enrollment.id) ?? [];
+    const enrollmentAbsences =
+      snapshot.absenceRowsByEnrollmentId.get(enrollment.id) ?? [];
 
     dashboardsByEnrollmentId.set(enrollment.id, enrollmentDashboard);
     recentUpdateAtByEnrollmentId.set(
@@ -1315,7 +1598,11 @@ export async function getAuthenticatedStudentDashboardPageData(
       })
     );
 
-    const classArea = resolveClassAreaSummary(classGroup, areaById, blockById);
+    const classArea = resolveClassAreaSummary(
+      classGroup,
+      snapshot.areaById,
+      snapshot.blockById
+    );
     areaSummaries.push({
       enrollmentId: enrollment.id,
       areaName: classArea.areaName,
@@ -1378,16 +1665,16 @@ export async function getAuthenticatedStudentDashboardPageData(
       student: {
         id: currentUser.id,
         name: currentUser.name,
-        registration: studentRow.matricula,
+        registration: snapshot.studentRow.matricula,
         email: currentUser.email,
-        cellphone: studentRow.celular
+        cellphone: snapshot.studentRow.celular
       },
       semester: {
-        id: selectedSemester.id,
-        code: selectedSemester.codigo,
-        name: selectedSemester.nome,
-        startsAt: selectedSemester.data_inicio,
-        endsAt: selectedSemester.data_fim
+        id: snapshot.selectedSemester.id,
+        code: snapshot.selectedSemester.codigo,
+        name: snapshot.selectedSemester.nome,
+        startsAt: snapshot.selectedSemester.data_inicio,
+        endsAt: snapshot.selectedSemester.data_fim
       },
       navigation: {
         currentView: selectedAreaDashboard ? "area" : "overview",
@@ -1406,6 +1693,115 @@ export async function getAuthenticatedStudentDashboardPageData(
       selectedAreaDashboard
     },
     emptyState: null
+  };
+}
+
+export async function getAuthenticatedStudentEvaluationDetailPageData(
+  currentUser: SessionUser,
+  evaluationId: string
+): Promise<StudentEvaluationDetailLoadResult> {
+  const normalizedEvaluationId = evaluationId.trim();
+
+  if (!normalizedEvaluationId) {
+    return {
+      pageData: null,
+      emptyState: {
+        title: "Avaliação não identificada",
+        description:
+          "O lançamento solicitado não foi informado corretamente para carregar o histórico."
+      }
+    };
+  }
+
+  const { snapshot, emptyState } =
+    await loadAuthenticatedStudentCurrentSemesterSnapshot(currentUser);
+
+  if (!snapshot || emptyState) {
+    return {
+      pageData: null,
+      emptyState
+    };
+  }
+
+  for (const enrollment of snapshot.currentSemesterEnrollments) {
+    const classGroup = snapshot.classMap.get(enrollment.turma_id);
+    const enrollmentEvaluations =
+      snapshot.evaluationRowsByEnrollmentId.get(enrollment.id) ?? [];
+
+    if (
+      !classGroup ||
+      !enrollmentEvaluations.some((evaluation) => evaluation.id === normalizedEvaluationId)
+    ) {
+      continue;
+    }
+
+    const enrollmentProfessorLinks = snapshot.professorLinks.filter(
+      (link) => link.matricula_turma_id === enrollment.id
+    );
+    const enrollmentProfessorUsers = enrollmentProfessorLinks
+      .map((link) => snapshot.professorUserMap.get(link.professor_id))
+      .filter(Boolean) as UserRow[];
+    const detail = buildStudentHistoricalEvaluationDetailFromRows({
+      currentUserName: currentUser.name,
+      studentUser: buildCurrentUserStudentUserRow(currentUser),
+      studentRow: snapshot.studentRow,
+      enrollment,
+      semester: snapshot.selectedSemester,
+      classGroup,
+      professorLinks: enrollmentProfessorLinks,
+      linkedProfessorUsers: enrollmentProfessorUsers,
+      evaluationRows: enrollmentEvaluations,
+      evaluationItemRows:
+        snapshot.evaluationItemsByEnrollmentId.get(enrollment.id) ?? [],
+      criterionRows: snapshot.criterionRows,
+      absenceRows: snapshot.absenceRowsByEnrollmentId.get(enrollment.id) ?? [],
+      evaluationId: normalizedEvaluationId
+    });
+
+    if (!detail) {
+      continue;
+    }
+
+    const classArea = resolveClassAreaSummary(
+      classGroup,
+      snapshot.areaById,
+      snapshot.blockById
+    );
+    const selectedProfessorName =
+      snapshot.professorUserMap.get(detail.selectedEvaluation.professorId)?.nome_completo ??
+      null;
+
+    return {
+      pageData: {
+        evaluation: {
+          id: detail.selectedEvaluation.id,
+          launchType: detail.selectedEvaluation.launchType,
+          publishedAt: detail.selectedEvaluation.publishedAt,
+          reference: detail.selectedEvaluation.reference,
+          isLegacyRecord: detail.selectedEvaluation.isLegacyRecord ?? false,
+          professorId: detail.selectedEvaluation.professorId,
+          professorName: selectedProfessorName,
+          notes: detail.selectedEvaluation.notes ?? null
+        },
+        dashboard: detail.dashboard,
+        area: {
+          enrollmentId: enrollment.id,
+          areaName: classArea.areaName,
+          blockName: classArea.blockName,
+          className: classGroup.nome
+        }
+      },
+      emptyState: null
+    };
+  }
+
+  return {
+    pageData: null,
+    emptyState: {
+      title: "Avaliação não disponível",
+      description:
+        "O lançamento solicitado não pertence ao aluno autenticado ou não está disponível no semestre atual."
+    }
   };
 }
 

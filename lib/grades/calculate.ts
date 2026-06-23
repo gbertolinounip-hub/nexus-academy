@@ -187,6 +187,7 @@ function buildProgress(
     }));
 
     return {
+      evaluationId: evaluation.id,
       label: evaluation.reference,
       launchType: evaluation.launchType,
       publishedAt: evaluation.publishedAt,

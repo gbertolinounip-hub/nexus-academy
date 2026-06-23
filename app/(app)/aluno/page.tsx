@@ -1,3 +1,5 @@
+import Link from "next/link";
+import type { Route } from "next";
 import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
 import { ProgressBars } from "@/components/dashboard/progress-bars";
@@ -70,7 +72,7 @@ function renderAreaDashboard(dashboard: StudentDashboardData) {
             <div className="timeline">
               {dashboard.progress.map((point) => (
                 <article
-                  key={`${point.label}-${point.publishedAt}`}
+                  key={`${point.evaluationId}-${point.publishedAt}`}
                   className="timeline-item"
                 >
                   <div className="timeline-item-header">
@@ -86,6 +88,14 @@ function renderAreaDashboard(dashboard: StudentDashboardData) {
                     <span>Desconto: {formatPercentage(point.absencePenaltyPercentage)}</span>
                     <span>Total: {formatPercentage(point.finalPercentage)}</span>
                     <span>Conclusão: {formatPercentage(point.completionRate)}</span>
+                  </div>
+                  <div className="actions-row">
+                    <Link
+                      href={`/aluno/avaliacoes/${point.evaluationId}` as Route}
+                      className="button button-secondary button-small"
+                    >
+                      Ver avaliação
+                    </Link>
                   </div>
                 </article>
               ))}

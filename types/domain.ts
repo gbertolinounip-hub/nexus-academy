@@ -566,6 +566,7 @@ export interface StudentGroupSnapshot {
 }
 
 export interface StudentProgressPoint {
+  evaluationId: string;
   label: string;
   launchType: "parcial" | "revisao" | "fechamento";
   publishedAt: string;
