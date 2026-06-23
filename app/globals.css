@@ -3153,6 +3153,98 @@ textarea.input:focus {
   white-space: nowrap;
 }
 
+.clinical-indicators-dashboard {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.clinical-indicators-dashboard .hero-card,
+.clinical-indicators-dashboard .card,
+.clinical-indicators-dashboard .table-wrap,
+.clinical-indicators-dashboard .metrics-grid {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.clinical-indicators-dashboard .table-helper,
+.clinical-indicators-dashboard .card-header p {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.clinical-indicators-filter-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: end;
+}
+
+.clinical-indicators-filter-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.clinical-indicators-breakdown-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.clinical-indicators-breakdown-grid .card,
+.clinical-indicators-breakdown-grid .table-wrap {
+  min-width: 0;
+  width: 100%;
+}
+
+.clinical-indicators-breakdown-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.clinical-indicators-breakdown-card .card-header {
+  flex-shrink: 0;
+}
+
+.clinical-indicators-breakdown-table-wrap {
+  max-height: 420px;
+  overflow-x: auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.clinical-indicators-breakdown-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.clinical-indicators-breakdown-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(248, 250, 252, 0.98);
+}
+
+.clinical-indicators-breakdown-table th,
+.clinical-indicators-breakdown-table td {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.clinical-indicators-breakdown-table th:first-child,
+.clinical-indicators-breakdown-table td:first-child {
+  width: 32%;
+}
+
+.clinical-indicators-breakdown-identity strong {
+  display: block;
+}
+
 .student-documents-page {
   min-width: 0;
   overflow-x: hidden;
@@ -5868,6 +5960,14 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
 
   .clinical-attendance-filter-actions {
     justify-content: flex-start;
+  }
+
+  .clinical-indicators-filter-form {
+    grid-template-columns: 1fr;
+  }
+
+  .clinical-indicators-breakdown-grid {
+    grid-template-columns: 1fr;
   }
 
   .clinical-pending-evolution-item {

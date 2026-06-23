@@ -28,6 +28,17 @@ export function buildExcelDownloadResponse(filename: string, content: Buffer) {
   });
 }
 
+export function buildXlsxDownloadResponse(filename: string, content: Buffer) {
+  return new Response(new Uint8Array(content), {
+    headers: {
+      "Content-Type":
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="${filename}.xlsx"`,
+      "Cache-Control": "no-store"
+    }
+  });
+}
+
 export function buildUnauthorizedDownloadResponse() {
   return new Response("Não autenticado.", { status: 401 });
 }

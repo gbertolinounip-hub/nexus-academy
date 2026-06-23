@@ -32,6 +32,11 @@ export const navigationItems: NavigationItem[] = [
     allowedRoles: ["aluno", "professor", "secretaria"]
   },
   {
+    href: "/clinica-supervisionada/indicadores" as Route,
+    label: "Indicadores clínicos",
+    allowedRoles: ["professor"]
+  },
+  {
     href: "/documentos" as Route,
     label: "Documentos",
     allowedRoles: ["aluno"]
@@ -117,6 +122,11 @@ export const navigationItems: NavigationItem[] = [
     allowedRoles: ["coordenador_master"]
   },
   {
+    href: "/master/clinica-supervisionada/indicadores" as Route,
+    label: "Indicadores clínicos",
+    allowedRoles: ["coordenador_master"]
+  },
+  {
     href: "/master/documentos" as Route,
     label: "Documentos",
     allowedRoles: ["coordenador_master"]
@@ -129,6 +139,11 @@ export const navigationItems: NavigationItem[] = [
   {
     href: "/coordenador/clinica-supervisionada" as Route,
     label: "Gestão clínica",
+    allowedRoles: ["coordenador"]
+  },
+  {
+    href: "/coordenador/clinica-supervisionada/indicadores" as Route,
+    label: "Indicadores clínicos",
     allowedRoles: ["coordenador"]
   },
   {
@@ -208,6 +223,12 @@ export function getNavigationForUser(currentUser: SessionUser) {
         label: "Gestão do curso",
         allowedRoles: [currentUser.role]
       });
+    }
+
+    for (const link of links) {
+      if (link.href === ("/coordenador/clinica-supervisionada/indicadores" as Route)) {
+        link.href = "/master-curso/clinica-supervisionada/indicadores" as Route;
+      }
     }
   }
 
