@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Nexus Academy offline</title>
+    <meta name="theme-color" content="#153e90" />
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f8fafc;
+        --text: #1c2e4a;
+        --muted: #5e718d;
+        --brand: #153e90;
+        --line: rgba(21, 62, 144, 0.14);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 1.5rem;
+        font-family:
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(46, 115, 210, 0.14), transparent 24%),
+          linear-gradient(180deg, #fbfdff 0%, var(--bg) 100%);
+      }
+
+      main {
+        width: min(100%, 28rem);
+        padding: 2rem;
+        border: 1px solid var(--line);
+        border-radius: 1.5rem;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 24px 50px rgba(21, 62, 144, 0.1);
+      }
+
+      .eyebrow {
+        margin: 0 0 0.6rem;
+        color: var(--brand);
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(1.8rem, 5vw, 2.3rem);
+        line-height: 1.05;
+      }
+
+      p {
+        margin: 0.9rem 0 0;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">Nexus Academy</p>
+      <h1>Você está offline.</h1>
+      <p>Conecte-se novamente à internet para acessar os dados do Nexus Academy.</p>
+    </main>
+  </body>
+</html>
