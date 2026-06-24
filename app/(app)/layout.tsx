@@ -1,5 +1,8 @@
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
-import { getNavigationForUser } from "@/lib/auth/navigation";
+import {
+  getNavigationForUser,
+  type NavigationItem
+} from "@/lib/auth/navigation";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { joinDisplayParts } from "@/lib/utils/format";
 import { getAuthenticatedStudentDashboardPageData } from "@/services/dashboard";
@@ -29,6 +32,41 @@ export default async function AppLayout({
     currentUser.role === "professor"
       ? await getProfessorPendingStudentDocumentCount(currentUser)
       : 0;
+  function mapNavigationBadges(items: NavigationItem[]): NavigationItem[] {
+    return items.map((item) => {
+      const nextItem: NavigationItem =
+        String(item.href) === "/clinica-supervisionada"
+          ? {
+              ...item,
+              badgeCount:
+                clinicalUnreadNotificationCount > 0
+                  ? clinicalUnreadNotificationCount
+                  : undefined
+            }
+          : String(item.href) === "/documentos"
+            ? {
+                ...item,
+                badgeCount:
+                  studentDocumentUnreadNotificationCount > 0
+                    ? studentDocumentUnreadNotificationCount
+                    : undefined
+              }
+            : String(item.href) === "/professor/documentos"
+              ? {
+                  ...item,
+                  badgeCount:
+                    professorPendingStudentDocumentCount > 0
+                      ? professorPendingStudentDocumentCount
+                      : undefined
+                }
+              : { ...item };
+
+      return {
+        ...nextItem,
+        children: nextItem.children ? mapNavigationBadges(nextItem.children) : undefined
+      };
+    });
+  }
   const studentSecondaryNavigationItems =
     currentUser.role === "aluno"
       ? studentDashboardLoad?.pageData?.navigation.areas.map((area) => ({
@@ -44,33 +82,7 @@ export default async function AppLayout({
           ])
         })) ?? []
       : [];
-  const navigationItems = getNavigationForUser(currentUser).map((item) =>
-    String(item.href) === "/clinica-supervisionada"
-      ? {
-          ...item,
-          badgeCount:
-            clinicalUnreadNotificationCount > 0
-              ? clinicalUnreadNotificationCount
-              : undefined
-        }
-      : String(item.href) === "/documentos"
-        ? {
-            ...item,
-            badgeCount:
-              studentDocumentUnreadNotificationCount > 0
-                ? studentDocumentUnreadNotificationCount
-                : undefined
-          }
-        : String(item.href) === "/professor/documentos"
-          ? {
-              ...item,
-              badgeCount:
-                professorPendingStudentDocumentCount > 0
-                  ? professorPendingStudentDocumentCount
-                  : undefined
-            }
-        : item
-  );
+  const navigationItems = mapNavigationBadges(getNavigationForUser(currentUser));
 
   return (
     <DashboardShell

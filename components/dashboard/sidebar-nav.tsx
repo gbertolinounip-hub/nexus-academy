@@ -24,17 +24,24 @@ export function SidebarNav({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const activeEnrollmentId = searchParams.get("matricula");
-  const hasStudentOverviewLink = links.some((link) => link.href === ("/aluno" as Route));
+  const flattenNavigationLinks = (
+    items: NavigationItem[]
+  ): Array<NavigationItem & { href: string }> => {
+    return items.flatMap((item) => [
+      ...(item.href ? [{ ...item, href: item.href }] : []),
+      ...(item.children ? flattenNavigationLinks(item.children) : [])
+    ]);
+  };
+  const hasStudentOverviewLink = links.some((link) => link.href === "/aluno");
   const studentClinicalLink = links.find(
-    (link) =>
-      hasStudentOverviewLink &&
-      link.href === ("/clinica-supervisionada" as Route)
+    (link): link is NavigationItem & { href: string } =>
+      hasStudentOverviewLink && link.href === "/clinica-supervisionada"
   );
   const visibleLinks = studentClinicalLink
     ? links.filter((link) => link.href !== studentClinicalLink.href)
     : links;
   const activeLinkHref =
-    [...links]
+    [...flattenNavigationLinks(links)]
       .sort((left, right) => right.href.length - left.href.length)
       .find((link) => pathname === link.href || pathname.startsWith(`${link.href}/`))
       ?.href ?? null;
@@ -87,19 +94,63 @@ export function SidebarNav({
     );
   }
 
+  function renderNestedLink(link: NavigationItem) {
+    if (!link.href) {
+      return null;
+    }
+
+    const isActive = activeLinkHref === link.href;
+
+    return (
+      <Link
+        key={link.href}
+        className={isActive ? "sidebar-sublink sidebar-sublink-active" : "sidebar-sublink"}
+        href={link.href as Route}
+      >
+        <strong>{renderNavigationLabel(link.label, link.badgeCount)}</strong>
+        {link.description ? <span>{link.description}</span> : null}
+      </Link>
+    );
+  }
+
   return (
     <nav className="sidebar-nav">
       {visibleLinks.map((link) => {
-        const isActive = activeLinkHref === link.href;
+        const isActive = Boolean(link.href) && activeLinkHref === link.href;
+        const hasActiveChild = Boolean(
+          link.children?.some((child) => child.href && activeLinkHref === child.href)
+        );
         const showSecondaryNavigation =
           link.href === "/aluno" &&
           (secondaryNavigationItems.length > 0 || Boolean(studentClinicalLink));
+        const showChildNavigation = Boolean(link.children?.length);
 
         return (
-          <div key={link.href} className="sidebar-nav-item">
-            <Link className={isActive ? "sidebar-link active" : "sidebar-link"} href={link.href}>
-              {renderNavigationLabel(link.label, link.badgeCount)}
-            </Link>
+          <div key={link.href ?? `group-${link.label}`} className="sidebar-nav-item">
+            {link.href ? (
+              <Link
+                className={isActive ? "sidebar-link active" : "sidebar-link"}
+                href={link.href as Route}
+              >
+                {renderNavigationLabel(link.label, link.badgeCount)}
+              </Link>
+            ) : (
+              <div
+                className={
+                  hasActiveChild
+                    ? "sidebar-nav-group-label sidebar-nav-group-label-active"
+                    : "sidebar-nav-group-label"
+                }
+              >
+                {renderNavigationLabel(link.label, link.badgeCount)}
+              </div>
+            )}
+
+            {showChildNavigation ? (
+              <div className="sidebar-subnav">
+                {link.children?.map((child) => renderNestedLink(child))}
+              </div>
+            ) : null}
 
             {showSecondaryNavigation ? (
               <div className="sidebar-subnav">
@@ -138,7 +189,7 @@ export function SidebarNav({
                         ? "sidebar-sublink sidebar-sublink-active"
                         : "sidebar-sublink"
                     }
-                    href={studentClinicalLink.href}
+                    href={studentClinicalLink.href as Route}
                   >
                     <strong>
                       {renderNavigationLabel(

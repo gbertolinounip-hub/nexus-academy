@@ -261,6 +261,24 @@ select {
   gap: 0.45rem;
 }
 
+.sidebar-nav-group-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+  padding: 0.1rem 0.3rem 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sidebar-nav-group-label-active {
+  color: var(--brand);
+}
+
 .sidebar-link {
   position: relative;
   border-radius: 14px;

@@ -8,6 +8,14 @@ import {
 import type { ProfileCode, SessionUser } from "@/types/domain";
 
 export interface NavigationItem {
+  href?: string;
+  label: string;
+  description?: string;
+  badgeCount?: number;
+  children?: NavigationItem[];
+}
+
+interface NavigationDefinition {
   href: Route;
   label: string;
   allowedRoles: ProfileCode[];
@@ -22,7 +30,7 @@ export interface SecondaryNavigationItem {
   recentUpdateAt?: string | null;
 }
 
-export const navigationItems: NavigationItem[] = [
+export const navigationItems: NavigationDefinition[] = [
   { href: "/aluno" as Route, label: "Aluno", allowedRoles: ["aluno"] },
   { href: "/professor" as Route, label: "Professor", allowedRoles: ["professor"] },
   { href: "/secretaria" as Route, label: "Secretaria", allowedRoles: ["secretaria"] },
@@ -189,7 +197,127 @@ export const navigationItems: NavigationItem[] = [
 ];
 
 export function getNavigationForRole(role: ProfileCode) {
-  return navigationItems.filter((item) => item.allowedRoles.includes(role));
+  return navigationItems
+    .filter((item) => item.allowedRoles.includes(role))
+    .map<NavigationItem>((item) => ({
+      href: item.href,
+      label: item.label,
+      ...(typeof item.badgeCount === "number" ? { badgeCount: item.badgeCount } : {})
+    }));
+}
+
+function findNavigationLink(links: NavigationItem[], href: string) {
+  return links.find((link) => link.href === href) ?? null;
+}
+
+function buildProfessorNavigation(links: NavigationItem[]) {
+  const professorDashboardLink = findNavigationLink(links, "/professor" as Route);
+  const clinicalLink = findNavigationLink(links, "/clinica-supervisionada" as Route);
+  const patientsLink = findNavigationLink(links, "/pacientes" as Route);
+  const clinicalIndicatorsLink = findNavigationLink(
+    links,
+    "/clinica-supervisionada/indicadores" as Route
+  );
+  const evaluationsLink = findNavigationLink(links, "/avaliacoes" as Route);
+  const absencesLink = findNavigationLink(links, "/ausencias" as Route);
+  const professorDocumentsLink = findNavigationLink(
+    links,
+    "/professor/documentos" as Route
+  );
+  const reportsLink = findNavigationLink(links, "/relatorios" as Route);
+
+  const groupedLinks: NavigationItem[] = [];
+  const usedHrefs = new Set<string>();
+
+  if (professorDashboardLink?.href) {
+    groupedLinks.push({
+      ...professorDashboardLink,
+      label: "Professor"
+    });
+    usedHrefs.add(professorDashboardLink.href);
+  }
+
+  const clinicalChildren = [
+    clinicalLink
+      ? {
+          ...clinicalLink,
+          label: "Cl\u00ednica"
+        }
+      : null,
+    patientsLink
+      ? {
+          ...patientsLink,
+          label: "Pacientes"
+        }
+      : null,
+    clinicalIndicatorsLink
+      ? {
+          ...clinicalIndicatorsLink,
+          label: "Indicadores cl\u00ednicos"
+        }
+      : null
+  ].filter(Boolean) as NavigationItem[];
+
+  if (clinicalChildren.length > 0) {
+    groupedLinks.push({
+      label: "Cl\u00ednica supervisionada",
+      children: clinicalChildren
+    });
+
+    for (const child of clinicalChildren) {
+      if (child.href) {
+        usedHrefs.add(child.href);
+      }
+    }
+  }
+
+  const studentChildren = [
+    evaluationsLink
+      ? {
+          ...evaluationsLink,
+          label: "Lan\u00e7amentos"
+        }
+      : null,
+    absencesLink
+      ? {
+          ...absencesLink,
+          label: "Faltas"
+        }
+      : null,
+    professorDocumentsLink
+      ? {
+          ...professorDocumentsLink,
+          label: "Documentos"
+        }
+      : null
+  ].filter(Boolean) as NavigationItem[];
+
+  if (studentChildren.length > 0) {
+    groupedLinks.push({
+      label: "Alunos",
+      children: studentChildren
+    });
+
+    for (const child of studentChildren) {
+      if (child.href) {
+        usedHrefs.add(child.href);
+      }
+    }
+  }
+
+  if (reportsLink?.href) {
+    groupedLinks.push({
+      ...reportsLink,
+      label: "Relat\u00f3rios"
+    });
+    usedHrefs.add(reportsLink.href);
+  }
+
+  const remainingLinks = links.filter((link) => {
+    return link.href ? !usedHrefs.has(link.href) : true;
+  });
+
+  return [...groupedLinks, ...remainingLinks];
 }
 
 export function getNavigationForUser(currentUser: SessionUser) {
@@ -197,10 +325,10 @@ export function getNavigationForUser(currentUser: SessionUser) {
   const activeMasterCourseContext = getActiveMasterCourseContext(currentUser);
 
   if (activeMasterCourseContext) {
-    const hiddenCourseManagerLinks = new Set<Route>(["/gestao/tces" as Route]);
+    const hiddenCourseManagerLinks = new Set<string>(["/gestao/tces"]);
 
     for (let index = links.length - 1; index >= 0; index -= 1) {
-      if (hiddenCourseManagerLinks.has(links[index]?.href ?? ("" as Route))) {
+      if (hiddenCourseManagerLinks.has(links[index]?.href ?? "")) {
         links.splice(index, 1);
       }
     }
@@ -221,7 +349,6 @@ export function getNavigationForUser(currentUser: SessionUser) {
       links.unshift({
         href: "/master-curso" as Route,
         label: "Gestão do curso",
-        allowedRoles: [currentUser.role]
       });
     }
 
@@ -230,6 +357,10 @@ export function getNavigationForUser(currentUser: SessionUser) {
         link.href = "/master-curso/clinica-supervisionada/indicadores" as Route;
       }
     }
+  }
+
+  if (currentUser.role === "professor") {
+    return buildProfessorNavigation(links);
   }
 
   return links;
