@@ -119,14 +119,18 @@ function formatPreviousCriterionScore(score: number) {
   return score.toFixed(1).replace(".", ",");
 }
 
-function buildPreviousSubmissionLabel(previousSubmission: EvaluationCriterionPreviousSubmission) {
-  const scoreLabel = formatPreviousCriterionScore(previousSubmission.score);
-
+function buildPreviousSubmissionSummary(
+  previousSubmission: EvaluationCriterionPreviousSubmission
+) {
   if (previousSubmission.optionLabel) {
-    return `${previousSubmission.optionLabel} — ${scoreLabel} em ${formatDate(previousSubmission.evaluationDate)}`;
+    return previousSubmission.optionLabel;
   }
 
-  return `${scoreLabel} em ${formatDate(previousSubmission.evaluationDate)}`;
+  return "Lançamento anterior registrado sem opção textual.";
+}
+
+function buildPreviousSubmissionMeta(previousSubmission: EvaluationCriterionPreviousSubmission) {
+  return `Nota: ${formatPreviousCriterionScore(previousSubmission.score)} · Data: ${formatDate(previousSubmission.evaluationDate)}`;
 }
 
 function CriterionPreviousSubmissionNotice({
@@ -140,15 +144,19 @@ function CriterionPreviousSubmissionNotice({
 
   return (
     <div className="criterion-previous-submission">
-      <span className="criterion-previous-submission-label">
-        Último lançamento: {buildPreviousSubmissionLabel(previousSubmission)}
+      <span className="criterion-previous-submission-title">Último lançamento</span>
+      <span className="criterion-previous-submission-summary">
+        {buildPreviousSubmissionSummary(previousSubmission)}
+      </span>
+      <span className="criterion-previous-submission-meta">
+        {buildPreviousSubmissionMeta(previousSubmission)}
       </span>
       {previousSubmission.observation ? (
         <span
           className="criterion-previous-submission-feedback"
           title={previousSubmission.observation}
         >
-          Devolutiva anterior: {previousSubmission.observation}
+          <strong>Devolutiva anterior:</strong> {previousSubmission.observation}
         </span>
       ) : null}
     </div>
