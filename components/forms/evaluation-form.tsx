@@ -144,9 +144,8 @@ function CriterionPreviousSubmissionNotice({
 
   return (
     <div className="criterion-previous-submission">
-      <span className="criterion-previous-submission-title">Último lançamento</span>
       <span className="criterion-previous-submission-summary">
-        {buildPreviousSubmissionSummary(previousSubmission)}
+        <strong>Último lançamento:</strong> {buildPreviousSubmissionSummary(previousSubmission)}
       </span>
       <span className="criterion-previous-submission-meta">
         {buildPreviousSubmissionMeta(previousSubmission)}
@@ -205,7 +204,7 @@ function DescriptiveCriterionField({
         error || feedbackError ? " criterion-field-invalid" : ""
       }${changedInCurrent ? " criterion-field-changed" : ""}`}
     >
-      <span>{criterion.name}</span>
+      <span className="criterion-field-title">{criterion.name}</span>
       <span className="field-help">
         Peso {criterion.weightPercentage}% · escala de 0 a {criterion.maxScore}
       </span>
@@ -297,7 +296,7 @@ function RubricCriterionField({
         error || feedbackError ? " criterion-field-invalid" : ""
       }${changedInCurrent ? " criterion-field-changed" : ""}`}
     >
-      <span>{criterion.name}</span>
+      <span className="criterion-field-title">{criterion.name}</span>
       <span className="field-help">
         Peso {criterion.weightPercentage}% · nota definida pela opção selecionada
       </span>

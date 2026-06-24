@@ -1776,22 +1776,22 @@ textarea.input:focus {
   background: rgba(255, 255, 255, 0.42);
 }
 
-.criterion-previous-submission {
-  display: grid;
-  gap: 0.35rem;
-  margin: 0.2rem 0 0.25rem;
-  padding: 0.8rem 0.9rem;
-  border-radius: 16px;
-  background: linear-gradient(
-    180deg,
-    rgba(var(--highlight-rgb), 0.12),
-    rgba(var(--accent-rgb), 0.06)
-  );
-  border: 1px solid rgba(var(--accent-rgb), 0.18);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+.criterion-field-title {
+  color: var(--text) !important;
+  font-size: 1rem !important;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
 }
 
-.criterion-previous-submission-title,
+.criterion-previous-submission {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.05rem 0 0.2rem;
+  padding: 0.1rem 0 0.1rem 0.65rem;
+  border-left: 2px solid rgba(var(--accent-rgb), 0.18);
+}
+
 .criterion-previous-submission-summary,
 .criterion-previous-submission-meta,
 .criterion-previous-submission-feedback {
@@ -1801,35 +1801,32 @@ textarea.input:focus {
   word-break: break-word;
 }
 
-.criterion-previous-submission-title {
-  color: var(--brand);
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .criterion-previous-submission-summary {
-  color: var(--brand);
-  font-size: 0.86rem;
-  line-height: 1.5;
-}
-
-.criterion-previous-submission-meta {
-  color: rgba(var(--brand-rgb), 0.78);
-  font-size: 0.79rem;
-  font-weight: 600;
-  line-height: 1.4;
-}
-
-.criterion-previous-submission-feedback {
-  color: var(--muted);
+  color: rgba(var(--brand-rgb), 0.82);
   font-size: 0.8rem;
   line-height: 1.5;
 }
 
+.criterion-previous-submission-summary strong {
+  color: rgba(var(--brand-rgb), 0.88);
+  font-weight: 700;
+}
+
+.criterion-previous-submission-meta {
+  color: rgba(var(--brand-rgb), 0.68);
+  font-size: 0.76rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.criterion-previous-submission-feedback {
+  color: rgba(var(--brand-rgb), 0.72);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
 .criterion-previous-submission-feedback strong {
-  color: var(--brand);
+  color: rgba(var(--brand-rgb), 0.82);
 }
 
 .criterion-field-invalid {
