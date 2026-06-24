@@ -68,6 +68,7 @@ export interface EvaluationRubricCriterion {
   weightPercentage: number;
   maxScore: number;
   options: EvaluationRubricCriterionOption[];
+  previousSubmission?: EvaluationCriterionPreviousSubmission | null;
 }
 
 export interface EvaluationRubricCriterionOption {
@@ -77,6 +78,15 @@ export interface EvaluationRubricCriterionOption {
   scoreValue: number;
   order: number;
   active: boolean;
+}
+
+export interface EvaluationCriterionPreviousSubmission {
+  evaluationId: string;
+  evaluationDate: string;
+  launchType: EvaluationRow["tipo_lancamento"];
+  score: number;
+  optionLabel: string | null;
+  observation: string | null;
 }
 
 export interface EvaluationRubricGroup {
@@ -711,6 +721,20 @@ function serializeEvaluationRuntimeContext(
     applicationRuleSummary: runtimeContext.applicationRuleSummary,
     rubricGroups: runtimeContext.rubricGroups
   };
+}
+
+function cloneRubricGroupsWithPreviousSubmissions(
+  rubricGroups: EvaluationRubricGroup[],
+  previousSubmissionByCriterionId: Map<string, EvaluationCriterionPreviousSubmission>
+) {
+  return rubricGroups.map((group) => ({
+    ...group,
+    criteria: group.criteria.map((criterion) => ({
+      ...criterion,
+      previousSubmission:
+        previousSubmissionByCriterionId.get(criterion.id) ?? null
+    }))
+  }));
 }
 
 function sortRubricOptionRows(
@@ -2191,6 +2215,183 @@ function buildEvaluationChainBundle(
   };
 }
 
+async function loadPreviousCriterionSubmissionsForEnrollments(
+  currentUser: SessionUser,
+  runtimeContextsByEnrollmentId: Map<string, EvaluationRuntimeContext>
+) {
+  if (!runtimeContextsByEnrollmentId.size) {
+    return runtimeContextsByEnrollmentId;
+  }
+
+  const enrollmentIds = [...runtimeContextsByEnrollmentId.keys()];
+  const supabase = await createSupabaseServerClient();
+  const { data: evaluationRowsData, error: evaluationsError } = await supabase
+    .from("avaliacoes")
+    .select("id, professor_id, matricula_turma_id, tipo_lancamento, avaliado_em, created_at, status")
+    .eq("professor_id", currentUser.id)
+    .eq("status", "publicado")
+    .in("matricula_turma_id", enrollmentIds);
+
+  if (evaluationsError) {
+    throw new Error(
+      "Não foi possível carregar o histórico anterior dos critérios para este lançamento."
+    );
+  }
+
+  const evaluationRows = (evaluationRowsData ?? []) as Pick<
+    EvaluationRow,
+    "id" | "professor_id" | "matricula_turma_id" | "tipo_lancamento" | "avaliado_em" | "created_at" | "status"
+  >[];
+  const comparePublishedEvaluationSummaries = (
+    left: (typeof evaluationRows)[number],
+    right: (typeof evaluationRows)[number]
+  ) => {
+    const evaluatedDifference = safeSortableTimestamp(left.avaliado_em).localeCompare(
+      safeSortableTimestamp(right.avaliado_em)
+    );
+
+    if (evaluatedDifference !== 0) {
+      return evaluatedDifference;
+    }
+
+    const createdDifference = safeSortableTimestamp(left.created_at).localeCompare(
+      safeSortableTimestamp(right.created_at)
+    );
+
+    if (createdDifference !== 0) {
+      return createdDifference;
+    }
+
+    return left.id.localeCompare(right.id);
+  };
+  const evaluationIds = evaluationRows.map((evaluationRow) => evaluationRow.id);
+  const { data: evaluationItemsData, error: evaluationItemsError } = evaluationIds.length
+    ? await supabase
+        .from("itens_avaliados")
+        .select(
+          "avaliacao_id, criterio_id, criterio_modelo_avaliacao_id, opcao_criterio_modelo_avaliacao_id, nota_bruta, feedback, opcao_rotulo_snapshot"
+        )
+        .in("avaliacao_id", evaluationIds)
+    : { data: [], error: null };
+
+  if (evaluationItemsError) {
+    throw new Error(
+      "Não foi possível carregar os itens anteriores da rubrica para este lançamento."
+    );
+  }
+
+  const itemsByEvaluationId = mapEvaluationItemsByEvaluationId(
+    (evaluationItemsData ?? []) as EvaluationItemRow[]
+  );
+  const matcherByEnrollmentId = new Map<
+    string,
+    {
+      runtimeContext: EvaluationRuntimeContext;
+      currentCriterionIdByModelCriterionId: Map<string, string>;
+      currentCriterionIdByLegacyCriterionId: Map<string, string>;
+    }
+  >();
+
+  for (const [enrollmentId, runtimeContext] of runtimeContextsByEnrollmentId.entries()) {
+    const currentCriterionIdByModelCriterionId = new Map<string, string>();
+    const currentCriterionIdByLegacyCriterionId = new Map<string, string>();
+
+    for (const group of runtimeContext.rubricGroups) {
+      for (const criterion of group.criteria) {
+        if (criterion.modelCriterionId) {
+          currentCriterionIdByModelCriterionId.set(
+            criterion.modelCriterionId,
+            criterion.id
+          );
+        }
+
+        currentCriterionIdByLegacyCriterionId.set(criterion.legacyCriterionId, criterion.id);
+      }
+    }
+
+    matcherByEnrollmentId.set(enrollmentId, {
+      runtimeContext,
+      currentCriterionIdByModelCriterionId,
+      currentCriterionIdByLegacyCriterionId
+    });
+  }
+
+  const latestSubmissionByEnrollmentAndCriterion = new Map<
+    string,
+    Map<string, EvaluationCriterionPreviousSubmission>
+  >();
+
+  for (const evaluationRow of [...evaluationRows].sort(comparePublishedEvaluationSummaries)) {
+    const enrollmentMatcher = matcherByEnrollmentId.get(evaluationRow.matricula_turma_id);
+
+    if (!enrollmentMatcher) {
+      continue;
+    }
+
+    const currentPreviousSubmissionMap =
+      latestSubmissionByEnrollmentAndCriterion.get(evaluationRow.matricula_turma_id) ??
+      new Map<string, EvaluationCriterionPreviousSubmission>();
+
+    for (const item of itemsByEvaluationId.get(evaluationRow.id) ?? []) {
+      const currentCriterionId =
+        (item.criterio_modelo_avaliacao_id
+          ? enrollmentMatcher.currentCriterionIdByModelCriterionId.get(
+              item.criterio_modelo_avaliacao_id
+            )
+          : null) ??
+        enrollmentMatcher.currentCriterionIdByLegacyCriterionId.get(item.criterio_id) ??
+        null;
+
+      if (!currentCriterionId) {
+        continue;
+      }
+
+      const currentCriterion = enrollmentMatcher.runtimeContext.rubricGroups
+        .flatMap((group) => group.criteria)
+        .find((criterion) => criterion.id === currentCriterionId);
+      const fallbackOptionLabel =
+        item.opcao_criterio_modelo_avaliacao_id && currentCriterion
+          ? currentCriterion.options.find(
+              (option) => option.id === item.opcao_criterio_modelo_avaliacao_id
+            )?.label ?? null
+          : null;
+
+      currentPreviousSubmissionMap.set(currentCriterionId, {
+        evaluationId: evaluationRow.id,
+        evaluationDate:
+          evaluationRow.avaliado_em ??
+          safeSortableTimestamp(evaluationRow.created_at).slice(0, 10),
+        launchType: evaluationRow.tipo_lancamento,
+        score: Number(item.nota_bruta),
+        optionLabel: item.opcao_rotulo_snapshot ?? fallbackOptionLabel,
+        observation: item.feedback?.trim() ? item.feedback.trim() : null
+      });
+    }
+
+    latestSubmissionByEnrollmentAndCriterion.set(
+      evaluationRow.matricula_turma_id,
+      currentPreviousSubmissionMap
+    );
+  }
+
+  const enrichedRuntimeContexts = new Map<string, EvaluationRuntimeContext>();
+
+  for (const [enrollmentId, runtimeContext] of runtimeContextsByEnrollmentId.entries()) {
+    const previousSubmissionByCriterionId =
+      latestSubmissionByEnrollmentAndCriterion.get(enrollmentId) ?? new Map();
+
+    enrichedRuntimeContexts.set(enrollmentId, {
+      ...runtimeContext,
+      rubricGroups: cloneRubricGroupsWithPreviousSubmissions(
+        runtimeContext.rubricGroups,
+        previousSubmissionByCriterionId
+      )
+    });
+  }
+
+  return enrichedRuntimeContexts;
+}
+
 async function loadEvaluationChainBundle(
   targetEvaluation: EvaluationRow
 ): Promise<{
@@ -2695,10 +2896,38 @@ export async function getEvaluationFormPageData(
     );
   }
 
-  const runtimeContext = resolveRuntimeContextForEnrollment(
-    context,
-    context.studentOptions[0]?.enrollmentId
-  );
+  let runtimeContextsByEnrollmentId = serializeRuntimeContextsByEnrollment(context);
+
+  try {
+    const enrichedRuntimeContexts = await loadPreviousCriterionSubmissionsForEnrollments(
+      currentUser,
+      context.runtimeContextByEnrollmentId
+    );
+
+    runtimeContextsByEnrollmentId = Object.fromEntries(
+      [...enrichedRuntimeContexts.entries()].map(([enrollmentId, runtimeContext]) => [
+        enrollmentId,
+        serializeEvaluationRuntimeContext(runtimeContext)
+      ])
+    );
+  } catch (error) {
+    return buildEmptyState(
+      "Não foi possível carregar o histórico anterior da rubrica",
+      error instanceof Error
+        ? error.message
+        : "Os últimos lançamentos por critério não puderam ser consultados para este professor."
+    );
+  }
+
+  const runtimeContext =
+    runtimeContextsByEnrollmentId[context.studentOptions[0]?.enrollmentId ?? ""] ?? {
+      ...serializeEvaluationRuntimeContext(
+        resolveRuntimeContextForEnrollment(
+          context,
+          context.studentOptions[0]?.enrollmentId
+        )
+      )
+    };
 
   return {
     formData: {
@@ -2710,7 +2939,7 @@ export async function getEvaluationFormPageData(
       evaluationModelId: runtimeContext.modelId,
       evaluationModelCode: runtimeContext.modelCode,
       evaluationModelName: runtimeContext.modelName,
-      runtimeContextsByEnrollmentId: serializeRuntimeContextsByEnrollment(context),
+      runtimeContextsByEnrollmentId,
       mode: "create",
       readOnlyMessage: null,
       contextMessage: null,

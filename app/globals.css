@@ -1758,6 +1758,31 @@ textarea.input:focus {
   background: rgba(255, 255, 255, 0.42);
 }
 
+.criterion-previous-submission {
+  display: grid;
+  gap: 0.22rem;
+  margin-top: 0.15rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 14px;
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.14);
+}
+
+.criterion-previous-submission-label,
+.criterion-previous-submission-feedback {
+  color: var(--brand);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.criterion-previous-submission-feedback {
+  color: var(--muted);
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .criterion-field-invalid {
   border-color: rgba(var(--danger-rgb), 0.3);
 }

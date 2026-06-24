@@ -7,7 +7,9 @@ import { submitEvaluationAction } from "@/app/(app)/avaliacoes/nova/actions";
 import { ExceptionalReleaseNotice } from "@/components/common/exceptional-release-notice";
 import type { EvaluationActionFormValues } from "@/app/(app)/avaliacoes/nova/state";
 import { initialEvaluationActionState } from "@/app/(app)/avaliacoes/nova/state";
+import { formatDate } from "@/lib/utils/format";
 import type {
+  EvaluationCriterionPreviousSubmission,
   EvaluationFormInitialValues,
   EvaluationFormMode,
   EvaluationFormPageData,
@@ -113,6 +115,46 @@ function resolveCriterionOptionLabel(
   return `${option.label} — ${formatOptionScoreLabel(option.scoreValue)} pontos`;
 }
 
+function formatPreviousCriterionScore(score: number) {
+  return score.toFixed(1).replace(".", ",");
+}
+
+function buildPreviousSubmissionLabel(previousSubmission: EvaluationCriterionPreviousSubmission) {
+  const scoreLabel = formatPreviousCriterionScore(previousSubmission.score);
+
+  if (previousSubmission.optionLabel) {
+    return `${previousSubmission.optionLabel} — ${scoreLabel} em ${formatDate(previousSubmission.evaluationDate)}`;
+  }
+
+  return `${scoreLabel} em ${formatDate(previousSubmission.evaluationDate)}`;
+}
+
+function CriterionPreviousSubmissionNotice({
+  previousSubmission
+}: {
+  previousSubmission?: EvaluationCriterionPreviousSubmission | null;
+}) {
+  if (!previousSubmission) {
+    return null;
+  }
+
+  return (
+    <div className="criterion-previous-submission">
+      <span className="criterion-previous-submission-label">
+        Último lançamento: {buildPreviousSubmissionLabel(previousSubmission)}
+      </span>
+      {previousSubmission.observation ? (
+        <span
+          className="criterion-previous-submission-feedback"
+          title={previousSubmission.observation}
+        >
+          Devolutiva anterior: {previousSubmission.observation}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 type CriterionFieldProps = {
   criterion: EvaluationRubricCriterion;
   error?: string;
@@ -159,6 +201,7 @@ function DescriptiveCriterionField({
       <span className="field-help">
         Peso {criterion.weightPercentage}% · escala de 0 a {criterion.maxScore}
       </span>
+      <CriterionPreviousSubmissionNotice previousSubmission={criterion.previousSubmission} />
       {showReviewContext && formattedBaselineValue ? (
         <span className="field-help">
           Valor vigente antes desta revisão: {formattedBaselineValue}
@@ -250,6 +293,7 @@ function RubricCriterionField({
       <span className="field-help">
         Peso {criterion.weightPercentage}% · nota definida pela opção selecionada
       </span>
+      <CriterionPreviousSubmissionNotice previousSubmission={criterion.previousSubmission} />
       {showReviewContext && baselineOptionLabel ? (
         <span className="field-help">
           Opção vigente antes desta revisão: {baselineOptionLabel}
