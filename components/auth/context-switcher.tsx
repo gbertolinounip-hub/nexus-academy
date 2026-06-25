@@ -76,10 +76,7 @@ export function ContextSwitcher({ currentUser }: ContextSwitcherProps) {
       </div>
 
       <details className="context-switcher-disclosure">
-        <summary
-          className="context-switcher-summary"
-          title={currentLabels.longLabel}
-        >
+        <summary className="context-switcher-summary" title={currentLabels.longLabel}>
           <strong className="context-switcher-current">
             {currentUser.contextoAtivo ? currentLabels.shortLabel : "Selecionar contexto"}
           </strong>

@@ -141,8 +141,7 @@ export function MasterInstitutionBrandingForm({
   }
 
   function handleInstitutionSelection(institutionId: string) {
-    const institution =
-      institutions.find((entry) => entry.id === institutionId) ?? null;
+    const institution = institutions.find((entry) => entry.id === institutionId) ?? null;
     setDraft(buildBrandingDraft(institution));
   }
 
@@ -185,8 +184,8 @@ export function MasterInstitutionBrandingForm({
             <div>
               <h3>Configurar identidade visual</h3>
               <p className="field-help">
-                Selecione uma IES já cadastrada para definir nome de exibição e logos
-                usados apenas dentro do sistema autenticado.
+                Selecione uma IES já cadastrada para definir nome de exibição e
+                logos usados apenas dentro do sistema autenticado.
               </p>
             </div>
           </div>
@@ -227,11 +226,11 @@ export function MasterInstitutionBrandingForm({
                 value={draft.nome_exibicao}
                 disabled={formDisabled}
                 onChange={(event) => updateDraft("nome_exibicao", event.currentTarget.value)}
-                placeholder="Opcional. Ex.: Universidade Paulista - UNIP"
+                placeholder="Opcional. Ex.: Universidade Paulista – UNIP"
               />
               <span className="field-help">
-                Quando preenchido, este nome fica disponível para uso interno no sistema
-                em vez do nome cadastral.
+                Quando preenchido, este nome fica disponível para uso interno no
+                sistema em vez do nome cadastral.
               </span>
               {fieldErrors.nome_exibicao ? (
                 <span className="field-error">{fieldErrors.nome_exibicao}</span>
@@ -245,7 +244,11 @@ export function MasterInstitutionBrandingForm({
               previewUrl={selectedInstitution?.primaryLogoUrl ?? null}
               removeRequested={draft.remove_logo_principal === "true"}
               emptyLabel="Nenhuma logo principal configurada."
-              imageAlt={`Logo principal da ${selectedInstitution?.displayName ?? selectedInstitution?.name ?? "instituição"}`}
+              imageAlt={`Logo principal da ${
+                selectedInstitution?.displayName ??
+                selectedInstitution?.name ??
+                "instituição"
+              }`}
               imageClassName="institution-branding-preview-image institution-branding-preview-image-primary"
             />
 
@@ -254,7 +257,11 @@ export function MasterInstitutionBrandingForm({
               previewUrl={selectedInstitution?.compactLogoUrl ?? null}
               removeRequested={draft.remove_logo_compacta === "true"}
               emptyLabel="Nenhuma logo compacta configurada."
-              imageAlt={`Logo compacta da ${selectedInstitution?.displayName ?? selectedInstitution?.name ?? "instituição"}`}
+              imageAlt={`Logo compacta da ${
+                selectedInstitution?.displayName ??
+                selectedInstitution?.name ??
+                "instituição"
+              }`}
               imageClassName="institution-branding-preview-image institution-branding-preview-image-compact"
             />
           </div>
@@ -269,9 +276,7 @@ export function MasterInstitutionBrandingForm({
                 className={getInputClassName(fieldErrors, "logo_principal_file")}
                 disabled={formDisabled}
               />
-              <span className="field-help">
-                PNG, JPG, JPEG ou WEBP com até 1 MB.
-              </span>
+              <span className="field-help">PNG, JPG, JPEG ou WEBP com até 1 MB.</span>
               {selectedInstitution?.primaryLogoPath ? (
                 <label className="master-institution-branding-toggle">
                   <input
@@ -301,9 +306,7 @@ export function MasterInstitutionBrandingForm({
                 className={getInputClassName(fieldErrors, "logo_compacta_file")}
                 disabled={formDisabled}
               />
-              <span className="field-help">
-                PNG, JPG, JPEG ou WEBP com até 1 MB.
-              </span>
+              <span className="field-help">PNG, JPG, JPEG ou WEBP com até 1 MB.</span>
               {selectedInstitution?.compactLogoPath ? (
                 <label className="master-institution-branding-toggle">
                   <input
@@ -337,8 +340,8 @@ export function MasterInstitutionBrandingForm({
             <div>
               <h3>Orientações de imagem</h3>
               <p className="field-help">
-                As logos são ajustadas automaticamente sem distorção dentro do menu
-                lateral e de futuras áreas internas.
+                As logos são ajustadas automaticamente sem distorção dentro do
+                menu lateral e de futuras áreas internas.
               </p>
             </div>
           </div>

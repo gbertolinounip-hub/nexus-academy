@@ -1,8 +1,14 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { unstable_noStore as noStore } from "next/cache";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import type { SessionUser } from "@/types/domain";
-import type { Database } from "@/types/database";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import type { Database } from "@/types/database";
+import type { SessionUser } from "@/types/domain";
 
 type InstitutionRow = Database["public"]["Tables"]["instituicoes"]["Row"];
 
@@ -138,6 +144,39 @@ function buildPersistedInstitutionBrandingStoragePath(storageKey: string) {
   return `${INSTITUTION_BRANDING_S3_SCHEME}${bucket}/${storageKey}`;
 }
 
+function resolveInstitutionIdForBranding(currentUser: SessionUser) {
+  if (currentUser.contextoAtivo?.instituicaoId) {
+    return currentUser.contextoAtivo.instituicaoId;
+  }
+
+  if (currentUser.instituicaoId) {
+    return currentUser.instituicaoId;
+  }
+
+  const activeContextInstitutionIds = [
+    ...new Set(
+      currentUser.contextosDisponiveis
+        .filter((context) => context.ativo)
+        .map((context) => context.instituicaoId)
+        .filter((institutionId): institutionId is string => Boolean(institutionId))
+    )
+  ];
+
+  if (activeContextInstitutionIds.length === 1) {
+    return activeContextInstitutionIds[0];
+  }
+
+  const availableInstitutionIds = [
+    ...new Set(
+      currentUser.contextosDisponiveis
+        .map((context) => context.instituicaoId)
+        .filter((institutionId): institutionId is string => Boolean(institutionId))
+    )
+  ];
+
+  return availableInstitutionIds.length === 1 ? availableInstitutionIds[0] : null;
+}
+
 export function buildInstitutionBrandingStoragePath(input: {
   institutionId: string;
   variant: "principal" | "compacta";
@@ -208,7 +247,7 @@ export async function removeInstitutionBrandingBinary(
 
 export async function getInstitutionBrandingDownloadUrl(
   storagePath: string | null | undefined,
-  expiresInSeconds = 900
+  expiresInSeconds = 43200
 ) {
   if (!storagePath) {
     return null;
@@ -272,8 +311,8 @@ export function resolveAcceptedInstitutionBrandingMimeType(
 export async function loadInstitutionBrandingForCurrentUser(
   currentUser: SessionUser
 ): Promise<InstitutionBrandingSummary | null> {
-  const institutionId =
-    currentUser.contextoAtivo?.instituicaoId ?? currentUser.instituicaoId ?? null;
+  noStore();
+  const institutionId = resolveInstitutionIdForBranding(currentUser);
 
   if (!institutionId) {
     return null;
@@ -282,9 +321,7 @@ export async function loadInstitutionBrandingForCurrentUser(
   const adminClient = createSupabaseAdminClient();
   const { data, error } = await adminClient
     .from("instituicoes")
-    .select(
-      "id, nome, nome_exibicao, logo_principal_path, logo_compacta_path"
-    )
+    .select("id, nome, nome_exibicao, logo_principal_path, logo_compacta_path")
     .eq("id", institutionId)
     .maybeSingle();
 

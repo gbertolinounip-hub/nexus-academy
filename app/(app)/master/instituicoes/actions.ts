@@ -30,37 +30,37 @@ const institutionSchema = z.object({
   nome: z
     .string()
     .trim()
-    .min(3, "Informe o nome da instituicao.")
-    .max(160, "O nome da instituicao deve ter no maximo 160 caracteres."),
+    .min(3, "Informe o nome da instituição.")
+    .max(160, "O nome da instituição deve ter no máximo 160 caracteres."),
   sigla: z
     .string()
     .trim()
-    .max(30, "A sigla deve ter no maximo 30 caracteres."),
+    .max(30, "A sigla deve ter no máximo 30 caracteres."),
   slug: z
     .string()
     .trim()
-    .min(3, "Informe o slug da instituicao.")
-    .max(120, "O slug deve ter no maximo 120 caracteres.")
-    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use apenas letras minusculas, numeros e hifens."),
+    .min(3, "Informe o slug da instituição.")
+    .max(120, "O slug deve ter no máximo 120 caracteres.")
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use apenas letras minúsculas, números e hifens."),
   cnpj: z
     .string()
     .trim()
     .refine((value) => !value || /^\d{14}$/.test(value), {
-      message: "Informe um CNPJ com 14 digitos ou deixe em branco."
+      message: "Informe um CNPJ com 14 dígitos ou deixe em branco."
     })
 });
 
 const institutionEditSchema = institutionSchema.extend({
-  institution_id: z.string().uuid("Instituicao invalida."),
+  institution_id: z.string().uuid("Instituição inválida."),
   ativo: z.enum(["true", "false"])
 });
 
 const institutionBrandingSchema = z.object({
-  institution_id: z.string().uuid("Selecione uma instituicao valida."),
+  institution_id: z.string().uuid("Selecione uma instituição válida."),
   nome_exibicao: z
     .string()
     .trim()
-    .max(160, "O nome de exibicao deve ter no maximo 160 caracteres."),
+    .max(160, "O nome de exibição deve ter no máximo 160 caracteres."),
   remove_logo_principal: z.enum(["true", "false"]).default("false"),
   remove_logo_compacta: z.enum(["true", "false"]).default("false")
 });
@@ -207,13 +207,13 @@ async function ensureUniqueInstitutionSlug(slug: string, currentInstitutionId?: 
   const { data, error } = await query.maybeSingle();
 
   if (error) {
-    throw new Error("Nao foi possivel validar a unicidade do slug da instituicao.");
+    throw new Error("Não foi possível validar a unicidade do slug da instituição.");
   }
 
   const fieldErrors: Record<string, string> = {};
 
   if (data) {
-    fieldErrors.slug = "Ja existe uma instituicao com este slug.";
+    fieldErrors.slug = "Já existe uma instituição com este slug.";
   }
 
   return fieldErrors;
@@ -231,7 +231,7 @@ function validateInstitutionBrandingFile(file: File | null) {
     return {
       extension: "",
       mimeType: "",
-      fieldError: "Use uma imagem com ate 1 MB."
+      fieldError: "Use uma imagem com até 1 MB."
     };
   }
 
@@ -251,7 +251,7 @@ function validateInstitutionBrandingFile(file: File | null) {
     return {
       extension,
       mimeType: "",
-      fieldError: "A imagem enviada nao pode ser validada com seguranca."
+      fieldError: "A imagem enviada não pode ser validada com segurança."
     };
   }
 
@@ -272,7 +272,7 @@ export async function createInstitutionAction(
   if (!parsedData.success) {
     return buildActionState(
       "error",
-      "Revise os campos obrigatorios da instituicao.",
+      "Revise os campos obrigatórios da instituição.",
       normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
       submittedFormValues
     );
@@ -283,7 +283,7 @@ export async function createInstitutionAction(
   if (Object.keys(uniqueFieldErrors).length) {
     return buildActionState(
       "error",
-      "Ja existe uma instituicao com o slug informado.",
+      "Já existe uma instituição com o slug informado.",
       uniqueFieldErrors,
       submittedFormValues
     );
@@ -307,7 +307,7 @@ export async function createInstitutionAction(
     return buildActionState(
       "error",
       error.code === "23505"
-        ? "Ja existe uma instituicao com o slug informado."
+        ? "Já existe uma instituição com o slug informado."
         : error.message,
       {},
       submittedFormValues
@@ -318,7 +318,7 @@ export async function createInstitutionAction(
 
   return buildActionState(
     "success",
-    `Instituicao ${parsedData.data.nome} criada com sucesso.`
+    `Instituição ${parsedData.data.nome} criada com sucesso.`
   );
 }
 
@@ -333,7 +333,7 @@ export async function updateInstitutionAction(
   if (!parsedData.success) {
     return buildActionState(
       "error",
-      "Revise os campos obrigatorios da instituicao.",
+      "Revise os campos obrigatórios da instituição.",
       normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
       submittedFormValues
     );
@@ -344,8 +344,8 @@ export async function updateInstitutionAction(
   if (!institution) {
     return buildActionState(
       "error",
-      "Nao foi possivel localizar a instituicao selecionada.",
-      { institution_id: "Instituicao invalida." },
+      "Não foi possível localizar a instituição selecionada.",
+      { institution_id: "Instituição inválida." },
       submittedFormValues
     );
   }
@@ -358,7 +358,7 @@ export async function updateInstitutionAction(
   if (Object.keys(uniqueFieldErrors).length) {
     return buildActionState(
       "error",
-      "Ja existe outra instituicao com o slug informado.",
+      "Já existe outra instituição com o slug informado.",
       uniqueFieldErrors,
       submittedFormValues
     );
@@ -382,7 +382,7 @@ export async function updateInstitutionAction(
     return buildActionState(
       "error",
       error.code === "23505"
-        ? "Ja existe outra instituicao com o slug informado."
+        ? "Já existe outra instituição com o slug informado."
         : error.message,
       {},
       submittedFormValues
@@ -393,7 +393,7 @@ export async function updateInstitutionAction(
 
   return buildActionState(
     "success",
-    `Instituicao ${parsedData.data.nome} atualizada com sucesso.`,
+    `Instituição ${parsedData.data.nome} atualizada com sucesso.`,
     {},
     {
       ...submittedFormValues,
@@ -413,7 +413,7 @@ export async function updateInstitutionBrandingAction(
   if (!parsedData.success) {
     return buildActionState(
       "error",
-      "Revise os campos da identidade visual da instituicao.",
+      "Revise os campos da identidade visual da instituição.",
       normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
       submittedFormValues
     );
@@ -424,8 +424,8 @@ export async function updateInstitutionBrandingAction(
   if (!institution) {
     return buildActionState(
       "error",
-      "Nao foi possivel localizar a instituicao selecionada.",
-      { institution_id: "Instituicao invalida." },
+      "Não foi possível localizar a instituição selecionada.",
+      { institution_id: "Instituição inválida." },
       submittedFormValues
     );
   }
@@ -545,7 +545,7 @@ export async function updateInstitutionBrandingAction(
       "error",
       error instanceof Error
         ? error.message
-        : "Nao foi possivel enviar as imagens da identidade visual.",
+        : "Não foi possível enviar as imagens da identidade visual.",
       {},
       submittedFormValues
     );
@@ -573,7 +573,7 @@ export async function updateInstitutionBrandingAction(
 
     return buildActionState(
       "error",
-      "Nao foi possivel salvar a identidade visual da instituicao.",
+      "Não foi possível salvar a identidade visual da instituição.",
       {},
       submittedFormValues
     );
@@ -589,7 +589,7 @@ export async function updateInstitutionBrandingAction(
 
   return buildActionState(
     "success",
-    `Identidade visual da instituicao ${institution.nome} atualizada com sucesso.`,
+    `Identidade visual da instituição ${institution.nome} atualizada com sucesso.`,
     {},
     submittedFormValues
   );

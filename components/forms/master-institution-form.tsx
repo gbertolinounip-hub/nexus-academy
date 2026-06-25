@@ -128,7 +128,7 @@ export function MasterInstitutionCreateForm() {
 
       <div className="actions-row">
         <button className="button" type="submit">
-          Cadastrar instituicao
+          Cadastrar instituição
         </button>
       </div>
     </form>
@@ -247,7 +247,7 @@ export function MasterInstitutionEditForm({
 
       <div className="actions-row">
         <button className="button button-secondary" type="submit">
-          Salvar instituicao
+          Salvar instituição
         </button>
       </div>
     </form>

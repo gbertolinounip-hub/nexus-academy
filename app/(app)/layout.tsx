@@ -7,6 +7,7 @@ import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { joinDisplayParts } from "@/lib/utils/format";
 import { getAuthenticatedStudentDashboardPageData } from "@/services/dashboard";
 import { getClinicalUnreadNotificationCount } from "@/services/clinical-supervision";
+import { loadInstitutionBrandingForCurrentUser } from "@/services/institution-branding";
 import {
   getProfessorPendingStudentDocumentCount,
   getStudentDocumentUnreadNotificationCount
@@ -32,6 +33,7 @@ export default async function AppLayout({
     currentUser.role === "professor"
       ? await getProfessorPendingStudentDocumentCount(currentUser)
       : 0;
+  const institutionBranding = await loadInstitutionBrandingForCurrentUser(currentUser);
   function mapNavigationBadges(items: NavigationItem[]): NavigationItem[] {
     return items.map((item) => {
       const nextItem: NavigationItem =
@@ -78,7 +80,7 @@ export default async function AppLayout({
             area.className,
             area.professorNames.length
               ? area.professorNames.join(", ")
-              : "Supervisor ainda nao vinculado"
+              : "Supervisor ainda não vinculado"
           ])
         })) ?? []
       : [];
@@ -93,7 +95,7 @@ export default async function AppLayout({
           ? [
               {
                 key: "overview",
-                label: "Visao geral",
+                label: "Visão geral",
                 description: "Consolidado do semestre atual"
               },
               ...studentSecondaryNavigationItems
@@ -101,6 +103,7 @@ export default async function AppLayout({
           : []
       }
       currentUserId={currentUser.id}
+      institutionBranding={institutionBranding}
     >
       {children}
     </DashboardShell>

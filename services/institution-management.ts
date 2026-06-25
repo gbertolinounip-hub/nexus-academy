@@ -84,7 +84,7 @@ export async function getInstitutionManagementPageData(): Promise<InstitutionMan
   if (institutionsResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "Nao foi possivel carregar as instituicoes.",
+        "Não foi possível carregar as instituições.",
         institutionsResult.error
       )
     );
@@ -92,20 +92,20 @@ export async function getInstitutionManagementPageData(): Promise<InstitutionMan
 
   if (unitsResult.error) {
     throw new Error(
-      formatSupabaseErrorMessage("Nao foi possivel carregar as unidades.", unitsResult.error)
+      formatSupabaseErrorMessage("Não foi possível carregar as unidades.", unitsResult.error)
     );
   }
 
   if (coursesResult.error) {
     throw new Error(
-      formatSupabaseErrorMessage("Nao foi possivel carregar os cursos.", coursesResult.error)
+      formatSupabaseErrorMessage("Não foi possível carregar os cursos.", coursesResult.error)
     );
   }
 
   if (offersResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "Nao foi possivel carregar as ofertas de curso por unidade.",
+        "Não foi possível carregar as ofertas de curso por unidade.",
         offersResult.error
       )
     );
