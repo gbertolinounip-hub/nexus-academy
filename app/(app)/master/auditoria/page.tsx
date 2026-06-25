@@ -9,6 +9,7 @@ interface MasterAuditPageProps {
   searchParams?: Promise<{
     instituicao?: string | string[];
     unidade?: string | string[];
+    curso?: string | string[];
     perfil?: string | string[];
     periodo?: string | string[];
   }>;
@@ -16,13 +17,41 @@ interface MasterAuditPageProps {
 
 export default async function MasterAuditPage({ searchParams }: MasterAuditPageProps) {
   await requireRole(["coordenador_master"]);
+
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const pageData = await getMasterGlobalAuditPageData({
     institutionId: resolvedSearchParams?.instituicao,
     unitId: resolvedSearchParams?.unidade,
+    courseId: resolvedSearchParams?.curso,
     role: resolvedSearchParams?.perfil,
     period: resolvedSearchParams?.periodo
   });
+
+  const exportParams = new URLSearchParams();
+
+  if (pageData.filters.institutionId) {
+    exportParams.set("instituicao", pageData.filters.institutionId);
+  }
+
+  if (pageData.filters.unitId) {
+    exportParams.set("unidade", pageData.filters.unitId);
+  }
+
+  if (pageData.filters.courseId) {
+    exportParams.set("curso", pageData.filters.courseId);
+  }
+
+  if (pageData.filters.role !== "todos") {
+    exportParams.set("perfil", pageData.filters.role);
+  }
+
+  if (pageData.filters.period !== "all") {
+    exportParams.set("periodo", pageData.filters.period);
+  }
+
+  const exportHref = exportParams.size
+    ? `/master/auditoria/export/excel?${exportParams.toString()}`
+    : "/master/auditoria/export/excel";
 
   return (
     <div className="stack master-dashboard master-audit-dashboard">
@@ -31,8 +60,9 @@ export default async function MasterAuditPage({ searchParams }: MasterAuditPageP
           <p className="eyebrow">Auditoria global</p>
           <h1>Auditoria global</h1>
           <p>
-            Acompanhe eventos recentes por instituição, unidade, perfil e período sem
-            misturar esta leitura global com a auditoria operacional local das coordenações.
+            Acompanhe eventos recentes por instituição, unidade, curso, perfil e período
+            sem misturar esta leitura global com a auditoria operacional local das
+            coordenações.
           </p>
         </div>
       </section>
@@ -57,13 +87,15 @@ export default async function MasterAuditPage({ searchParams }: MasterAuditPageP
 
       <SectionCard
         title="Filtros globais"
-        description="Refine a leitura institucional por IES, unidade, perfil de origem e janela temporal."
+        description="Refine a leitura institucional por IES, unidade, curso, perfil de origem e janela temporal."
         className="master-audit-filters-card"
       >
         <MasterAuditFilters
           institutions={pageData.institutions}
           units={pageData.units}
+          courses={pageData.courses}
           filters={pageData.filters}
+          exportHref={exportHref}
         />
       </SectionCard>
 

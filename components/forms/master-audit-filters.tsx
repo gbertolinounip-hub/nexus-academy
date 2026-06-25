@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import type { Route } from "next";
 import { useEffect, useMemo, useState } from "react";
 import type {
+  MasterCourseOption,
   MasterGlobalAuditPageData,
   MasterInstitutionOption,
   MasterUnitOption
@@ -12,21 +12,27 @@ import type {
 interface MasterAuditFiltersProps {
   institutions: MasterInstitutionOption[];
   units: MasterUnitOption[];
+  courses: MasterCourseOption[];
   filters: MasterGlobalAuditPageData["filters"];
+  exportHref: string;
 }
 
 export function MasterAuditFilters({
   institutions,
   units,
-  filters
+  courses,
+  filters,
+  exportHref
 }: MasterAuditFiltersProps) {
   const [institutionId, setInstitutionId] = useState(filters.institutionId);
   const [unitId, setUnitId] = useState(filters.unitId);
+  const [courseId, setCourseId] = useState(filters.courseId);
 
   useEffect(() => {
     setInstitutionId(filters.institutionId);
     setUnitId(filters.unitId);
-  }, [filters.institutionId, filters.unitId]);
+    setCourseId(filters.courseId);
+  }, [filters.courseId, filters.institutionId, filters.unitId]);
 
   const filteredUnits = useMemo(
     () =>
@@ -36,11 +42,35 @@ export function MasterAuditFilters({
     [institutionId, units]
   );
 
+  const effectiveUnitId = filteredUnits.some((unit) => unit.id === unitId) ? unitId : "";
+
+  const filteredCourses = useMemo(
+    () =>
+      courses.filter((course) => {
+        if (institutionId && course.institutionId !== institutionId) {
+          return false;
+        }
+
+        if (!effectiveUnitId) {
+          return true;
+        }
+
+        return course.unitIds.includes(effectiveUnitId);
+      }),
+    [courses, effectiveUnitId, institutionId]
+  );
+
   useEffect(() => {
     if (unitId && !filteredUnits.some((unit) => unit.id === unitId)) {
       setUnitId("");
     }
   }, [filteredUnits, unitId]);
+
+  useEffect(() => {
+    if (courseId && !filteredCourses.some((course) => course.id === courseId)) {
+      setCourseId("");
+    }
+  }, [courseId, filteredCourses]);
 
   return (
     <form
@@ -82,6 +112,23 @@ export function MasterAuditFilters({
       </label>
 
       <label className="field">
+        <span>Curso</span>
+        <select
+          className="input"
+          name="curso"
+          value={courseId}
+          onChange={(event) => setCourseId(event.currentTarget.value)}
+        >
+          <option value="">Todos os cursos</option>
+          {filteredCourses.map((course) => (
+            <option key={course.id} value={course.id}>
+              {course.code ? `${course.code} - ${course.name}` : course.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="field">
         <span>Perfil</span>
         <select className="input" name="perfil" defaultValue={filters.role}>
           <option value="todos">Todos</option>
@@ -106,9 +153,12 @@ export function MasterAuditFilters({
         <button className="button button-secondary" type="submit">
           Aplicar filtros
         </button>
-        <Link href={"/master/auditoria" as Route} className="button button-secondary">
+        <Link href="/master/auditoria" className="button button-secondary">
           Limpar
         </Link>
+        <a href={exportHref} className="button button-secondary">
+          Exportar Excel
+        </a>
       </div>
     </form>
   );

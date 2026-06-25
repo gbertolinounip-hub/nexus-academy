@@ -1,5 +1,6 @@
-import type { PostgrestError } from "@supabase/supabase-js";
+﻿import type { PostgrestError } from "@supabase/supabase-js";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { repairKnownMojibake } from "@/lib/utils/format";
 import type { AuditEntry, ProfileCode, SessionUser } from "@/types/domain";
 import type { Database } from "@/types/database";
 import {
@@ -21,6 +22,7 @@ type StudentRow = Database["public"]["Tables"]["alunos"]["Row"];
 type ProfessorRow = Database["public"]["Tables"]["professores"]["Row"];
 type InstitutionalContextRow = Database["public"]["Tables"]["usuarios_papeis_contexto"]["Row"];
 type CourseOfferRow = Database["public"]["Tables"]["ofertas_curso_unidade"]["Row"];
+type CourseRow = Database["public"]["Tables"]["cursos"]["Row"];
 type JsonRecord = Record<string, unknown>;
 
 type VisibleProfileCode = Exclude<ProfileCode, "coordenador_master">;
@@ -46,6 +48,14 @@ export interface MasterInstitutionOption {
   name: string;
   slug: string;
   isActive: boolean;
+}
+
+export interface MasterCourseOption {
+  id: string;
+  institutionId: string;
+  code: string;
+  name: string;
+  unitIds: string[];
 }
 
 export interface MasterUnitSummary {
@@ -190,28 +200,34 @@ export interface MasterUnitDetailPageData {
 
 export interface MasterGlobalAuditEntry {
   id: string;
+  institutionName: string;
   unitName: string;
+  courseName: string | null;
   actorName: string;
   actorProfileLabel: string;
   action: AuditEntry["action"];
   tableName: string;
   recordLabel: string;
   summary: string;
+  detailsText: string;
   happenedAt: string;
 }
 
 export interface MasterGlobalAuditPageData {
   institutions: MasterInstitutionOption[];
   units: MasterUnitOption[];
+  courses: MasterCourseOption[];
   filters: {
     institutionId: string;
     unitId: string;
+    courseId: string;
     role: VisibleProfileCode | "todos";
     period: "7" | "30" | "90" | "365" | "all";
   };
   totalEvents: number;
   totalUnitsTouched: number;
   totalActors: number;
+  generatedAt: string;
   entries: MasterGlobalAuditEntry[];
 }
 
@@ -253,12 +269,35 @@ function buildUnitOptions(
       id: unit.id,
       institutionId: unit.instituicao_id,
       institutionName: unit.instituicao_id
-        ? institutionMap?.get(unit.instituicao_id)?.nome ?? "Instituicao nao identificada"
-        : "Instituicao nao identificada",
+        ? institutionMap?.get(unit.instituicao_id)?.nome ?? "Instituição não identificada"
+        : "Instituição não identificada",
       name: unit.nome,
       acronym: unit.sigla,
       slug: unit.slug,
       isActive: unit.ativo
+    }));
+}
+
+function buildCourseOptions(
+  courses: Array<Pick<CourseRow, "id" | "instituicao_id" | "codigo" | "nome">>,
+  offers: Array<Pick<CourseOfferRow, "id" | "instituicao_id" | "unidade_id" | "curso_id">>
+): MasterCourseOption[] {
+  const unitIdsByCourseId = new Map<string, Set<string>>();
+
+  for (const offer of offers) {
+    const currentUnitIds = unitIdsByCourseId.get(offer.curso_id) ?? new Set<string>();
+    currentUnitIds.add(offer.unidade_id);
+    unitIdsByCourseId.set(offer.curso_id, currentUnitIds);
+  }
+
+  return [...courses]
+    .sort((left, right) => left.nome.localeCompare(right.nome, "pt-BR"))
+    .map((course) => ({
+      id: course.id,
+      institutionId: course.instituicao_id,
+      code: course.codigo,
+      name: course.nome,
+      unitIds: [...(unitIdsByCourseId.get(course.id) ?? new Set<string>())]
     }));
 }
 
@@ -278,7 +317,7 @@ function formatLocation(city: string | null, state: string | null) {
     return `${city} / ${state}`;
   }
 
-  return city || state || "NÃ£o informado";
+  return city || state || "Não informado";
 }
 
 function normalizeFilterValue(
@@ -297,6 +336,22 @@ function normalizeSearchText(value: string | null | undefined) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLocaleLowerCase("pt-BR")
     .trim();
+}
+
+function normalizeAuditDisplayText(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  return repairKnownMojibake(value).trim();
+}
+
+function buildCourseDisplayName(course: Pick<CourseRow, "codigo" | "nome"> | null | undefined) {
+  if (!course) {
+    return null;
+  }
+
+  return course.codigo?.trim() ? `${course.codigo} - ${course.nome}` : course.nome;
 }
 
 function matchesCoordinatorSearch(
@@ -341,27 +396,43 @@ function buildRecordLabel(entry: AuditHistoryRow) {
     return entry.tabela;
   }
 
-  return `${entry.tabela} Â· ${entry.registro_id.slice(0, 8)}`;
+  return `${entry.tabela} · ${entry.registro_id.slice(0, 8)}`;
 }
 
 function buildAuditSummary(entry: AuditHistoryRow) {
   switch (entry.acao) {
     case "INSERT":
-      return `InclusÃ£o registrada em ${entry.tabela}.`;
+      return `Inclusão registrada em ${entry.tabela}.`;
     case "UPDATE":
-      return `AtualizaÃ§Ã£o registrada em ${entry.tabela}.`;
+      return `Atualização registrada em ${entry.tabela}.`;
     case "DELETE":
-      return `ExclusÃ£o registrada em ${entry.tabela}.`;
+      return `Exclusão registrada em ${entry.tabela}.`;
     default:
-      return `MovimentaÃ§Ã£o registrada em ${entry.tabela}.`;
+      return `Movimentação registrada em ${entry.tabela}.`;
   }
 }
 
 interface MasterGlobalAuditResolutionContext {
-  evaluations: Map<string, Pick<EvaluationRow, "id" | "matricula_turma_id">>;
-  enrollments: Map<string, Pick<EnrollmentRow, "id" | "turma_id">>;
-  classes: Map<string, Pick<ClassRow, "id" | "semestre_id">>;
-  semesters: Map<string, Pick<SemesterRow, "id" | "unidade_id">>;
+  evaluations: Map<
+    string,
+    Pick<EvaluationRow, "id" | "matricula_turma_id" | "oferta_curso_unidade_id">
+  >;
+  enrollments: Map<
+    string,
+    Pick<EnrollmentRow, "id" | "turma_id" | "oferta_curso_unidade_id">
+  >;
+  classes: Map<
+    string,
+    Pick<ClassRow, "id" | "semestre_id" | "oferta_curso_unidade_id">
+  >;
+  semesters: Map<
+    string,
+    Pick<SemesterRow, "id" | "unidade_id" | "oferta_curso_unidade_id">
+  >;
+  offers: Map<
+    string,
+    Pick<CourseOfferRow, "id" | "curso_id" | "instituicao_id" | "unidade_id">
+  >;
 }
 
 function asAuditRecord(value: unknown): JsonRecord {
@@ -469,10 +540,82 @@ function resolveMasterAuditUnitId(
     return directUnitId;
   }
 
+  const offerId = resolveMasterAuditOfferId(entry, payload, context);
+  const offer = offerId ? context.offers.get(offerId) ?? null : null;
+
+  if (offer?.unidade_id) {
+    return offer.unidade_id;
+  }
+
   const semesterId = resolveMasterAuditSemesterId(entry, payload, context);
   const semester = semesterId ? context.semesters.get(semesterId) ?? null : null;
 
   return semester?.unidade_id ?? null;
+}
+
+function resolveMasterAuditOfferId(
+  entry: AuditHistoryRow,
+  payload: JsonRecord,
+  context: MasterGlobalAuditResolutionContext
+) {
+  if (entry.tabela === "ofertas_curso_unidade") {
+    return getAuditString(payload, "id") ?? entry.registro_id ?? undefined;
+  }
+
+  const directOfferId = getAuditString(payload, "oferta_curso_unidade_id");
+
+  if (directOfferId) {
+    return directOfferId;
+  }
+
+  if (entry.tabela === "avaliacoes") {
+    const evaluationId = getAuditString(payload, "id") ?? entry.registro_id ?? undefined;
+    const evaluation = evaluationId ? context.evaluations.get(evaluationId) ?? null : null;
+
+    if (evaluation?.oferta_curso_unidade_id) {
+      return evaluation.oferta_curso_unidade_id;
+    }
+  }
+
+  const enrollmentId = resolveMasterAuditEnrollmentId(entry, payload, context);
+  const enrollment = enrollmentId ? context.enrollments.get(enrollmentId) ?? null : null;
+
+  if (enrollment?.oferta_curso_unidade_id) {
+    return enrollment.oferta_curso_unidade_id;
+  }
+
+  const classId = resolveMasterAuditClassId(entry, payload, context);
+  const classGroup = classId ? context.classes.get(classId) ?? null : null;
+
+  if (classGroup?.oferta_curso_unidade_id) {
+    return classGroup.oferta_curso_unidade_id;
+  }
+
+  const semesterId = resolveMasterAuditSemesterId(entry, payload, context);
+  const semester = semesterId ? context.semesters.get(semesterId) ?? null : null;
+
+  return semester?.oferta_curso_unidade_id ?? undefined;
+}
+
+function resolveMasterAuditCourseId(
+  entry: AuditHistoryRow,
+  payload: JsonRecord,
+  context: MasterGlobalAuditResolutionContext
+) {
+  if (entry.tabela === "cursos") {
+    return getAuditString(payload, "id") ?? entry.registro_id ?? undefined;
+  }
+
+  const directCourseId = getAuditString(payload, "curso_id");
+
+  if (directCourseId) {
+    return directCourseId;
+  }
+
+  const offerId = resolveMasterAuditOfferId(entry, payload, context);
+  const offer = offerId ? context.offers.get(offerId) ?? null : null;
+
+  return offer?.curso_id ?? undefined;
 }
 
 async function loadProfiles() {
@@ -481,7 +624,7 @@ async function loadProfiles() {
 
   if (error) {
     throw new Error(
-      formatSupabaseErrorMessage("NÃ£o foi possÃ­vel carregar os perfis da plataforma.", error)
+      formatSupabaseErrorMessage("NÃƒÂ£o foi possÃƒÂ­vel carregar os perfis da plataforma.", error)
     );
   }
 
@@ -513,7 +656,7 @@ async function loadMasterBaseData() {
   if (unitsResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "NÃ£o foi possÃ­vel carregar as unidades cadastradas.",
+        "NÃƒÂ£o foi possÃƒÂ­vel carregar as unidades cadastradas.",
         unitsResult.error
       )
     );
@@ -522,7 +665,7 @@ async function loadMasterBaseData() {
   if (coordinatorsResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "NÃ£o foi possÃ­vel carregar os coordenadores das unidades.",
+        "NÃƒÂ£o foi possÃƒÂ­vel carregar os coordenadores das unidades.",
         coordinatorsResult.error
       )
     );
@@ -531,7 +674,7 @@ async function loadMasterBaseData() {
   if (semestersResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "NÃ£o foi possÃ­vel carregar os semestres das unidades.",
+        "NÃƒÂ£o foi possÃƒÂ­vel carregar os semestres das unidades.",
         semestersResult.error
       )
     );
@@ -554,7 +697,7 @@ async function loadMasterBaseData() {
   if (coordinatorUsersResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "NÃ£o foi possÃ­vel carregar os usuÃ¡rios coordenadores.",
+        "NÃƒÂ£o foi possÃƒÂ­vel carregar os usuÃƒÂ¡rios coordenadores.",
         coordinatorUsersResult.error
       )
     );
@@ -641,7 +784,7 @@ function buildUnitSummaries(input: {
       if (!linkedCoordinators.some((coordinator) =>
         input.coordinatorUserMap.get(coordinator.usuario_id)?.ativo
       )) {
-        pendingItems.push("Nenhum coordenador ativo vinculado Ã  unidade.");
+        pendingItems.push("Nenhum coordenador ativo vinculado ÃƒÂ  unidade.");
       }
 
       if (!unitSemesters.length) {
@@ -770,7 +913,7 @@ export async function getMasterCoordinatorsPageData(input?: {
         unitName: unit.nome,
         unitSlug: unit.slug,
         unitIsActive: unit.ativo,
-        name: coordinatorUser?.nome_completo ?? "Coordenador nÃ£o identificado",
+        name: coordinatorUser?.nome_completo ?? "Coordenador nÃƒÂ£o identificado",
         email: coordinatorUser?.email ?? "Sem e-mail",
         roleTitle: coordinator.cargo,
         isActive: Boolean(coordinatorUser?.ativo),
@@ -856,7 +999,7 @@ export async function getMasterUsersPageData(input?: {
   if (unitsResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "NÃ£o foi possÃ­vel carregar as unidades para a visÃ£o de usuÃ¡rios.",
+        "NÃƒÂ£o foi possÃƒÂ­vel carregar as unidades para a visÃƒÂ£o de usuÃƒÂ¡rios.",
         unitsResult.error
       )
     );
@@ -925,7 +1068,7 @@ export async function getMasterUsersPageData(input?: {
   if (usersResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "NÃ£o foi possÃ­vel carregar os usuÃ¡rios institucionais.",
+        "NÃƒÂ£o foi possÃƒÂ­vel carregar os usuÃƒÂ¡rios institucionais.",
         usersResult.error
       )
     );
@@ -961,7 +1104,7 @@ export async function getMasterUsersPageData(input?: {
   ) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "NÃ£o foi possÃ­vel carregar os vÃ­nculos institucionais dos usuÃ¡rios.",
+        "NÃƒÂ£o foi possÃƒÂ­vel carregar os vÃƒÂ­nculos institucionais dos usuÃƒÂ¡rios.",
         studentRowsResult.error ??
           professorRowsResult.error ??
           coordinatorRowsResult.error ??
@@ -1024,7 +1167,7 @@ export async function getMasterUsersPageData(input?: {
   const entries = users.map((user) => {
     const profile = profilesById.get(user.perfil_id);
     const role = (profile?.codigo ?? "aluno") as VisibleProfileCode;
-    let auxiliaryLabel = "Sem vÃ­nculo complementar";
+    let auxiliaryLabel = "Sem vÃƒÂ­nculo complementar";
 
     if (role === "aluno") {
       const student = studentMap.get(user.id);
@@ -1055,7 +1198,7 @@ export async function getMasterUsersPageData(input?: {
       roleLabel: roleLabel(role),
       unitId: user.unidade_id,
       unitName: user.unidade_id
-        ? unitMap.get(user.unidade_id)?.nome ?? "Unidade nÃ£o identificada"
+        ? unitMap.get(user.unidade_id)?.nome ?? "Unidade nÃƒÂ£o identificada"
         : "Sem unidade vinculada",
       isActive: user.ativo,
       auxiliaryLabel
@@ -1190,7 +1333,7 @@ export async function getMasterUnitDetailPageData(
 
   if (unitError) {
     throw new Error(
-      formatSupabaseErrorMessage("Não foi possível carregar a unidade solicitada.", unitError)
+      formatSupabaseErrorMessage("NÃ£o foi possÃ­vel carregar a unidade solicitada.", unitError)
     );
   }
 
@@ -1240,7 +1383,7 @@ export async function getMasterUnitDetailPageData(
   if (coordinatorsResult.error || usersResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "Não foi possível consolidar a visão institucional desta unidade.",
+        "NÃ£o foi possÃ­vel consolidar a visÃ£o institucional desta unidade.",
         coordinatorsResult.error ?? usersResult.error
       )
     );
@@ -1279,7 +1422,7 @@ export async function getMasterUnitDetailPageData(
   if (enrollmentRowsResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "Não foi possível carregar as matrículas da unidade.",
+        "NÃ£o foi possÃ­vel carregar as matrÃ­culas da unidade.",
         enrollmentRowsResult.error
       )
     );
@@ -1289,25 +1432,25 @@ export async function getMasterUnitDetailPageData(
   const pendingItems: string[] = [];
 
   if (!unit.ativo) {
-    pendingItems.push("A unidade está inativa no cadastro institucional.");
+    pendingItems.push("A unidade estÃ¡ inativa no cadastro institucional.");
   }
 
   if (!activeCoordinatorCount) {
-    pendingItems.push("A unidade não possui coordenador ativo no momento.");
+    pendingItems.push("A unidade nÃ£o possui coordenador ativo no momento.");
   }
 
   if (!semesters.length) {
-    pendingItems.push("A unidade ainda não possui semestres cadastrados.");
+    pendingItems.push("A unidade ainda nÃ£o possui semestres cadastrados.");
   } else if (!semesters.some((semester) => semester.status === "ativo")) {
-    pendingItems.push("A unidade não possui semestre ativo.");
+    pendingItems.push("A unidade nÃ£o possui semestre ativo.");
   }
 
   if (!professorUsers.length) {
-    pendingItems.push("Ainda não há professores cadastrados na unidade.");
+    pendingItems.push("Ainda nÃ£o hÃ¡ professores cadastrados na unidade.");
   }
 
   if (!studentUsers.length) {
-    pendingItems.push("Ainda não há alunos cadastrados na unidade.");
+    pendingItems.push("Ainda nÃ£o hÃ¡ alunos cadastrados na unidade.");
   }
 
   return {
@@ -1347,7 +1490,7 @@ export async function getMasterUnitDetailPageData(
 
       return {
         coordinatorId: coordinator.usuario_id,
-        name: user?.nome_completo ?? "Coordenador não identificado",
+        name: user?.nome_completo ?? "Coordenador nÃ£o identificado",
         email: user?.email ?? "Sem e-mail",
         roleTitle: coordinator.cargo,
         isActive: Boolean(user?.ativo),
@@ -1372,15 +1515,22 @@ export async function getMasterUnitDetailPageData(
 export async function getMasterGlobalAuditPageData(input?: {
   institutionId?: string | string[];
   unitId?: string | string[];
+  courseId?: string | string[];
   role?: string | string[];
   period?: string | string[];
 }): Promise<MasterGlobalAuditPageData> {
   const supabase = createSupabaseAdminClient();
-  const [institutionsResult, unitsResult, profiles] = await Promise.all([
-    supabase.from("instituicoes").select("id, nome, slug, ativo").order("nome"),
-    supabase.from("unidades").select("*").order("nome"),
-    loadProfiles()
-  ]);
+  const [institutionsResult, unitsResult, coursesResult, offersResult, profiles] =
+    await Promise.all([
+      supabase.from("instituicoes").select("id, nome, slug, ativo").order("nome"),
+      supabase.from("unidades").select("*").order("nome"),
+      supabase.from("cursos").select("id, instituicao_id, codigo, nome").order("nome"),
+      supabase
+        .from("ofertas_curso_unidade")
+        .select("id, instituicao_id, unidade_id, curso_id")
+        .order("created_at", { ascending: false }),
+      loadProfiles()
+    ]);
 
   if (institutionsResult.error) {
     throw new Error(
@@ -1394,8 +1544,17 @@ export async function getMasterGlobalAuditPageData(input?: {
   if (unitsResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "NÃ£o foi possÃ­vel carregar as unidades para a auditoria global.",
+        "Não foi possível carregar as unidades para a auditoria global.",
         unitsResult.error
+      )
+    );
+  }
+
+  if (coursesResult.error || offersResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Não foi possível carregar os cursos disponíveis para a auditoria global.",
+        coursesResult.error ?? offersResult.error
       )
     );
   }
@@ -1404,9 +1563,19 @@ export async function getMasterGlobalAuditPageData(input?: {
     Pick<Database["public"]["Tables"]["instituicoes"]["Row"], "id" | "nome" | "slug" | "ativo">
   >;
   const units = (unitsResult.data ?? []) as UnitRow[];
-  const institutionsById = new Map(institutions.map((institution) => [institution.id, institution]));
+  const courses = (coursesResult.data ?? []) as Array<
+    Pick<CourseRow, "id" | "instituicao_id" | "codigo" | "nome">
+  >;
+  const offers = (offersResult.data ?? []) as Array<
+    Pick<CourseOfferRow, "id" | "instituicao_id" | "unidade_id" | "curso_id">
+  >;
+  const institutionsById = new Map(
+    institutions.map((institution) => [institution.id, institution])
+  );
+  const courseMap = new Map(courses.map((course) => [course.id, course]));
   const requestedInstitutionId = normalizeFilterValue(input?.institutionId);
   const requestedUnitId = normalizeFilterValue(input?.unitId);
+  const requestedCourseId = normalizeFilterValue(input?.courseId);
   const requestedRole = normalizeFilterValue(input?.role);
   const requestedPeriod = normalizeFilterValue(input?.period);
   const validInstitutionId = institutionsById.has(requestedInstitutionId)
@@ -1417,6 +1586,19 @@ export async function getMasterGlobalAuditPageData(input?: {
     requestedUnit &&
     (!validInstitutionId || requestedUnit.instituicao_id === validInstitutionId)
       ? requestedUnitId
+      : "";
+  const requestedCourse = courseMap.get(requestedCourseId) ?? null;
+  const validCourseId =
+    requestedCourse &&
+    (!validInstitutionId || requestedCourse.instituicao_id === validInstitutionId) &&
+    (!validUnitId ||
+      offers.some(
+        (offer) =>
+          offer.curso_id === requestedCourseId &&
+          offer.unidade_id === validUnitId &&
+          (!validInstitutionId || offer.instituicao_id === validInstitutionId)
+      ))
+      ? requestedCourseId
       : "";
   const roleFilter: MasterGlobalAuditPageData["filters"]["role"] =
     visibleInstitutionalProfiles.includes(requestedRole as VisibleProfileCode)
@@ -1429,7 +1611,8 @@ export async function getMasterGlobalAuditPageData(input?: {
     requestedPeriod === "365"
       ? requestedPeriod
       : "all";
-  const auditRowLimit = validUnitId ? 1200 : validInstitutionId ? 1200 : 400;
+  const auditRowLimit =
+    validUnitId || validInstitutionId || validCourseId ? 1200 : 400;
 
   let auditQuery = supabase
     .from("historico_alteracoes")
@@ -1448,7 +1631,7 @@ export async function getMasterGlobalAuditPageData(input?: {
   if (auditRowsResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "NÃ£o foi possÃ­vel carregar os eventos da auditoria global.",
+        "Não foi possível carregar os eventos da auditoria global.",
         auditRowsResult.error
       )
     );
@@ -1465,6 +1648,7 @@ export async function getMasterGlobalAuditPageData(input?: {
 
     if (entry.tabela === "semestres") {
       const semesterId = getAuditString(payload, "id") ?? entry.registro_id ?? undefined;
+
       if (semesterId) {
         semesterIds.add(semesterId);
       }
@@ -1528,7 +1712,7 @@ export async function getMasterGlobalAuditPageData(input?: {
   const evaluationRowsResult = evaluationIds.size
     ? await supabase
         .from("avaliacoes")
-        .select("id, matricula_turma_id")
+        .select("id, matricula_turma_id, oferta_curso_unidade_id")
         .in("id", [...evaluationIds])
     : { data: [], error: null };
 
@@ -1542,7 +1726,7 @@ export async function getMasterGlobalAuditPageData(input?: {
   }
 
   const evaluationRows = (evaluationRowsResult.data ?? []) as Array<
-    Pick<EvaluationRow, "id" | "matricula_turma_id">
+    Pick<EvaluationRow, "id" | "matricula_turma_id" | "oferta_curso_unidade_id">
   >;
 
   for (const evaluation of evaluationRows) {
@@ -1552,7 +1736,7 @@ export async function getMasterGlobalAuditPageData(input?: {
   const enrollmentRowsResult = enrollmentIds.size
     ? await supabase
         .from("matriculas_turma")
-        .select("id, turma_id")
+        .select("id, turma_id, oferta_curso_unidade_id")
         .in("id", [...enrollmentIds])
     : { data: [], error: null };
 
@@ -1566,7 +1750,7 @@ export async function getMasterGlobalAuditPageData(input?: {
   }
 
   const enrollmentRows = (enrollmentRowsResult.data ?? []) as Array<
-    Pick<EnrollmentRow, "id" | "turma_id">
+    Pick<EnrollmentRow, "id" | "turma_id" | "oferta_curso_unidade_id">
   >;
 
   for (const enrollment of enrollmentRows) {
@@ -1576,7 +1760,7 @@ export async function getMasterGlobalAuditPageData(input?: {
   const classRowsResult = classIds.size
     ? await supabase
         .from("turmas")
-        .select("id, semestre_id")
+        .select("id, semestre_id, oferta_curso_unidade_id")
         .in("id", [...classIds])
     : { data: [], error: null };
 
@@ -1590,7 +1774,7 @@ export async function getMasterGlobalAuditPageData(input?: {
   }
 
   const classRows = (classRowsResult.data ?? []) as Array<
-    Pick<ClassRow, "id" | "semestre_id">
+    Pick<ClassRow, "id" | "semestre_id" | "oferta_curso_unidade_id">
   >;
 
   for (const classGroup of classRows) {
@@ -1600,7 +1784,7 @@ export async function getMasterGlobalAuditPageData(input?: {
   const semesterRowsResult = semesterIds.size
     ? await supabase
         .from("semestres")
-        .select("id, unidade_id")
+        .select("id, unidade_id, oferta_curso_unidade_id")
         .in("id", [...semesterIds])
     : { data: [], error: null };
 
@@ -1624,7 +1808,7 @@ export async function getMasterGlobalAuditPageData(input?: {
   if (actorUsersResult.error) {
     throw new Error(
       formatSupabaseErrorMessage(
-        "NÃ£o foi possÃ­vel carregar os usuÃ¡rios responsÃ¡veis pelos eventos.",
+        "Não foi possível carregar os usuários responsáveis pelos eventos.",
         actorUsersResult.error
       )
     );
@@ -1640,10 +1824,13 @@ export async function getMasterGlobalAuditPageData(input?: {
     enrollments: new Map(enrollmentRows.map((enrollment) => [enrollment.id, enrollment])),
     classes: new Map(classRows.map((classGroup) => [classGroup.id, classGroup])),
     semesters: new Map(
-      ((semesterRowsResult.data ?? []) as Array<Pick<SemesterRow, "id" | "unidade_id">>).map(
-        (semester) => [semester.id, semester]
-      )
-    )
+      (
+        (semesterRowsResult.data ?? []) as Array<
+          Pick<SemesterRow, "id" | "unidade_id" | "oferta_curso_unidade_id">
+        >
+      ).map((semester) => [semester.id, semester])
+    ),
+    offers: new Map(offers.map((offer) => [offer.id, offer]))
   };
 
   const entries = auditRows
@@ -1654,22 +1841,43 @@ export async function getMasterGlobalAuditPageData(input?: {
         : null;
       const payload = asAuditRecord(entry.dados_depois ?? entry.dados_antes);
       const resolvedUnitId = resolveMasterAuditUnitId(entry, payload, resolutionContext);
+      const resolvedCourseId = resolveMasterAuditCourseId(entry, payload, resolutionContext);
+      const resolvedInstitutionId =
+        resolvedUnitId
+          ? unitMap.get(resolvedUnitId)?.instituicao_id ?? null
+          : resolvedCourseId
+            ? courseMap.get(resolvedCourseId)?.instituicao_id ?? null
+            : null;
+      const resolvedCourse = resolvedCourseId ? courseMap.get(resolvedCourseId) ?? null : null;
 
       return {
         id: String(entry.id),
-        institutionId: resolvedUnitId
-          ? unitMap.get(resolvedUnitId)?.instituicao_id ?? null
-          : null,
+        institutionId: resolvedInstitutionId,
+        institutionName: resolvedInstitutionId
+          ? institutionsById.get(resolvedInstitutionId)?.nome ?? "Instituição não identificada"
+          : "Sem instituição",
         unitName: resolvedUnitId
           ? unitMap.get(resolvedUnitId)?.nome ?? "Unidade não identificada"
           : "Sem unidade",
-        actorName: actor?.nome_completo ?? "Sistema",
-        actorProfileLabel: profileCode ? roleLabel(profileCode) : "Sistema",
+        courseId: resolvedCourseId ?? null,
+        courseName: buildCourseDisplayName(resolvedCourse),
+        actorName: normalizeAuditDisplayText(actor?.nome_completo ?? "Sistema") || "Sistema",
+        actorProfileLabel:
+          normalizeAuditDisplayText(profileCode ? roleLabel(profileCode) : "Sistema") || "Sistema",
         actorProfileCode: profileCode,
         action: entry.acao,
-        tableName: entry.tabela,
-        recordLabel: buildRecordLabel(entry),
-        summary: buildAuditSummary(entry),
+        tableName: normalizeAuditDisplayText(entry.tabela) || entry.tabela,
+        recordLabel: normalizeAuditDisplayText(buildRecordLabel(entry)) || entry.tabela,
+        summary:
+          normalizeAuditDisplayText(buildAuditSummary(entry)) || buildAuditSummary(entry),
+        detailsText: normalizeAuditDisplayText(
+          [
+            `Perfil: ${profileCode ? roleLabel(profileCode) : "Sistema"}`,
+            `Responsável: ${actor?.nome_completo ?? "Sistema"}`,
+            `Tabela: ${entry.tabela}`,
+            `Registro: ${buildRecordLabel(entry)}`
+          ].join(" | ")
+        ),
         happenedAt: entry.created_at,
         unitId: resolvedUnitId
       };
@@ -1683,6 +1891,10 @@ export async function getMasterGlobalAuditPageData(input?: {
         return false;
       }
 
+      if (validCourseId && entry.courseId !== validCourseId) {
+        return false;
+      }
+
       if (roleFilter !== "todos" && entry.actorProfileCode !== roleFilter) {
         return false;
       }
@@ -1693,9 +1905,11 @@ export async function getMasterGlobalAuditPageData(input?: {
   return {
     institutions: buildInstitutionOptions(institutions),
     units: buildUnitOptions(units, institutionsById),
+    courses: buildCourseOptions(courses, offers),
     filters: {
       institutionId: validInstitutionId,
       unitId: validUnitId,
+      courseId: validCourseId,
       role: roleFilter,
       period: periodFilter
     },
@@ -1706,15 +1920,19 @@ export async function getMasterGlobalAuditPageData(input?: {
         .filter((entry) => entry.actorName !== "Sistema")
         .map((entry) => `${entry.actorName}-${entry.actorProfileLabel}`)
     ).size,
+    generatedAt: new Date().toISOString(),
     entries: entries.map((entry) => ({
       id: entry.id,
+      institutionName: entry.institutionName,
       unitName: entry.unitName,
+      courseName: entry.courseName,
       actorName: entry.actorName,
       actorProfileLabel: entry.actorProfileLabel,
       action: entry.action,
       tableName: entry.tableName,
       recordLabel: entry.recordLabel,
       summary: entry.summary,
+      detailsText: entry.detailsText,
       happenedAt: entry.happenedAt
     }))
   };

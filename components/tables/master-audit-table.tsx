@@ -13,6 +13,7 @@ interface MasterAuditTableEntry {
   recordLabel: string;
   summary: string;
   happenedAt: string;
+  courseName?: string | null;
 }
 
 interface MasterAuditTableProps {
@@ -131,6 +132,12 @@ function MasterAuditFragmentRow(props: {
                   <span className="audit-table-details-label">Registro</span>
                   <strong>{entry.recordLabel}</strong>
                 </div>
+                {entry.courseName ? (
+                  <div className="audit-table-details-item">
+                    <span className="audit-table-details-label">Curso</span>
+                    <strong>{entry.courseName}</strong>
+                  </div>
+                ) : null}
               </div>
               <div className="audit-table-details-summary">
                 <span className="audit-table-details-label">Resumo completo</span>
