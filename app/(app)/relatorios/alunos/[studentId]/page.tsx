@@ -1,7 +1,7 @@
-﻿import Link from "next/link";
-import { BrandLockup } from "@/components/common/brand-lockup";
+import Link from "next/link";
 import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
+import { ReportBrandLockup } from "@/components/reports/report-brand-lockup";
 import { ReportPrintButton } from "@/components/reports/report-print-button";
 import { CriteriaTable } from "@/components/tables/criteria-table";
 import { requireRole } from "@/lib/auth/session";
@@ -11,6 +11,7 @@ import {
   formatLaunchType,
   formatPercentage
 } from "@/lib/utils/format";
+import { loadInstitutionalReportBrandingForCurrentUser } from "@/services/report-branding";
 import { getAuthenticatedStudentFinalReport } from "@/services/reports";
 
 interface StudentFinalReportPageProps {
@@ -45,6 +46,8 @@ export default async function StudentFinalReportPage(
   props: StudentFinalReportPageProps
 ) {
   const currentUser = await requireRole(["coordenador", "professor"]);
+  const reportBranding =
+    await loadInstitutionalReportBrandingForCurrentUser(currentUser);
   const { studentId } = await props.params;
   const searchParams = (await props.searchParams) ?? {};
   const requestedSemesterId = readSearchParam(searchParams, "semestre");
@@ -87,9 +90,9 @@ export default async function StudentFinalReportPage(
     <div className="stack reports-dashboard student-final-report">
       <section className="hero-card student-final-report-hero">
         <div className="report-hero-brand">
-          <BrandLockup
-            eyebrow="Plataforma acadêmica"
-            subtitle="Desempenho e gestão de estágios"
+          <ReportBrandLockup
+            branding={reportBranding}
+            fallbackEyebrow="Plataforma acadêmica"
           />
         </div>
         <p className="eyebrow">
@@ -143,7 +146,9 @@ export default async function StudentFinalReportPage(
               actions={
                 <div className="actions-row">
                   <a href={backHref} className="button button-secondary">
-                    {origin === "audit" ? "Voltar à área arquivada" : "Voltar aos relatórios"}
+                    {origin === "audit"
+                      ? "Voltar à área arquivada"
+                      : "Voltar aos relatórios"}
                   </a>
                 </div>
               }
@@ -442,8 +447,3 @@ export default async function StudentFinalReportPage(
     </div>
   );
 }
-
-
-
-
-

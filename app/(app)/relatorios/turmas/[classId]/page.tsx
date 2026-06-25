@@ -1,8 +1,8 @@
 import type { Route } from "next";
 import Link from "next/link";
-import { BrandLockup } from "@/components/common/brand-lockup";
 import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
+import { ReportBrandLockup } from "@/components/reports/report-brand-lockup";
 import { ReportAutoPrint } from "@/components/reports/report-auto-print";
 import { ReportPrintButton } from "@/components/reports/report-print-button";
 import { requireRole } from "@/lib/auth/session";
@@ -10,6 +10,7 @@ import {
   formatPercentage,
   formatStudentStatusBadge
 } from "@/lib/utils/format";
+import { loadInstitutionalReportBrandingForCurrentUser } from "@/services/report-branding";
 import { getAuthenticatedClassFinalReport } from "@/services/reports";
 
 interface ClassFinalReportPageProps {
@@ -28,6 +29,8 @@ export default async function ClassFinalReportPage({
   searchParams
 }: ClassFinalReportPageProps) {
   const currentUser = await requireRole(["coordenador", "professor"]);
+  const reportBranding =
+    await loadInstitutionalReportBrandingForCurrentUser(currentUser);
   const { classId } = await params;
   const resolvedSearchParams = (await searchParams) ?? {};
   const origin = Array.isArray(resolvedSearchParams.from)
@@ -65,17 +68,17 @@ export default async function ClassFinalReportPage({
 
       <section className="hero-card class-final-report-hero">
         <div className="report-hero-brand">
-          <BrandLockup
-            eyebrow={"Plataforma acad\u00eamica"}
-            subtitle={"Desempenho e gest\u00e3o de est\u00e1gios"}
+          <ReportBrandLockup
+            branding={reportBranding}
+            fallbackEyebrow="Plataforma acadêmica"
           />
         </div>
-        <p className="eyebrow">{"Relat\u00f3rio final por turma"}</p>
-        <h1>{report?.classGroup.name ?? "Turma n\u00e3o identificada"}</h1>
+        <p className="eyebrow">Relatório final por turma</p>
+        <h1>{report?.classGroup.name ?? "Turma não identificada"}</h1>
         <p>
           {report
-            ? `${report.classGroup.code} \u00b7 ${report.classGroup.semesterCode} \u00b7 ${report.classGroup.areaName}`
-            : "N\u00e3o foi poss\u00edvel consolidar o fechamento desta turma."}
+            ? `${report.classGroup.code} · ${report.classGroup.semesterCode} · ${report.classGroup.areaName}`
+            : "Não foi possível consolidar o fechamento desta turma."}
         </p>
         {report ? (
           <div className="actions-row report-screen-only">
@@ -100,21 +103,19 @@ export default async function ClassFinalReportPage({
         <>
           <SectionCard
             title="Contexto da turma"
-            description={
-              "Identifica\u00e7\u00e3o acad\u00eamica e escopo de supervis\u00e3o usado na consolida\u00e7\u00e3o."
-            }
+            description="Identificação acadêmica e escopo de supervisão usado na consolidação."
             className="class-final-report-context-card"
             actions={
               <Link href={backHref} className="button button-secondary">
                 {origin === "audit"
-                  ? "Voltar \u00e0 auditoria"
-                  : "Voltar aos relat\u00f3rios"}
+                  ? "Voltar à auditoria"
+                  : "Voltar aos relatórios"}
               </Link>
             }
           >
             <div className="report-identity-grid class-final-report-identity-grid">
               <div className="management-student-summary-item class-final-report-identity-item">
-                <span>{"C\u00f3digo"}</span>
+                <span>Código</span>
                 <strong>{report.classGroup.code}</strong>
               </div>
               <div className="management-student-summary-item class-final-report-identity-item is-wide">
@@ -126,7 +127,7 @@ export default async function ClassFinalReportPage({
                 <strong>{report.classGroup.semesterCode}</strong>
               </div>
               <div className="management-student-summary-item class-final-report-identity-item is-wide">
-                <span>{"\u00c1rea de est\u00e1gio"}</span>
+                <span>Área de estágio</span>
                 <strong>{report.classGroup.areaName}</strong>
               </div>
               <div className="management-student-summary-item class-final-report-identity-item">
@@ -144,34 +145,34 @@ export default async function ClassFinalReportPage({
             <MetricCard
               label="Alunos na turma"
               value={String(report.summary.totalStudents)}
-              hint={"Alunos consolidados neste relat\u00f3rio final."}
+              hint="Alunos consolidados neste relatório final."
             />
             <MetricCard
-              label={"M\u00e9dia geral"}
+              label="Média geral"
               value={formatPercentage(report.summary.averageFinalPercentage)}
-              hint={"M\u00e9dia final consolidada da turma."}
+              hint="Média final consolidada da turma."
               tone="positive"
             />
             <MetricCard
-              label={"Avalia\u00e7\u00f5es publicadas"}
+              label="Avaliações publicadas"
               value={String(report.summary.totalPublishedEvaluations)}
-              hint={"Lan\u00e7amentos publicados que sustentam o fechamento."}
+              hint="Lançamentos publicados que sustentam o fechamento."
             />
             <MetricCard
-              label={"Conclus\u00e3o m\u00e9dia"}
+              label="Conclusão média"
               value={formatPercentage(report.summary.completionAverage)}
-              hint={"Percentual m\u00e9dio de crit\u00e9rios com fechamento publicado."}
+              hint="Percentual médio de critérios com fechamento publicado."
             />
             <MetricCard
-              label={"Horas n\u00e3o justificadas"}
+              label="Horas não justificadas"
               value={`${report.summary.totalUnjustifiedAbsenceHours}h`}
               hint="Penalidade total consolidada na turma."
               tone="alert"
             />
             <MetricCard
-              label={"Alunos em aten\u00e7\u00e3o"}
+              label="Alunos em atenção"
               value={String(report.summary.studentsAtRisk)}
-              hint={"Casos que pedem acompanhamento mais pr\u00f3ximo."}
+              hint="Casos que pedem acompanhamento mais próximo."
               tone="alert"
             />
           </div>
@@ -179,9 +180,7 @@ export default async function ClassFinalReportPage({
           <div className="split-grid">
             <SectionCard
               title="Panorama resumido"
-              description={
-                "Leitura r\u00e1pida para fechamento acad\u00eamico e tomada de decis\u00e3o."
-              }
+              description="Leitura rápida para fechamento acadêmico e tomada de decisão."
             >
               <p className="empty-message">{report.summary.panorama}</p>
             </SectionCard>
@@ -209,10 +208,8 @@ export default async function ClassFinalReportPage({
           </div>
 
           <SectionCard
-            title={"Composi\u00e7\u00e3o e situa\u00e7\u00e3o da turma"}
-            description={
-              "Lista de alunos com indicadores principais e acesso ao relat\u00f3rio individual."
-            }
+            title="Composição e situação da turma"
+            description="Lista de alunos com indicadores principais e acesso ao relatório individual."
           >
             {report.students.length ? (
               <div className="table-wrap">
@@ -224,9 +221,9 @@ export default async function ClassFinalReportPage({
                       <th>Subtotal</th>
                       <th>Desconto</th>
                       <th>Total</th>
-                      <th>{"Conclus\u00e3o"}</th>
-                      <th>{"Situa\u00e7\u00e3o"}</th>
-                      <th>{"A\u00e7\u00f5es"}</th>
+                      <th>Conclusão</th>
+                      <th>Situação</th>
+                      <th>Ações</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -239,7 +236,7 @@ export default async function ClassFinalReportPage({
                         <td className="report-table-text-cell">
                           <div>{student.email}</div>
                           <div className="table-helper">
-                            {student.cellphone ?? "Celular n\u00e3o informado"}
+                            {student.cellphone ?? "Celular não informado"}
                           </div>
                         </td>
                         <td>{formatPercentage(student.subtotalPercentage)}</td>
@@ -257,7 +254,7 @@ export default async function ClassFinalReportPage({
                             className="button button-secondary button-small"
                           >
                             {report.viewerRole === "professor"
-                              ? "Ver relat\u00f3rio da \u00e1rea"
+                              ? "Ver relatório da área"
                               : "Ver aluno"}
                           </Link>
                         </td>
@@ -275,21 +272,20 @@ export default async function ClassFinalReportPage({
         </>
       ) : (
         <SectionCard
-          title={emptyState?.title ?? "Relat\u00f3rio indispon\u00edvel"}
+          title={emptyState?.title ?? "Relatório indisponível"}
           description={
             emptyState?.description ??
-            "N\u00e3o foi poss\u00edvel montar o relat\u00f3rio final desta turma."
+            "Não foi possível montar o relatório final desta turma."
           }
           actions={
             <Link href="/relatorios" className="button button-secondary">
-              {"Voltar aos relat\u00f3rios"}
+              Voltar aos relatórios
             </Link>
           }
         >
           <p className="empty-message">
-            {
-              "Quando houver turma, matr\u00edculas, lan\u00e7amentos e faltas consistentes no banco, este fechamento ser\u00e1 exibido aqui."
-            }
+            Quando houver turma, matrículas, lançamentos e faltas consistentes no
+            banco, este fechamento será exibido aqui.
           </p>
         </SectionCard>
       )}

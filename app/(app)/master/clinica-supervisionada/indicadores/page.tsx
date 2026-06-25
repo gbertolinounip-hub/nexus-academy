@@ -3,6 +3,7 @@ import { ClinicalAttendanceIndicatorsDashboard } from "@/components/clinical/cli
 import { SectionCard } from "@/components/common/section-card";
 import { requireRole } from "@/lib/auth/session";
 import { getClinicalAttendanceIndicatorsPageData } from "@/services/clinical-indicators";
+import { loadInstitutionalReportBrandingForCurrentUser } from "@/services/report-branding";
 
 export default async function MasterClinicalAttendanceIndicatorsPage(props: {
   searchParams?: Promise<{
@@ -18,6 +19,8 @@ export default async function MasterClinicalAttendanceIndicatorsPage(props: {
   }>;
 }) {
   const currentUser = await requireRole(["coordenador_master"]);
+  const reportBranding =
+    await loadInstitutionalReportBrandingForCurrentUser(currentUser);
   const searchParams = (await props.searchParams) ?? {};
   const { pageData, emptyState } = await getClinicalAttendanceIndicatorsPageData(
     currentUser,
@@ -64,6 +67,7 @@ export default async function MasterClinicalAttendanceIndicatorsPage(props: {
 
   return (
     <ClinicalAttendanceIndicatorsDashboard
+      branding={reportBranding}
       pageData={pageData}
       basePath={"/master/clinica-supervisionada/indicadores" as Route}
       heroEyebrow="Gestão clínica global"

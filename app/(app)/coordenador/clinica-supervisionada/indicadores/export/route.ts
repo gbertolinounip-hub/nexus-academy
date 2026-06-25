@@ -9,9 +9,15 @@ import {
   buildClinicalAttendanceIndicatorsWorkbook,
   getClinicalAttendanceIndicatorsFileBaseName
 } from "@/services/clinical-indicators-export";
+import { getClinicalAttendanceIndicatorsPageData } from "@/services/clinical-indicators";
 import {
-  getClinicalAttendanceIndicatorsPageData
-} from "@/services/clinical-indicators";
+  buildInstitutionalReportHeaderRows,
+  loadInstitutionalReportBrandingByInstitutionId,
+  loadInstitutionalReportBrandingForCurrentUser,
+  resolveCurrentUserCourseName,
+  resolveCurrentUserUnitName,
+  resolveNamedScopeValue
+} from "@/services/report-branding";
 
 export const runtime = "nodejs";
 
@@ -47,8 +53,23 @@ export async function GET(request: Request) {
     );
   }
 
+  const reportBranding =
+    (await loadInstitutionalReportBrandingByInstitutionId(pageData.filters.institutionId)) ??
+    (await loadInstitutionalReportBrandingForCurrentUser(currentUser));
+  const headerRows = buildInstitutionalReportHeaderRows(reportBranding, {
+    reportName: "Indicadores clínicos",
+    courseName:
+      resolveNamedScopeValue(pageData.filterOptions.courses, pageData.filters.courseId) ??
+      resolveCurrentUserCourseName(currentUser),
+    unitName:
+      resolveNamedScopeValue(
+        pageData.filterOptions.units.map((unit) => ({ id: unit.id, name: unit.name })),
+        pageData.filters.unitId
+      ) ?? resolveCurrentUserUnitName(currentUser)
+  });
+
   return buildXlsxDownloadResponse(
     getClinicalAttendanceIndicatorsFileBaseName(pageData),
-    buildClinicalAttendanceIndicatorsWorkbook(pageData)
+    buildClinicalAttendanceIndicatorsWorkbook(pageData, headerRows)
   );
 }

@@ -1,12 +1,13 @@
-﻿import Link from "next/link";
-import { BrandLockup } from "@/components/common/brand-lockup";
+import Link from "next/link";
 import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
 import { ProgressBars } from "@/components/dashboard/progress-bars";
+import { ReportBrandLockup } from "@/components/reports/report-brand-lockup";
 import { ReportPrintButton } from "@/components/reports/report-print-button";
 import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/session";
 import { formatPercentage, formatStudentStatusBadge } from "@/lib/utils/format";
+import { loadInstitutionalReportBrandingForCurrentUser } from "@/services/report-branding";
 import { getAuthenticatedReportsPageData } from "@/services/reports";
 
 interface ReportsPageProps {
@@ -23,6 +24,8 @@ function readSearchParam(
 
 export default async function ReportsPage(props: ReportsPageProps) {
   const currentUser = await requireRole(["coordenador", "professor"]);
+  const reportBranding =
+    await loadInstitutionalReportBrandingForCurrentUser(currentUser);
   const searchParams = (await props.searchParams) ?? {};
   const requestedSemesterId = readSearchParam(searchParams, "semestre");
   const { reports, emptyState } = await getAuthenticatedReportsPageData(
@@ -37,28 +40,26 @@ export default async function ReportsPage(props: ReportsPageProps) {
     isCourseManagerView
       ? "Relatórios consolidados do curso"
       : currentUser.role === "coordenador"
-      ? "Relatórios finais acadêmicos"
-      : "Relatórios finais sob supervisão";
+        ? "Relatórios finais acadêmicos"
+        : "Relatórios finais sob supervisão";
   const pageDescription =
     isCourseManagerView
       ? `Visão consolidada de ${activeCourseManagerContext?.cursoNome ?? currentUser.cursoNome ?? "curso"}, abrangendo ofertas, unidades, turmas, áreas, alunos e lançamentos avaliativos da IES atual.`
       : currentUser.role === "coordenador"
-      ? "Visão gerencial do fechamento do semestre, com consolidações por bloco, área, turma e aluno."
-      : "Visão final das turmas e dos alunos que estão no escopo acadêmico deste supervisor.";
+        ? "Visão gerencial do fechamento do semestre, com consolidações por bloco, área, turma e aluno."
+        : "Visão final das turmas e dos alunos que estão no escopo acadêmico deste supervisor.";
 
   return (
     <div
       className={`stack reports-dashboard${
-        currentUser.role === "professor"
-          ? " reports-dashboard-professor"
-          : ""
+        currentUser.role === "professor" ? " reports-dashboard-professor" : ""
       }`}
     >
       <section className="hero-card">
         <div className="report-hero-brand">
-          <BrandLockup
-            eyebrow="Plataforma acadêmica"
-            subtitle="Desempenho e gestão de estágios"
+          <ReportBrandLockup
+            branding={reportBranding}
+            fallbackEyebrow="Plataforma acadêmica"
           />
         </div>
         <p className="eyebrow">Relatórios finais</p>
@@ -402,8 +403,3 @@ export default async function ReportsPage(props: ReportsPageProps) {
     </div>
   );
 }
-
-
-
-
-

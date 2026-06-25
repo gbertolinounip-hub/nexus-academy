@@ -3,9 +3,11 @@ import type { Route } from "next";
 import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
 import { ClinicalAttendanceIndicatorsFilters } from "@/components/forms/clinical-attendance-indicators-filters";
+import { ReportBrandLockup } from "@/components/reports/report-brand-lockup";
 import { ClinicalAttendanceBreakdownTable } from "@/components/tables/clinical-attendance-breakdown-table";
 import { formatDate } from "@/lib/utils/format";
 import type { ClinicalAttendanceIndicatorsPageData } from "@/services/clinical-indicators";
+import type { InstitutionalReportBranding } from "@/services/report-branding";
 
 interface ClinicalAttendanceIndicatorsDashboardProps {
   pageData: ClinicalAttendanceIndicatorsPageData;
@@ -15,6 +17,7 @@ interface ClinicalAttendanceIndicatorsDashboardProps {
   heroDescription: string;
   backHref: Route;
   backLabel: string;
+  branding?: InstitutionalReportBranding | null;
 }
 
 function buildClinicalAttendanceIndicatorsQuery(
@@ -80,6 +83,12 @@ export function ClinicalAttendanceIndicatorsDashboard(
   return (
     <div className="stack clinical-indicators-dashboard">
       <section className="hero-card">
+        <div className="report-hero-brand">
+          <ReportBrandLockup
+            branding={props.branding}
+            fallbackEyebrow={props.heroEyebrow}
+          />
+        </div>
         <p className="eyebrow">{props.heroEyebrow}</p>
         <h1>{props.heroTitle}</h1>
         <p>{props.heroDescription}</p>
@@ -88,7 +97,10 @@ export function ClinicalAttendanceIndicatorsDashboard(
             {props.backLabel}
           </Link>
           {query ? (
-            <Link href={`${props.basePath}${query}` as Route} className="button button-secondary">
+            <Link
+              href={`${props.basePath}${query}` as Route}
+              className="button button-secondary"
+            >
               Atualizar recorte
             </Link>
           ) : null}

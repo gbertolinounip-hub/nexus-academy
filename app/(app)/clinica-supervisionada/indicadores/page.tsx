@@ -3,6 +3,7 @@ import { ClinicalAttendanceIndicatorsDashboard } from "@/components/clinical/cli
 import { SectionCard } from "@/components/common/section-card";
 import { requireRole } from "@/lib/auth/session";
 import { getClinicalAttendanceIndicatorsPageData } from "@/services/clinical-indicators";
+import { loadInstitutionalReportBrandingForCurrentUser } from "@/services/report-branding";
 
 export default async function ClinicalAttendanceIndicatorsPage(props: {
   searchParams?: Promise<{
@@ -14,6 +15,8 @@ export default async function ClinicalAttendanceIndicatorsPage(props: {
   }>;
 }) {
   const currentUser = await requireRole(["professor"]);
+  const reportBranding =
+    await loadInstitutionalReportBrandingForCurrentUser(currentUser);
   const searchParams = (await props.searchParams) ?? {};
   const { pageData, emptyState } = await getClinicalAttendanceIndicatorsPageData(
     currentUser,
@@ -56,6 +59,7 @@ export default async function ClinicalAttendanceIndicatorsPage(props: {
 
   return (
     <ClinicalAttendanceIndicatorsDashboard
+      branding={reportBranding}
       pageData={pageData}
       basePath={"/clinica-supervisionada/indicadores" as Route}
       heroEyebrow="Indicadores clínicos"

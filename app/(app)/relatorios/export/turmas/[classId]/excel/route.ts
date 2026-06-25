@@ -1,4 +1,4 @@
-﻿import {
+import {
   buildExcelDownloadResponse,
   buildUnauthorizedDownloadResponse,
   buildUnavailableDownloadResponse,
@@ -8,6 +8,12 @@ import {
   buildClassWorkbook,
   getClassFileBaseName
 } from "@/services/report-exports";
+import {
+  buildInstitutionalReportHeaderRows,
+  loadInstitutionalReportBrandingForCurrentUser,
+  resolveCurrentUserCourseName,
+  resolveCurrentUserUnitName
+} from "@/services/report-branding";
 import { getAuthenticatedClassFinalReport } from "@/services/reports";
 
 export const runtime = "nodejs";
@@ -45,9 +51,17 @@ export async function GET(request: Request, props: ClassExcelRouteProps) {
     );
   }
 
+  const reportBranding =
+    await loadInstitutionalReportBrandingForCurrentUser(currentUser);
+  const headerRows = buildInstitutionalReportHeaderRows(reportBranding, {
+    reportName: "Relatório final por turma",
+    courseName: resolveCurrentUserCourseName(currentUser),
+    unitName: resolveCurrentUserUnitName(currentUser),
+    semesterName: `${report.classGroup.semesterCode} · ${report.classGroup.semesterName}`
+  });
+
   return buildExcelDownloadResponse(
     getClassFileBaseName(report),
-    await buildClassWorkbook(report)
+    await buildClassWorkbook(report, headerRows)
   );
 }
-

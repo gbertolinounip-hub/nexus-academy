@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import { formatDate, formatDateTime } from "@/lib/utils/format";
+import type { InstitutionalReportHeaderRow } from "@/services/report-branding";
 import type {
   ClinicalAttendanceIndicatorsBreakdownRow,
   ClinicalAttendanceIndicatorsPageData,
@@ -77,6 +78,16 @@ function applyClinicalIndicatorsSheetColumns(
   sheet["!cols"] = widths.map((width) => ({ wch: width }));
 }
 
+function buildClinicalIndicatorsHeaderMatrix(
+  headerRows: InstitutionalReportHeaderRow[]
+) {
+  if (!headerRows.length) {
+    return [];
+  }
+
+  return [...headerRows.map((row) => [row.label, row.value]), []];
+}
+
 export function getClinicalAttendanceIndicatorsFileBaseName(
   pageData: ClinicalAttendanceIndicatorsPageData
 ) {
@@ -85,9 +96,11 @@ export function getClinicalAttendanceIndicatorsFileBaseName(
 }
 
 export function buildClinicalAttendanceIndicatorsWorkbook(
-  pageData: ClinicalAttendanceIndicatorsPageData
+  pageData: ClinicalAttendanceIndicatorsPageData,
+  headerRows: InstitutionalReportHeaderRow[] = []
 ) {
   const workbook = XLSX.utils.book_new();
+  const workbookHeaderMatrix = buildClinicalIndicatorsHeaderMatrix(headerRows);
   const filterSummaryRows = [
     ["Perfil", resolveClinicalIndicatorsViewerLabel(pageData.viewerRole)],
     ["Gerado em", formatDateTime(pageData.generatedAt)],
@@ -148,6 +161,7 @@ export function buildClinicalAttendanceIndicatorsWorkbook(
   ];
 
   const summarySheet = XLSX.utils.aoa_to_sheet([
+    ...workbookHeaderMatrix,
     ["Indicadores clínicos"],
     [],
     ...filterSummaryRows,
@@ -180,6 +194,9 @@ export function buildClinicalAttendanceIndicatorsWorkbook(
     rows: ClinicalAttendanceIndicatorsBreakdownRow[]
   ) => {
     const sheet = XLSX.utils.aoa_to_sheet([
+      ...workbookHeaderMatrix,
+      [`Indicadores clínicos · ${name}`],
+      [],
       breakdownHeader,
       ...buildClinicalIndicatorsSheetRows(rows)
     ]);

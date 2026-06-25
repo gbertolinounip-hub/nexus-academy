@@ -5,6 +5,7 @@ import {
   buildClinicalInstitutionalDashboardQuery
 } from "@/components/clinical/clinical-institutional-dashboard";
 import { requireRole } from "@/lib/auth/session";
+import { loadInstitutionalReportBrandingForCurrentUser } from "@/services/report-branding";
 import { getClinicalInstitutionalDashboardPageData } from "@/services/clinical-supervision";
 
 export default async function ClinicalInstitutionalDashboardPrintPage(props: {
@@ -20,6 +21,8 @@ export default async function ClinicalInstitutionalDashboardPrintPage(props: {
   }>;
 }) {
   const currentUser = await requireRole(["coordenador"]);
+  const reportBranding =
+    await loadInstitutionalReportBrandingForCurrentUser(currentUser);
   const searchParams = (await props.searchParams) ?? {};
   const shouldAutoPrint = searchParams.print === "1";
   const { pageData, emptyState } = await getClinicalInstitutionalDashboardPageData(
@@ -45,6 +48,7 @@ export default async function ClinicalInstitutionalDashboardPrintPage(props: {
   if (!pageData || emptyState) {
     return (
       <ClinicalPrintDocument
+        branding={reportBranding}
         title="Relatório clínico institucional"
         subtitle="Visão consolidada da unidade para acompanhamento da Clínica Supervisionada."
         backHref={backHref}
@@ -69,6 +73,7 @@ export default async function ClinicalInstitutionalDashboardPrintPage(props: {
 
   return (
     <ClinicalPrintDocument
+      branding={reportBranding}
       title="Relatório clínico institucional"
       subtitle="Consolidado institucional da Clínica Supervisionada da unidade."
       backHref={backHref}

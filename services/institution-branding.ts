@@ -318,6 +318,18 @@ export async function loadInstitutionBrandingForCurrentUser(
     return null;
   }
 
+  return loadInstitutionBrandingByInstitutionId(institutionId);
+}
+
+export async function loadInstitutionBrandingByInstitutionId(
+  institutionId: string | null | undefined
+): Promise<InstitutionBrandingSummary | null> {
+  noStore();
+
+  if (!institutionId) {
+    return null;
+  }
+
   const adminClient = createSupabaseAdminClient();
   const { data, error } = await adminClient
     .from("instituicoes")

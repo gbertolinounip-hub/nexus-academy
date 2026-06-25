@@ -239,6 +239,11 @@ select {
   gap: 1rem;
 }
 
+.report-hero-brand .brand-lockup-institution-stack,
+.clinical-print-brand .brand-lockup-institution-stack {
+  align-items: start;
+}
+
 .report-hero-brand .brand-mark {
   width: 3.15rem;
 }

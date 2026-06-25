@@ -5,6 +5,7 @@ import { ClinicalPrintSupervisionCard } from "@/components/clinical/clinical-pri
 import { SectionCard } from "@/components/common/section-card";
 import { requireRole } from "@/lib/auth/session";
 import { formatClinicalRecordStatus, formatDate, formatDateTime } from "@/lib/utils/format";
+import { loadInstitutionalReportBrandingForCurrentUser } from "@/services/report-branding";
 import { getClinicalEvolutionPageData } from "@/services/clinical-supervision";
 
 function readSearchParam(
@@ -23,6 +24,8 @@ export default async function ClinicalEvolutionPrintPage(props: {
     "coordenador",
     "coordenador_master"
   ]);
+  const reportBranding =
+    await loadInstitutionalReportBrandingForCurrentUser(currentUser);
   const params = await props.params;
   const searchParams = (await props.searchParams) ?? {};
   const autoPrint = readSearchParam(searchParams.print) === "1";
@@ -35,6 +38,7 @@ export default async function ClinicalEvolutionPrintPage(props: {
   if (!pageData || emptyState) {
     return (
       <ClinicalPrintDocument
+        branding={reportBranding}
         title="Evolução indisponível"
         subtitle={
           emptyState?.description ??
@@ -58,6 +62,7 @@ export default async function ClinicalEvolutionPrintPage(props: {
 
   return (
     <ClinicalPrintDocument
+      branding={reportBranding}
       title={`Evolução · ${pageData.caseItem.patient.name}`}
       subtitle="Versão organizada para impressão do registro individual de evolução e conduta."
       backHref={`/clinica-supervisionada/${pageData.caseItem.id}/evolucao/${params.recordId}`}

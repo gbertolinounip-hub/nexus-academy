@@ -5,6 +5,7 @@ import { SectionCard } from "@/components/common/section-card";
 import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/session";
 import { getClinicalAttendanceIndicatorsPageData } from "@/services/clinical-indicators";
+import { loadInstitutionalReportBrandingForCurrentUser } from "@/services/report-branding";
 
 export default async function CoordinatorClinicalAttendanceIndicatorsPage(props: {
   searchParams?: Promise<{
@@ -17,6 +18,8 @@ export default async function CoordinatorClinicalAttendanceIndicatorsPage(props:
   }>;
 }) {
   const currentUser = await requireRole(["coordenador"]);
+  const reportBranding =
+    await loadInstitutionalReportBrandingForCurrentUser(currentUser);
 
   if (getActiveMasterCourseContext(currentUser)) {
     redirect("/master-curso/clinica-supervisionada/indicadores");
@@ -65,6 +68,7 @@ export default async function CoordinatorClinicalAttendanceIndicatorsPage(props:
 
   return (
     <ClinicalAttendanceIndicatorsDashboard
+      branding={reportBranding}
       pageData={pageData}
       basePath={"/coordenador/clinica-supervisionada/indicadores" as Route}
       heroEyebrow="Gestão clínica"

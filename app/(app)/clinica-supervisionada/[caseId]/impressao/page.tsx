@@ -13,6 +13,7 @@ import {
   formatDate,
   formatDateTime
 } from "@/lib/utils/format";
+import { loadInstitutionalReportBrandingForCurrentUser } from "@/services/report-branding";
 import { getClinicalCaseDetailPageData } from "@/services/clinical-supervision";
 
 function readSearchParam(
@@ -31,6 +32,8 @@ export default async function ClinicalCasePrintPage(props: {
     "coordenador",
     "coordenador_master"
   ]);
+  const reportBranding =
+    await loadInstitutionalReportBrandingForCurrentUser(currentUser);
   const params = await props.params;
   const searchParams = (await props.searchParams) ?? {};
   const autoPrint = readSearchParam(searchParams.print) === "1";
@@ -42,6 +45,7 @@ export default async function ClinicalCasePrintPage(props: {
   if (!pageData || emptyState) {
     return (
       <ClinicalPrintDocument
+        branding={reportBranding}
         title="Caso clínico indisponível"
         subtitle={
           emptyState?.description ??
@@ -65,6 +69,7 @@ export default async function ClinicalCasePrintPage(props: {
 
   return (
     <ClinicalPrintDocument
+      branding={reportBranding}
       title={`Caso clínico · ${pageData.caseItem.patient.name}`}
       subtitle="Documento integrado com resumo do caso, registros clínicos e movimentações relevantes."
       backHref={`/clinica-supervisionada/${pageData.caseItem.id}`}

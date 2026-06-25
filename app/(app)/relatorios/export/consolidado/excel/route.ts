@@ -1,4 +1,4 @@
-﻿import {
+import {
   buildExcelDownloadResponse,
   buildUnauthorizedDownloadResponse,
   buildUnavailableDownloadResponse,
@@ -9,6 +9,12 @@ import {
   buildConsolidatedWorkbook,
   getConsolidatedFileBaseName
 } from "@/services/report-exports";
+import {
+  buildInstitutionalReportHeaderRows,
+  loadInstitutionalReportBrandingForCurrentUser,
+  resolveCurrentUserCourseName,
+  resolveCurrentUserUnitName
+} from "@/services/report-branding";
 import { getAuthenticatedReportsPageData } from "@/services/reports";
 
 export const runtime = "nodejs";
@@ -32,9 +38,17 @@ export async function GET(request: Request) {
     );
   }
 
+  const reportBranding =
+    await loadInstitutionalReportBrandingForCurrentUser(currentUser);
+  const headerRows = buildInstitutionalReportHeaderRows(reportBranding, {
+    reportName: "Relatórios finais acadêmicos",
+    courseName: resolveCurrentUserCourseName(currentUser),
+    unitName: resolveCurrentUserUnitName(currentUser),
+    semesterName: `${reports.selectedSemester.code} · ${reports.selectedSemester.name}`
+  });
+
   return buildExcelDownloadResponse(
     getConsolidatedFileBaseName(reports),
-    await buildConsolidatedWorkbook(reports)
+    await buildConsolidatedWorkbook(reports, headerRows)
   );
 }
-

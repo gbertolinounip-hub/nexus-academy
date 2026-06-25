@@ -1,8 +1,9 @@
-import type {
+﻿import type {
   ClassFinalReportData,
   ReportsHubData,
   StudentFinalReportData
 } from "@/services/reports";
+import type { InstitutionalReportHeaderRow } from "@/services/report-branding";
 
 type ExportCell = string | number | boolean | null;
 
@@ -22,6 +23,7 @@ interface WorkbookSheetDefinition {
   name: string;
   title: string;
   subtitle?: string;
+  headerRows?: InstitutionalReportHeaderRow[];
   metrics?: WorkbookMetric[];
   tables: WorkbookTable[];
 }
@@ -102,7 +104,7 @@ function normalizeWorkbookCellValue(value: ExportCell) {
   }
 
   if (typeof value === "boolean") {
-    return value ? "Sim" : "Não";
+    return value ? "Sim" : "NÃ£o";
   }
 
   return value;
@@ -137,6 +139,7 @@ function buildWorkbookRowXml(cells: WorkbookRowCell[]) {
 function getSheetColumnCount(sheet: WorkbookSheetDefinition) {
   return Math.max(
     1,
+    sheet.headerRows && sheet.headerRows.length > 0 ? 2 : 1,
     sheet.metrics && sheet.metrics.length > 0 ? 3 : 1,
     ...sheet.tables.map((table) => Math.max(1, table.columns.length))
   );
@@ -179,6 +182,29 @@ function buildMetricsRows(metrics: WorkbookMetric[], columnCount: number) {
   return rows;
 }
 
+function buildHeaderRows(
+  headerRows: InstitutionalReportHeaderRow[],
+  columnCount: number
+) {
+  if (headerRows.length === 0) {
+    return [];
+  }
+
+  const rows = headerRows.map((row) =>
+    buildWorkbookRowXml([
+      { value: row.label, styleId: "label" },
+      {
+        value: row.value,
+        styleId: "value",
+        mergeAcross: columnCount > 2 ? columnCount - 2 : undefined
+      }
+    ])
+  );
+
+  rows.push("<Row/>");
+  return rows;
+}
+
 function buildTableRows(table: WorkbookTable, columnCount: number) {
   const rows: string[] = [
     buildWorkbookRowXml(buildMergedTextRow(table.title, columnCount, "section")),
@@ -191,7 +217,7 @@ function buildTableRows(table: WorkbookTable, columnCount: number) {
     rows.push(
       buildWorkbookRowXml(
         buildMergedTextRow(
-          "Nenhum dado disponível para exportação neste recorte.",
+          "Nenhum dado disponÃ­vel para exportaÃ§Ã£o neste recorte.",
           Math.max(columnCount, table.columns.length),
           "hint"
         )
@@ -218,9 +244,13 @@ function buildTableRows(table: WorkbookTable, columnCount: number) {
 
 function buildWorksheetXml(sheet: WorkbookSheetDefinition) {
   const columnCount = getSheetColumnCount(sheet);
-  const rows: string[] = [
-    buildWorkbookRowXml(buildMergedTextRow(sheet.title, columnCount, "title"))
-  ];
+  const rows: string[] = [];
+
+  if (sheet.headerRows && sheet.headerRows.length > 0) {
+    rows.push(...buildHeaderRows(sheet.headerRows, columnCount));
+  }
+
+  rows.push(buildWorkbookRowXml(buildMergedTextRow(sheet.title, columnCount, "title")));
 
   if (sheet.subtitle) {
     rows.push(buildWorkbookRowXml(buildMergedTextRow(sheet.subtitle, columnCount, "subtitle")));
@@ -304,15 +334,15 @@ export function buildConsolidatedCsv(report: ReportsHubData) {
     "RA",
     "E-mail",
     "Celular",
-    "Áreas",
+    "Ãreas",
     "Blocos",
     "Supervisores",
     "Subtotal (%)",
     "Desconto faltas (%)",
     "Total final (%)",
     "Nota equivalente",
-    "Conclusão (%)",
-    "Situação"
+    "ConclusÃ£o (%)",
+    "SituaÃ§Ã£o"
   ];
   const rows = report.studentReports.map((student) => [
     report.selectedSemester.code,
@@ -338,7 +368,7 @@ export function buildClassCsv(report: ClassFinalReportData) {
   const columns = [
     "Semestre",
     "Turma",
-    "Área",
+    "Ãrea",
     "Aluno",
     "RA",
     "E-mail",
@@ -346,8 +376,8 @@ export function buildClassCsv(report: ClassFinalReportData) {
     "Subtotal (%)",
     "Desconto faltas (%)",
     "Total final (%)",
-    "Conclusão (%)",
-    "Situação"
+    "ConclusÃ£o (%)",
+    "SituaÃ§Ã£o"
   ];
   const rows = report.students.map((student) => [
     report.classGroup.semesterCode,
@@ -372,14 +402,14 @@ export function buildStudentCsv(report: StudentFinalReportData) {
     "Semestre",
     "Aluno",
     "RA",
-    "Área",
+    "Ãrea",
     "Bloco",
-    "Critério",
+    "CritÃ©rio",
     "Peso (%)",
     "Nota",
-    "Pontuação (%)",
+    "PontuaÃ§Ã£o (%)",
     "Justificativa",
-    "Última atualização"
+    "Ãšltima atualizaÃ§Ã£o"
   ];
   const rows = report.areaReports.flatMap((areaReport) =>
     areaReport.groups.flatMap((group) =>
@@ -402,33 +432,37 @@ export function buildStudentCsv(report: StudentFinalReportData) {
   return toCsv(columns, rows);
 }
 
-export async function buildConsolidatedWorkbook(report: ReportsHubData) {
+export async function buildConsolidatedWorkbook(
+  report: ReportsHubData,
+  headerRows: InstitutionalReportHeaderRow[] = []
+) {
   const definition: WorkbookDefinition = {
     sheets: [
       {
         name: "Resumo do semestre",
-        title: `Relatório consolidado - ${report.selectedSemester.code}`,
+        headerRows,
+        title: `RelatÃ³rio consolidado - ${report.selectedSemester.code}`,
         subtitle:
-          "Visão gerencial consolidada do semestre, respeitando o escopo do perfil autenticado.",
+          "VisÃ£o gerencial consolidada do semestre, respeitando o escopo do perfil autenticado.",
         metrics: [
           { label: "Semestre", value: report.selectedSemester.code },
           { label: "Alunos", value: String(report.summary.totalStudents) },
           { label: "Turmas", value: String(report.summary.totalClasses) },
-          { label: "Áreas", value: String(report.summary.totalAreas) },
+          { label: "Ãreas", value: String(report.summary.totalAreas) },
           { label: "Supervisores", value: String(report.summary.totalProfessors) },
           {
-            label: "Avaliações publicadas",
+            label: "AvaliaÃ§Ãµes publicadas",
             value: String(report.summary.totalPublishedEvaluations)
           },
           {
-            label: "Horas não justificadas",
+            label: "Horas nÃ£o justificadas",
             value: `${report.summary.totalUnjustifiedAbsenceHours}h`
           }
         ],
         tables: [
           {
             title: "Blocos",
-            columns: ["Bloco", "Áreas", "Alunos", "Média final (%)"],
+            columns: ["Bloco", "Ãreas", "Alunos", "MÃ©dia final (%)"],
             rows: report.blockSummaries.map((block) => [
               block.blockName,
               block.areaCount,
@@ -437,14 +471,14 @@ export async function buildConsolidatedWorkbook(report: ReportsHubData) {
             ])
           },
           {
-            title: "Áreas",
+            title: "Ãreas",
             columns: [
               "Bloco",
-              "Área",
+              "Ãrea",
               "Alunos",
-              "Média final (%)",
-              "Avaliações",
-              "Horas não justificadas"
+              "MÃ©dia final (%)",
+              "AvaliaÃ§Ãµes",
+              "Horas nÃ£o justificadas"
             ],
             rows: report.areaSummaries.map((area) => [
               area.blockName,
@@ -459,20 +493,21 @@ export async function buildConsolidatedWorkbook(report: ReportsHubData) {
       },
       {
         name: "Turmas",
-        title: "Relatórios finais por turma",
+        headerRows,
+        title: "RelatÃ³rios finais por turma",
         tables: [
           {
             title: "Turmas do semestre",
             columns: [
               "Turma",
-              "Área",
+              "Ãrea",
               "Bloco",
               "Supervisores",
               "Alunos",
-              "Média final (%)",
-              "Avaliações",
-              "Horas não justificadas",
-              "Alunos em atenção"
+              "MÃ©dia final (%)",
+              "AvaliaÃ§Ãµes",
+              "Horas nÃ£o justificadas",
+              "Alunos em atenÃ§Ã£o"
             ],
             rows: report.classReports.map((classReport) => [
               `${classReport.classCode} - ${classReport.className}`,
@@ -490,6 +525,7 @@ export async function buildConsolidatedWorkbook(report: ReportsHubData) {
       },
       {
         name: "Alunos",
+        headerRows,
         title: "Relatórios finais por aluno",
         tables: [
           {
@@ -499,15 +535,15 @@ export async function buildConsolidatedWorkbook(report: ReportsHubData) {
               "RA",
               "E-mail",
               "Celular",
-              "Áreas",
+              "Ãreas",
               "Blocos",
               "Supervisores",
               "Subtotal (%)",
               "Desconto (%)",
               "Total (%)",
               "Nota final",
-              "Conclusão (%)",
-              "Situação"
+              "ConclusÃ£o (%)",
+              "SituaÃ§Ã£o"
             ],
             rows: report.studentReports.map((student) => [
               student.studentName,
@@ -533,33 +569,37 @@ export async function buildConsolidatedWorkbook(report: ReportsHubData) {
   return buildWorkbookBytes(definition);
 }
 
-export async function buildClassWorkbook(report: ClassFinalReportData) {
+export async function buildClassWorkbook(
+  report: ClassFinalReportData,
+  headerRows: InstitutionalReportHeaderRow[] = []
+) {
   const definition: WorkbookDefinition = {
     sheets: [
       {
         name: "Resumo da turma",
-        title: `Relatório final da turma - ${report.classGroup.code}`,
+        headerRows,
+        title: `RelatÃ³rio final da turma - ${report.classGroup.code}`,
         subtitle: `${report.classGroup.semesterCode} - ${report.classGroup.areaName} - ${report.classGroup.blockName}`,
         metrics: [
           { label: "Turma", value: report.classGroup.name },
           { label: "Semestre", value: report.classGroup.semesterCode },
-          { label: "Área", value: report.classGroup.areaName },
+          { label: "Ãrea", value: report.classGroup.areaName },
           { label: "Bloco", value: report.classGroup.blockName },
           { label: "Alunos", value: String(report.summary.totalStudents) },
           {
-            label: "Média final",
+            label: "MÃ©dia final",
             value: `${report.summary.averageFinalPercentage}%`
           },
           {
-            label: "Avaliações publicadas",
+            label: "AvaliaÃ§Ãµes publicadas",
             value: String(report.summary.totalPublishedEvaluations)
           },
           {
-            label: "Horas não justificadas",
+            label: "Horas nÃ£o justificadas",
             value: `${report.summary.totalUnjustifiedAbsenceHours}h`
           },
           {
-            label: "Alunos em atenção",
+            label: "Alunos em atenÃ§Ã£o",
             value: String(report.summary.studentsAtRisk)
           }
         ],
@@ -573,6 +613,7 @@ export async function buildClassWorkbook(report: ClassFinalReportData) {
       },
       {
         name: "Supervisores",
+        headerRows,
         title: "Supervisores vinculados",
         tables: [
           {
@@ -588,10 +629,11 @@ export async function buildClassWorkbook(report: ClassFinalReportData) {
       },
       {
         name: "Alunos",
+        headerRows,
         title: "Alunos da turma",
         tables: [
           {
-            title: "Composição e situação da turma",
+            title: "ComposiÃ§Ã£o e situaÃ§Ã£o da turma",
             columns: [
               "Aluno",
               "RA",
@@ -600,8 +642,8 @@ export async function buildClassWorkbook(report: ClassFinalReportData) {
               "Subtotal (%)",
               "Desconto (%)",
               "Total (%)",
-              "Conclusão (%)",
-              "Situação"
+              "ConclusÃ£o (%)",
+              "SituaÃ§Ã£o"
             ],
             rows: report.students.map((student) => [
               student.studentName,
@@ -623,24 +665,28 @@ export async function buildClassWorkbook(report: ClassFinalReportData) {
   return buildWorkbookBytes(definition);
 }
 
-export async function buildStudentWorkbook(report: StudentFinalReportData) {
+export async function buildStudentWorkbook(
+  report: StudentFinalReportData,
+  headerRows: InstitutionalReportHeaderRow[] = []
+) {
   const singleAreaReport =
     report.reportContext.kind === "area" ? report.areaReports[0] ?? null : null;
   const definition: WorkbookDefinition = {
     sheets: [
       {
         name: "Resumo do aluno",
+        headerRows,
         title:
           report.reportContext.kind === "area"
-            ? `Relatório final da área - ${report.student.name}`
-            : `Relatório final do aluno - ${report.student.name}`,
+            ? `RelatÃ³rio final da Ã¡rea - ${report.student.name}`
+            : `RelatÃ³rio final do aluno - ${report.student.name}`,
         subtitle: singleAreaReport
           ? `${report.selectedSemester.code} - ${singleAreaReport.areaName} - ${singleAreaReport.classCode}`
           : `${report.selectedSemester.code} - ${report.selectedSemester.name}`,
         metrics: [
           { label: "RA", value: report.student.registration },
           { label: "E-mail", value: report.student.email },
-          { label: "Celular", value: report.student.cellphone ?? "Não informado" },
+          { label: "Celular", value: report.student.cellphone ?? "NÃ£o informado" },
           {
             label: "Subtotal consolidado",
             value: `${report.summary.subtotalPercentage}%`
@@ -658,34 +704,35 @@ export async function buildStudentWorkbook(report: StudentFinalReportData) {
             value: String(report.summary.finalGradeOutOfTen)
           },
           {
-            label: "Situação",
+            label: "SituaÃ§Ã£o",
             value: report.summary.status
           }
         ],
         tables: [
           {
-            title: "Resumo acadêmico",
-            columns: ["Descrição"],
+            title: "Resumo acadÃªmico",
+            columns: ["DescriÃ§Ã£o"],
             rows: [[report.summary.statusSummary]]
           }
         ]
       },
       {
         name: "Áreas",
+        headerRows,
         title: "Áreas e supervisores",
         tables: [
           {
-            title: "Áreas do semestre",
+            title: "Ãreas do semestre",
             columns: [
-              "Área",
+              "Ãrea",
               "Bloco",
               "Turma",
               "Supervisores",
               "Subtotal (%)",
               "Desconto (%)",
               "Total (%)",
-              "Conclusão (%)",
-              "Situação"
+              "ConclusÃ£o (%)",
+              "SituaÃ§Ã£o"
             ],
             rows: report.areaReports.map((areaReport) => [
               areaReport.areaName,
@@ -703,18 +750,19 @@ export async function buildStudentWorkbook(report: StudentFinalReportData) {
       },
       {
         name: "Critérios",
+        headerRows,
         title: "Detalhamento por critério",
         tables: [
           {
-            title: "Último estado publicado por critério",
+            title: "Ãšltimo estado publicado por critÃ©rio",
             columns: [
-              "Área",
+              "Ãrea",
               "Bloco",
               "Grupo",
-              "Critério",
+              "CritÃ©rio",
               "Peso (%)",
               "Nota",
-              "Pontuação (%)",
+              "PontuaÃ§Ã£o (%)",
               "Justificativa",
               "Atualizado em"
             ],
@@ -738,15 +786,16 @@ export async function buildStudentWorkbook(report: StudentFinalReportData) {
       },
       {
         name: "Faltas",
-        title: "Histórico de faltas",
+        headerRows,
+        title: "HistÃ³rico de faltas",
         tables: [
           {
-            title: "Ausências do semestre",
+            title: "AusÃªncias do semestre",
             columns: ["Data", "Horas", "Justificada", "Motivo"],
             rows: report.absences.map((absence) => [
               absence.date,
               absence.hours,
-              absence.justified ? "Sim" : "Não",
+              absence.justified ? "Sim" : "NÃ£o",
               absence.reason ?? ""
             ])
           }
@@ -780,10 +829,10 @@ export function getStudentFileBaseName(report: StudentFinalReportData) {
 export async function buildAccessLogWorkbook(data: AccessLogWorkbookData) {
   const filtersLabel =
     data.filters.startDate || data.filters.endDate
-      ? `${data.filters.startDate || "início aberto"} até ${
+      ? `${data.filters.startDate || "inÃ­cio aberto"} atÃ© ${
           data.filters.endDate || "fim aberto"
         }`
-      : "Período integral";
+      : "PerÃ­odo integral";
   const definition: WorkbookDefinition = {
     sheets: [
       {
@@ -793,7 +842,7 @@ export async function buildAccessLogWorkbook(data: AccessLogWorkbookData) {
           "Registro simples de logins com sucesso da unidade do coordenador.",
         metrics: [
           { label: "Unidade", value: data.unitName },
-          { label: "Período exportado", value: filtersLabel },
+          { label: "PerÃ­odo exportado", value: filtersLabel },
           { label: "Total de acessos", value: String(data.totalAccesses) },
           { label: "Exportado em", value: data.exportedAt }
         ],
@@ -801,12 +850,12 @@ export async function buildAccessLogWorkbook(data: AccessLogWorkbookData) {
           {
             title: "Acessos registrados",
             columns: [
-              "Nome do usuário",
+              "Nome do usuÃ¡rio",
               "E-mail",
               "Perfil",
               "Unidade",
               "Dia do login",
-              "Horário do login"
+              "HorÃ¡rio do login"
             ],
             rows: data.entries.map((entry) => [
               entry.userName,
@@ -828,3 +877,4 @@ export async function buildAccessLogWorkbook(data: AccessLogWorkbookData) {
 export function getAccessLogFileBaseName(unitName: string) {
   return sanitizeFileName(`acessos-${unitName}-${new Date().toISOString().slice(0, 10)}`);
 }
+

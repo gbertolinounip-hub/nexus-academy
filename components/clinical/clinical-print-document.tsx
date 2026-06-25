@@ -2,9 +2,10 @@ import Link from "next/link";
 import type { Route } from "next";
 import type { PropsWithChildren } from "react";
 import { ClinicalPrintMode } from "@/components/clinical/clinical-print-mode";
-import { BrandLockup } from "@/components/common/brand-lockup";
+import { ReportBrandLockup } from "@/components/reports/report-brand-lockup";
 import { ReportAutoPrint } from "@/components/reports/report-auto-print";
 import { ReportPrintButton } from "@/components/reports/report-print-button";
+import type { InstitutionalReportBranding } from "@/services/report-branding";
 
 interface ClinicalPrintDocumentProps extends PropsWithChildren {
   title: string;
@@ -12,6 +13,7 @@ interface ClinicalPrintDocumentProps extends PropsWithChildren {
   backHref: string;
   backLabel?: string;
   autoPrint?: boolean;
+  branding?: InstitutionalReportBranding | null;
 }
 
 export function ClinicalPrintDocument({
@@ -20,6 +22,7 @@ export function ClinicalPrintDocument({
   backHref,
   backLabel = "Voltar",
   autoPrint = false,
+  branding,
   children
 }: ClinicalPrintDocumentProps) {
   return (
@@ -30,10 +33,9 @@ export function ClinicalPrintDocument({
       <section className="hero-card clinical-print-hero">
         <div className="clinical-print-masthead">
           <div className="clinical-print-brand">
-            <BrandLockup
-              eyebrow="Nexus Academy"
-              title="Clínica Supervisionada"
-              subtitle="Versão organizada para impressão e PDF"
+            <ReportBrandLockup
+              branding={branding}
+              fallbackEyebrow="Clínica supervisionada"
               compact
             />
           </div>

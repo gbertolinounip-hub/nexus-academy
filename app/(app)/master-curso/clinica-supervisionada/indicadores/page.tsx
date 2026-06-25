@@ -5,6 +5,7 @@ import { SectionCard } from "@/components/common/section-card";
 import { getActiveMasterCourseContext } from "@/lib/auth/roles";
 import { requireAuthenticatedUser } from "@/lib/auth/session";
 import { getClinicalAttendanceIndicatorsPageData } from "@/services/clinical-indicators";
+import { loadInstitutionalReportBrandingForCurrentUser } from "@/services/report-branding";
 
 export default async function MasterCourseClinicalAttendanceIndicatorsPage(props: {
   searchParams?: Promise<{
@@ -18,6 +19,8 @@ export default async function MasterCourseClinicalAttendanceIndicatorsPage(props
   }>;
 }) {
   const currentUser = await requireAuthenticatedUser();
+  const reportBranding =
+    await loadInstitutionalReportBrandingForCurrentUser(currentUser);
   const activeContext = getActiveMasterCourseContext(currentUser);
 
   if (!activeContext) {
@@ -84,6 +87,7 @@ export default async function MasterCourseClinicalAttendanceIndicatorsPage(props
 
   return (
     <ClinicalAttendanceIndicatorsDashboard
+      branding={reportBranding}
       pageData={pageData}
       basePath={"/master-curso/clinica-supervisionada/indicadores" as Route}
       heroEyebrow="Gestão do curso"
