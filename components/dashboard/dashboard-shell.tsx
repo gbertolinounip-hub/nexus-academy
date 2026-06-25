@@ -10,6 +10,7 @@ import {
   type NavigationItem,
   type SecondaryNavigationItem
 } from "@/lib/auth/navigation";
+import type { InstitutionBrandingSummary } from "@/services/institution-branding";
 import type { SessionUser } from "@/types/domain";
 
 interface DashboardShellProps extends PropsWithChildren {
@@ -17,6 +18,7 @@ interface DashboardShellProps extends PropsWithChildren {
   navigationItems: NavigationItem[];
   secondaryNavigationItems?: SecondaryNavigationItem[];
   currentUserId: string;
+  institutionBranding?: InstitutionBrandingSummary | null;
 }
 
 export function DashboardShell({
@@ -24,9 +26,12 @@ export function DashboardShell({
   currentUser,
   navigationItems,
   secondaryNavigationItems,
-  currentUserId
+  currentUserId,
+  institutionBranding
 }: DashboardShellProps) {
   const showSidebarHelperContent = false;
+  const sidebarInstitutionLogoSrc =
+    institutionBranding?.primaryLogoUrl ?? institutionBranding?.compactLogoUrl ?? null;
 
   return (
     <div className="shell">
@@ -34,8 +39,11 @@ export function DashboardShell({
         <div className="brand">
           <BrandLockup
             compact
-            eyebrow="Plataforma institucional"
-            subtitle="Desempenho e gestão de estágios"
+            subtitle="Gestão de estágios e desempenho acadêmico"
+            institutionLogoSrc={sidebarInstitutionLogoSrc}
+            institutionLogoAlt={
+              institutionBranding ? `Logo da ${institutionBranding.displayName}` : ""
+            }
           />
         </div>
 
@@ -63,8 +71,8 @@ export function DashboardShell({
         >
           {showSidebarHelperContent ? (
             <p>
-              A navegação agora é filtrada pelo perfil autenticado, e as rotas são protegidas no
-              servidor.
+              A navegação agora é filtrada pelo perfil autenticado, e as rotas são
+              protegidas no servidor.
             </p>
           ) : null}
           {showSidebarHelperContent ? (
@@ -95,8 +103,8 @@ export function DashboardShell({
               </div>
               <h2>Bem-vindo ao Nexus Academy!</h2>
               <p>
-                Seu acesso foi criado com uma senha padrão. Recomendamos alterar sua senha agora
-                para manter sua conta mais segura.
+                Seu acesso foi criado com uma senha padrão. Recomendamos alterar sua
+                senha agora para manter sua conta mais segura.
               </p>
             </div>
 

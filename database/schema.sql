@@ -86,10 +86,14 @@ create index if not exists idx_usuarios_unidade_id on public.usuarios (unidade_i
 create table if not exists public.instituicoes (
   id uuid primary key default gen_random_uuid(),
   nome text not null,
+  nome_exibicao text,
   sigla text,
   slug text not null,
   cnpj text,
   ativo boolean not null default true,
+  logo_principal_path text,
+  logo_compacta_path text,
+  identidade_visual_atualizada_em timestamptz,
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

@@ -1,11 +1,22 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireRole } from "@/lib/auth/session";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  buildInstitutionBrandingStoragePath,
+  getInstitutionBrandingFileExtension,
+  INSTITUTION_BRANDING_ACCEPTED_EXTENSIONS,
+  INSTITUTION_BRANDING_MAX_BYTES,
+  removeInstitutionBrandingBinary,
+  resolveAcceptedInstitutionBrandingMimeType,
+  uploadInstitutionBrandingBinary
+} from "@/services/institution-branding";
 import type { Database } from "@/types/database";
 import type {
+  InstitutionBrandingFormValues,
   InstitutionEditFormValues,
   InstitutionFormValues,
   InstitutionManagementActionState
@@ -44,9 +55,23 @@ const institutionEditSchema = institutionSchema.extend({
   ativo: z.enum(["true", "false"])
 });
 
+const institutionBrandingSchema = z.object({
+  institution_id: z.string().uuid("Selecione uma instituicao valida."),
+  nome_exibicao: z
+    .string()
+    .trim()
+    .max(160, "O nome de exibicao deve ter no maximo 160 caracteres."),
+  remove_logo_principal: z.enum(["true", "false"]).default("false"),
+  remove_logo_compacta: z.enum(["true", "false"]).default("false")
+});
+
 function readStringField(formData: FormData, name: string) {
   const value = formData.get(name);
   return typeof value === "string" ? value.trim() : "";
+}
+
+function readBooleanFlagField(formData: FormData, name: string) {
+  return readStringField(formData, name) === "true";
 }
 
 function normalizeSlug(value: string) {
@@ -105,6 +130,19 @@ function buildEditFormValues(formData: FormData): InstitutionEditFormValues {
   };
 }
 
+function buildBrandingFormValues(formData: FormData): InstitutionBrandingFormValues {
+  return {
+    institution_id: readStringField(formData, "institution_id"),
+    nome_exibicao: readStringField(formData, "nome_exibicao"),
+    remove_logo_principal: readBooleanFlagField(formData, "remove_logo_principal")
+      ? "true"
+      : "false",
+    remove_logo_compacta: readBooleanFlagField(formData, "remove_logo_compacta")
+      ? "true"
+      : "false"
+  };
+}
+
 function buildActionState<TFormValues>(
   status: "success" | "error",
   message: string,
@@ -136,7 +174,9 @@ async function loadInstitution(institutionId: string) {
   const adminClient = createSupabaseAdminClient();
   const { data, error } = await adminClient
     .from("instituicoes")
-    .select("id, nome, slug, ativo")
+    .select(
+      "id, nome, slug, ativo, nome_exibicao, logo_principal_path, logo_compacta_path"
+    )
     .eq("id", institutionId)
     .maybeSingle();
 
@@ -144,7 +184,16 @@ async function loadInstitution(institutionId: string) {
     return null;
   }
 
-  return data as Pick<InstitutionRow, "id" | "nome" | "slug" | "ativo">;
+  return data as Pick<
+    InstitutionRow,
+    | "id"
+    | "nome"
+    | "slug"
+    | "ativo"
+    | "nome_exibicao"
+    | "logo_principal_path"
+    | "logo_compacta_path"
+  >;
 }
 
 async function ensureUniqueInstitutionSlug(slug: string, currentInstitutionId?: string) {
@@ -168,6 +217,48 @@ async function ensureUniqueInstitutionSlug(slug: string, currentInstitutionId?: 
   }
 
   return fieldErrors;
+}
+
+function validateInstitutionBrandingFile(file: File | null) {
+  if (!file || file.size <= 0) {
+    return {
+      extension: "",
+      mimeType: ""
+    };
+  }
+
+  if (file.size > INSTITUTION_BRANDING_MAX_BYTES) {
+    return {
+      extension: "",
+      mimeType: "",
+      fieldError: "Use uma imagem com ate 1 MB."
+    };
+  }
+
+  const extension = getInstitutionBrandingFileExtension(file.name);
+
+  if (!INSTITUTION_BRANDING_ACCEPTED_EXTENSIONS.includes(extension as never)) {
+    return {
+      extension: "",
+      mimeType: "",
+      fieldError: "Use apenas PNG, JPG, JPEG ou WEBP."
+    };
+  }
+
+  const mimeType = resolveAcceptedInstitutionBrandingMimeType(file, extension);
+
+  if (!mimeType) {
+    return {
+      extension,
+      mimeType: "",
+      fieldError: "A imagem enviada nao pode ser validada com seguranca."
+    };
+  }
+
+  return {
+    extension,
+    mimeType
+  };
 }
 
 export async function createInstitutionAction(
@@ -308,6 +399,199 @@ export async function updateInstitutionAction(
       ...submittedFormValues,
       ativo: parsedData.data.ativo
     }
+  );
+}
+
+export async function updateInstitutionBrandingAction(
+  _previousState: InstitutionManagementActionState<InstitutionBrandingFormValues>,
+  formData: FormData
+): Promise<InstitutionManagementActionState<InstitutionBrandingFormValues>> {
+  await requireRole(["coordenador_master"]);
+  const submittedFormValues = buildBrandingFormValues(formData);
+  const parsedData = institutionBrandingSchema.safeParse(submittedFormValues);
+
+  if (!parsedData.success) {
+    return buildActionState(
+      "error",
+      "Revise os campos da identidade visual da instituicao.",
+      normalizeFieldErrors(parsedData.error.flatten().fieldErrors),
+      submittedFormValues
+    );
+  }
+
+  const institution = await loadInstitution(parsedData.data.institution_id);
+
+  if (!institution) {
+    return buildActionState(
+      "error",
+      "Nao foi possivel localizar a instituicao selecionada.",
+      { institution_id: "Instituicao invalida." },
+      submittedFormValues
+    );
+  }
+
+  const primaryLogoFileValue = formData.get("logo_principal_file");
+  const compactLogoFileValue = formData.get("logo_compacta_file");
+  const primaryLogoFile =
+    primaryLogoFileValue instanceof File && primaryLogoFileValue.size > 0
+      ? primaryLogoFileValue
+      : null;
+  const compactLogoFile =
+    compactLogoFileValue instanceof File && compactLogoFileValue.size > 0
+      ? compactLogoFileValue
+      : null;
+
+  const primaryLogoValidation = validateInstitutionBrandingFile(primaryLogoFile);
+  const compactLogoValidation = validateInstitutionBrandingFile(compactLogoFile);
+
+  const fieldErrors: Record<string, string> = {};
+
+  if (primaryLogoValidation.fieldError) {
+    fieldErrors.logo_principal_file = primaryLogoValidation.fieldError;
+  }
+
+  if (compactLogoValidation.fieldError) {
+    fieldErrors.logo_compacta_file = compactLogoValidation.fieldError;
+  }
+
+  if (Object.keys(fieldErrors).length) {
+    return buildActionState(
+      "error",
+      "Revise os arquivos enviados para a identidade visual.",
+      fieldErrors,
+      submittedFormValues
+    );
+  }
+
+  const uploadedStoragePaths: string[] = [];
+  let nextPrimaryLogoPath = institution.logo_principal_path ?? null;
+  let nextCompactLogoPath = institution.logo_compacta_path ?? null;
+  const staleStoragePaths: string[] = [];
+
+  try {
+    if (primaryLogoFile) {
+      const primaryLogoStoragePath = buildInstitutionBrandingStoragePath({
+        institutionId: institution.id,
+        variant: "principal",
+        fileName:
+          primaryLogoFile.name ||
+          `logo-principal-${randomUUID()}.${primaryLogoValidation.extension}`
+      });
+
+      await uploadInstitutionBrandingBinary({
+        storagePath: primaryLogoStoragePath,
+        fileBuffer: Buffer.from(await primaryLogoFile.arrayBuffer()),
+        contentType: primaryLogoValidation.mimeType
+      });
+
+      uploadedStoragePaths.push(primaryLogoStoragePath);
+
+      if (
+        institution.logo_principal_path &&
+        institution.logo_principal_path !== primaryLogoStoragePath
+      ) {
+        staleStoragePaths.push(institution.logo_principal_path);
+      }
+
+      nextPrimaryLogoPath = primaryLogoStoragePath;
+    } else if (
+      parsedData.data.remove_logo_principal === "true" &&
+      institution.logo_principal_path
+    ) {
+      staleStoragePaths.push(institution.logo_principal_path);
+      nextPrimaryLogoPath = null;
+    }
+
+    if (compactLogoFile) {
+      const compactLogoStoragePath = buildInstitutionBrandingStoragePath({
+        institutionId: institution.id,
+        variant: "compacta",
+        fileName:
+          compactLogoFile.name ||
+          `logo-compacta-${randomUUID()}.${compactLogoValidation.extension}`
+      });
+
+      await uploadInstitutionBrandingBinary({
+        storagePath: compactLogoStoragePath,
+        fileBuffer: Buffer.from(await compactLogoFile.arrayBuffer()),
+        contentType: compactLogoValidation.mimeType
+      });
+
+      uploadedStoragePaths.push(compactLogoStoragePath);
+
+      if (
+        institution.logo_compacta_path &&
+        institution.logo_compacta_path !== compactLogoStoragePath
+      ) {
+        staleStoragePaths.push(institution.logo_compacta_path);
+      }
+
+      nextCompactLogoPath = compactLogoStoragePath;
+    } else if (
+      parsedData.data.remove_logo_compacta === "true" &&
+      institution.logo_compacta_path
+    ) {
+      staleStoragePaths.push(institution.logo_compacta_path);
+      nextCompactLogoPath = null;
+    }
+  } catch (error) {
+    for (const uploadedStoragePath of uploadedStoragePaths) {
+      try {
+        await removeInstitutionBrandingBinary(uploadedStoragePath);
+      } catch {}
+    }
+
+    return buildActionState(
+      "error",
+      error instanceof Error
+        ? error.message
+        : "Nao foi possivel enviar as imagens da identidade visual.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const updatePayload: InstitutionUpdate = {
+    nome_exibicao: parsedData.data.nome_exibicao || null,
+    logo_principal_path: nextPrimaryLogoPath,
+    logo_compacta_path: nextCompactLogoPath,
+    identidade_visual_atualizada_em: new Date().toISOString()
+  };
+
+  const { error } = await adminClient
+    .from("instituicoes")
+    .update(updatePayload as never)
+    .eq("id", institution.id);
+
+  if (error) {
+    for (const uploadedStoragePath of uploadedStoragePaths) {
+      try {
+        await removeInstitutionBrandingBinary(uploadedStoragePath);
+      } catch {}
+    }
+
+    return buildActionState(
+      "error",
+      "Nao foi possivel salvar a identidade visual da instituicao.",
+      {},
+      submittedFormValues
+    );
+  }
+
+  for (const staleStoragePath of staleStoragePaths) {
+    try {
+      await removeInstitutionBrandingBinary(staleStoragePath);
+    } catch {}
+  }
+
+  revalidateInstitutionManagementPaths();
+
+  return buildActionState(
+    "success",
+    `Identidade visual da instituicao ${institution.nome} atualizada com sucesso.`,
+    {},
+    submittedFormValues
   );
 }
 

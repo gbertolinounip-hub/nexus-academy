@@ -1,5 +1,6 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getInstitutionBrandingDownloadUrl } from "@/services/institution-branding";
 import type { Database } from "@/types/database";
 
 type InstitutionRow = Database["public"]["Tables"]["instituicoes"]["Row"];
@@ -19,10 +20,16 @@ export interface InstitutionManagementSummary {
 export interface InstitutionManagementEntry {
   id: string;
   name: string;
+  displayName: string | null;
   acronym: string | null;
   slug: string;
   cnpj: string | null;
   isActive: boolean;
+  primaryLogoPath: string | null;
+  primaryLogoUrl: string | null;
+  compactLogoPath: string | null;
+  compactLogoUrl: string | null;
+  visualIdentityUpdatedAt: string | null;
   unitsCount: number;
   coursesCount: number;
   offersCount: number;
@@ -138,17 +145,32 @@ export async function getInstitutionManagementPageData(): Promise<InstitutionMan
     );
   }
 
-  const institutions = institutionRows.map<InstitutionManagementEntry>((institutionRow) => ({
-    id: institutionRow.id,
-    name: institutionRow.nome,
-    acronym: institutionRow.sigla,
-    slug: institutionRow.slug,
-    cnpj: formatCnpj(institutionRow.cnpj),
-    isActive: institutionRow.ativo,
-    unitsCount: unitsCountByInstitutionId.get(institutionRow.id) ?? 0,
-    coursesCount: coursesCountByInstitutionId.get(institutionRow.id) ?? 0,
-    offersCount: offersCountByInstitutionId.get(institutionRow.id) ?? 0
-  }));
+  const institutions = await Promise.all(
+    institutionRows.map(async (institutionRow) => {
+      const [primaryLogoUrl, compactLogoUrl] = await Promise.all([
+        getInstitutionBrandingDownloadUrl(institutionRow.logo_principal_path),
+        getInstitutionBrandingDownloadUrl(institutionRow.logo_compacta_path)
+      ]);
+
+      return {
+        id: institutionRow.id,
+        name: institutionRow.nome,
+        displayName: institutionRow.nome_exibicao?.trim() || null,
+        acronym: institutionRow.sigla,
+        slug: institutionRow.slug,
+        cnpj: formatCnpj(institutionRow.cnpj),
+        isActive: institutionRow.ativo,
+        primaryLogoPath: institutionRow.logo_principal_path,
+        primaryLogoUrl,
+        compactLogoPath: institutionRow.logo_compacta_path,
+        compactLogoUrl,
+        visualIdentityUpdatedAt: institutionRow.identidade_visual_atualizada_em,
+        unitsCount: unitsCountByInstitutionId.get(institutionRow.id) ?? 0,
+        coursesCount: coursesCountByInstitutionId.get(institutionRow.id) ?? 0,
+        offersCount: offersCountByInstitutionId.get(institutionRow.id) ?? 0
+      } satisfies InstitutionManagementEntry;
+    })
+  );
 
   return {
     summary: {

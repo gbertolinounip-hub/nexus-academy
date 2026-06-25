@@ -1,6 +1,7 @@
 import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
 import { ConfirmActionForm } from "@/components/forms/confirm-action-form";
+import { MasterInstitutionBrandingForm } from "@/components/forms/master-institution-branding-form";
 import {
   MasterInstitutionCreateForm,
   MasterInstitutionEditForm
@@ -99,6 +100,11 @@ export default async function MasterInstitutionsPage() {
                     <tr key={institution.id}>
                       <td>
                         <strong>{institution.name}</strong>
+                        {institution.displayName ? (
+                          <div className="table-helper">
+                            Exibição interna: {institution.displayName}
+                          </div>
+                        ) : null}
                         {!institution.isActive &&
                         (institution.unitsCount > 0 ||
                           institution.coursesCount > 0 ||
@@ -156,6 +162,13 @@ export default async function MasterInstitutionsPage() {
             <p className="empty-message">Nenhuma instituicao cadastrada ate o momento.</p>
           )}
         </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Identidade Visual da IES"
+        description="Configure nome de exibicao e logos da instituicao para uso apenas no ambiente autenticado do Nexus Academy."
+      >
+        <MasterInstitutionBrandingForm institutions={pageData.institutions} />
       </SectionCard>
     </div>
   );

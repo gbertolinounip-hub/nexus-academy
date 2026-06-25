@@ -175,10 +175,14 @@ export interface Database {
         Row: {
           id: string;
           nome: string;
+          nome_exibicao: string | null;
           sigla: string | null;
           slug: string;
           cnpj: string | null;
           ativo: boolean;
+          logo_principal_path: string | null;
+          logo_compacta_path: string | null;
+          identidade_visual_atualizada_em: string | null;
           metadata: Record<string, unknown>;
           created_at: string;
           updated_at: string;
@@ -186,10 +190,14 @@ export interface Database {
         Insert: {
           id?: string;
           nome: string;
+          nome_exibicao?: string | null;
           sigla?: string | null;
           slug: string;
           cnpj?: string | null;
           ativo?: boolean;
+          logo_principal_path?: string | null;
+          logo_compacta_path?: string | null;
+          identidade_visual_atualizada_em?: string | null;
           metadata?: Record<string, unknown>;
           created_at?: string;
           updated_at?: string;
@@ -197,10 +205,14 @@ export interface Database {
         Update: {
           id?: string;
           nome?: string;
+          nome_exibicao?: string | null;
           sigla?: string | null;
           slug?: string;
           cnpj?: string | null;
           ativo?: boolean;
+          logo_principal_path?: string | null;
+          logo_compacta_path?: string | null;
+          identidade_visual_atualizada_em?: string | null;
           metadata?: Record<string, unknown>;
           created_at?: string;
           updated_at?: string;
