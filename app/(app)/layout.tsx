@@ -1,3 +1,4 @@
+﻿import { SessionGuard } from "@/components/auth/session-guard";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import {
   getNavigationForUser,
@@ -80,32 +81,35 @@ export default async function AppLayout({
             area.className,
             area.professorNames.length
               ? area.professorNames.join(", ")
-              : "Supervisor ainda não vinculado"
+              : "Supervisor ainda nÃ£o vinculado"
           ])
         })) ?? []
       : [];
   const navigationItems = mapNavigationBadges(getNavigationForUser(currentUser));
 
   return (
-    <DashboardShell
-      currentUser={currentUser}
-      navigationItems={navigationItems}
-      secondaryNavigationItems={
-        currentUser.role === "aluno"
-          ? [
-              {
-                key: "overview",
-                label: "Visão geral",
-                description: "Consolidado do semestre atual"
-              },
-              ...studentSecondaryNavigationItems
-            ]
-          : []
-      }
-      currentUserId={currentUser.id}
-      institutionBranding={institutionBranding}
-    >
-      {children}
-    </DashboardShell>
+    <>
+      <SessionGuard currentUserId={currentUser.id} />
+      <DashboardShell
+        currentUser={currentUser}
+        navigationItems={navigationItems}
+        secondaryNavigationItems={
+          currentUser.role === "aluno"
+            ? [
+                {
+                  key: "overview",
+                  label: "VisÃ£o geral",
+                  description: "Consolidado do semestre atual"
+                },
+                ...studentSecondaryNavigationItems
+              ]
+            : []
+        }
+        currentUserId={currentUser.id}
+        institutionBranding={institutionBranding}
+      >
+        {children}
+      </DashboardShell>
+    </>
   );
 }

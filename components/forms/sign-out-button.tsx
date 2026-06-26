@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { signOutClientSession } from "@/lib/auth/client-session";
 
 export function SignOutButton() {
   const router = useRouter();
@@ -14,15 +14,7 @@ export function SignOutButton() {
 
     startTransition(async () => {
       try {
-        const supabase = createSupabaseBrowserClient();
-        const { error } = await supabase.auth.signOut();
-
-        if (error) {
-          throw error;
-        }
-
-        router.replace("/login");
-        router.refresh();
+        await signOutClientSession(router);
       } catch (error) {
         setErrorMessage(
           error instanceof Error ? error.message : "Não foi possível encerrar a sessão."

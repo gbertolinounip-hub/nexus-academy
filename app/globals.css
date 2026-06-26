@@ -7490,3 +7490,86 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
       text-decoration: none;
     }
 }
+
+.session-guard-backdrop,
+.session-guard-status {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(4px);
+}
+
+.session-guard-dialog,
+.session-guard-status-card {
+  width: min(100%, 460px);
+  border-radius: 24px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 28px 60px rgba(15, 23, 42, 0.22);
+  padding: 24px;
+}
+
+.session-guard-eyebrow {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(37, 99, 235, 0.9);
+}
+
+.session-guard-dialog h2,
+.session-guard-status-card strong {
+  margin: 0;
+  color: #0f172a;
+}
+
+.session-guard-dialog p,
+.session-guard-status-card p {
+  margin: 12px 0 0;
+  color: #334155;
+  line-height: 1.55;
+}
+
+.session-guard-countdown {
+  font-weight: 700;
+  color: #1d4ed8;
+}
+
+.session-guard-actions {
+  margin-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.session-guard-status-card {
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .session-guard-backdrop,
+  .session-guard-status {
+    padding: 16px;
+  }
+
+  .session-guard-dialog,
+  .session-guard-status-card {
+    padding: 20px;
+    border-radius: 20px;
+  }
+
+  .session-guard-actions {
+    justify-content: stretch;
+  }
+
+  .session-guard-actions .button {
+    width: 100%;
+  }
+}
