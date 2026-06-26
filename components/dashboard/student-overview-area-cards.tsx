@@ -84,33 +84,33 @@ export function StudentOverviewAreaCards({
                   className="button button-secondary button-small"
                   onClick={() => handleAreaOpen(area)}
                 >
-                  Abrir area
+                  Abrir área
                 </Link>
                 {isUnreadUpdate ? (
                   <span className="student-area-update-notice">
-                    Avaliacao atualizada
+                    Avaliação atualizada
                   </span>
                 ) : null}
               </div>
             </div>
 
             <div className="student-overview-card-metrics">
-              <span>Media: {formatPercentage(area.finalPercentage)}</span>
+              <span>Média: {formatPercentage(area.finalPercentage)}</span>
               <span>Subtotal: {formatPercentage(area.subtotalPercentage)}</span>
               <span>
                 Desconto: {formatPercentage(area.absencePenaltyPercentage)}
               </span>
-              <span>Conclusao: {formatPercentage(area.completionRate)}</span>
+              <span>Conclusão: {formatPercentage(area.completionRate)}</span>
             </div>
 
             <p className="student-overview-card-copy">
               Supervisores:{" "}
               {area.professorNames.length
                 ? area.professorNames.join(", ")
-                : "ainda nao vinculados"}
+                : "ainda não vinculados"}
             </p>
             <p className="student-overview-card-copy">
-              Lancamentos publicados: {area.publishedLaunchCount} - Horas nao
+              Lançamentos publicados: {area.publishedLaunchCount} - Horas não
               justificadas: {area.unjustifiedAbsenceHours.toFixed(2).replace(".", ",")}h
             </p>
           </article>

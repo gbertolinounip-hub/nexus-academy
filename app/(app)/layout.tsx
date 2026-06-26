@@ -81,7 +81,7 @@ export default async function AppLayout({
             area.className,
             area.professorNames.length
               ? area.professorNames.join(", ")
-              : "Supervisor ainda nÃ£o vinculado"
+              : "Supervisor ainda não vinculado"
           ])
         })) ?? []
       : [];
@@ -98,7 +98,7 @@ export default async function AppLayout({
             ? [
                 {
                   key: "overview",
-                  label: "VisÃ£o geral",
+                  label: "Visão geral",
                   description: "Consolidado do semestre atual"
                 },
                 ...studentSecondaryNavigationItems
