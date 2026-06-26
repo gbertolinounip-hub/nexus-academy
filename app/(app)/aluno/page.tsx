@@ -233,16 +233,16 @@ export default async function StudentDashboardPage(props: {
               tone="positive"
             />
             <MetricCard
-              label="Conclusão média"
+              label="Critérios avaliados"
               value={formatPercentage(pageData.overview.averageCompletionRate)}
-              hint="Média da cobertura de critérios entre as áreas do semestre."
+              hint="Percentual dos critérios avaliados até o momento pelo professor/supervisor."
             />
             <MetricCard
               label="Faltas não justificadas"
               value={`${pageData.overview.totalUnjustifiedAbsenceHours
                 .toFixed(2)
                 .replace(".", ",")}h`}
-              hint={`Total de ${pageData.overview.totalPublishedLaunches} lançamentos publicados nas áreas do semestre.`}
+              hint="Horas descontadas da média final da área de estágio."
               tone="alert"
             />
           </div>
