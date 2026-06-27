@@ -980,7 +980,7 @@ function buildClinicalCaseSummary(input: {
   classGroup: ClassRow;
   semester: SemesterRow;
   studentRow: StudentRow;
-  studentUser: UserRow;
+  studentUser: UserRow | null;
   professorUser: UserRow;
   area: AreaRow | null;
   schedules: ClinicalCaseScheduleSlot[];
@@ -1003,8 +1003,11 @@ function buildClinicalCaseSummary(input: {
     unitName: input.unit?.nome ?? "Unidade não informada",
     patient: buildClinicalPatientSummary(input.patient),
     enrollmentId: input.enrollment.id,
-    studentId: input.studentUser.id,
-    studentName: input.studentRow.nome_social ?? input.studentUser.nome_completo,
+    studentId: input.studentUser?.id ?? input.enrollment.aluno_id,
+    studentName:
+      input.studentRow.nome_social ??
+      input.studentUser?.nome_completo ??
+      "Aluno arquivado",
     registration: input.studentRow.matricula,
     classId: input.classGroup.id,
     className: input.classGroup.nome,
@@ -2245,7 +2248,7 @@ async function loadClinicalReferenceBundle(
       ? supabase.from("alunos").select("*").in("usuario_id", studentIds)
       : Promise.resolve({ data: [], error: null }),
     studentIds.length
-      ? supabase.from("usuarios").select("*").in("id", studentIds).eq("ativo", true)
+      ? supabase.from("usuarios").select("*").in("id", studentIds)
       : Promise.resolve({ data: [], error: null })
   ]);
 
@@ -2274,11 +2277,7 @@ async function loadClinicalReferenceBundle(
   const semesterRows = (semesterRowsData ?? []) as SemesterRow[];
   classRows = filterClassesToSemesters(classRows, semesterRows);
   enrollmentRows = filterEnrollmentsToClasses(enrollmentRows, classRows);
-  const studentUsers = filterActiveStudentUsers(
-    (studentUsersResult.data ?? []) as UserRow[]
-  );
-  const activeStudentIdSet = new Set(studentUsers.map((studentUser) => studentUser.id));
-  enrollmentRows = filterEnrollmentsToStudentIds(enrollmentRows, activeStudentIdSet);
+  const studentUsers = (studentUsersResult.data ?? []) as UserRow[];
   const areaIds = uniqueStringValues(classRows.map((classGroup) => classGroup.area_estagio_id));
   const { data: areaRowsData, error: areaError } = areaIds.length
     ? await supabase.from("areas_estagio").select("*").in("id", areaIds)
@@ -2568,7 +2567,7 @@ function mapClinicalCaseSummaries(
         ? bundle.studentsById.get(enrollment.aluno_id)
         : null;
       const studentUser = enrollment
-        ? bundle.studentUsersById.get(enrollment.aluno_id)
+        ? bundle.studentUsersById.get(enrollment.aluno_id) ?? null
         : null;
       const professorUser = bundle.professorsById.get(caseRow.professor_id);
       const area = caseRow.area_estagio_id
@@ -2582,7 +2581,6 @@ function mapClinicalCaseSummaries(
         !classGroup ||
         !semester ||
         !studentRow ||
-        !studentUser ||
         !professorUser
       ) {
         return null;
