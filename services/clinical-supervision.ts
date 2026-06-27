@@ -2195,7 +2195,9 @@ async function loadClinicalReferenceBundle(
   currentUser?: SessionUser | null
 ): Promise<ClinicalReferenceBundle> {
   const supabase =
-    currentUser?.role === "coordenador_master" || currentUser?.role === "secretaria"
+    currentUser?.role === "coordenador_master" ||
+    currentUser?.role === "secretaria" ||
+    currentUser?.role === "professor"
       ? createSupabaseAdminClient()
       : await createSupabaseServerClient();
   const patientIds = uniqueStringValues(caseRows.map((caseRow) => caseRow.paciente_id));
@@ -2332,7 +2334,8 @@ async function loadAccessibleClinicalCaseRows(input: {
   const serverSupabase = await createSupabaseServerClient();
   const queryClient =
     input.currentUser.role === "coordenador_master" ||
-    input.currentUser.role === "secretaria"
+    input.currentUser.role === "secretaria" ||
+    input.currentUser.role === "professor"
       ? createSupabaseAdminClient()
       : serverSupabase;
   let query = queryClient.from("casos_clinicos").select("*");
@@ -4317,7 +4320,8 @@ async function loadInstitutionalPatientRows(input: {
   patientIds?: string[];
 }) {
   const supabase =
-    input.currentUser.role === "secretaria"
+    input.currentUser.role === "secretaria" ||
+    input.currentUser.role === "professor"
       ? createSupabaseAdminClient()
       : await createSupabaseServerClient();
   let query = supabase.from("pacientes_clinica").select("*");
