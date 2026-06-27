@@ -4,6 +4,7 @@ import type { StudentGroupSnapshot } from "@/types/domain";
 interface CriteriaTableProps {
   groups: StudentGroupSnapshot[];
   collapsibleFeedback?: boolean;
+  displayMode?: "default" | "student";
 }
 
 function hasCriterionNarrative(criterion: StudentGroupSnapshot["criteria"][number]) {
@@ -67,17 +68,21 @@ function renderCriterionNarrative(
 
 export function CriteriaTable({
   groups,
-  collapsibleFeedback = false
+  collapsibleFeedback = false,
+  displayMode = "default"
 }: CriteriaTableProps) {
+  const hideRawScore = displayMode === "student";
+  const columnCount = hideRawScore ? 4 : 5;
+
   return (
     <div className="table-wrap">
       <table className="table criteria-table">
         <thead>
           <tr>
             <th>Critério</th>
-            <th>Peso</th>
-            <th>Nota lançada</th>
-            <th>Pontuação</th>
+            <th>{hideRawScore ? "% do critério" : "Peso"}</th>
+            {hideRawScore ? null : <th>Nota lançada</th>}
+            <th>{hideRawScore ? "% atingido" : "Pontuação"}</th>
             <th>Última atualização</th>
           </tr>
         </thead>
@@ -88,7 +93,7 @@ export function CriteriaTable({
           return (
             <tbody key={group.groupId} className={`criteria-block ${blockClassName}`}>
               <tr className="criteria-group-heading-row">
-                <th colSpan={5} className="criteria-group-heading-cell">
+                <th colSpan={columnCount} className="criteria-group-heading-cell">
                   <div className="criteria-group-heading-content">
                     <span className="criteria-group-heading-kicker">Bloco</span>
                     <strong className="criteria-group-heading-title">{group.name}</strong>
@@ -107,11 +112,13 @@ export function CriteriaTable({
                   >
                     <td>{criterion.name}</td>
                     <td>{formatPercentage(criterion.weightPercentage)}</td>
-                    <td>
-                      {criterion.latestRawScore === null
-                        ? "Pendente"
-                        : criterion.latestRawScore.toFixed(1).replace(".", ",")}
-                    </td>
+                    {hideRawScore ? null : (
+                      <td>
+                        {criterion.latestRawScore === null
+                          ? "Pendente"
+                          : criterion.latestRawScore.toFixed(1).replace(".", ",")}
+                      </td>
+                    )}
                     <td>{formatPercentage(criterion.earnedPercentage)}</td>
                     <td>{criterion.updatedAt ? formatDate(criterion.updatedAt) : "Sem lançamento"}</td>
                   </tr>
@@ -125,7 +132,7 @@ export function CriteriaTable({
                         isLastCriterion ? " criteria-block-row-end" : ""
                       }`}
                     >
-                      <td colSpan={5} className="criteria-justification-cell">
+                      <td colSpan={columnCount} className="criteria-justification-cell">
                         {renderCriterionNarrative(criterion, collapsibleFeedback)}
                       </td>
                     </tr>

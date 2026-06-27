@@ -132,7 +132,11 @@ export default async function StudentHistoricalEvaluationPage(props: {
         title="Detalhamento por subitem"
         description="Critérios, pontuações e justificativas correspondentes ao estado desta avaliação histórica."
       >
-        <CriteriaTable groups={pageData.dashboard.groups} collapsibleFeedback />
+        <CriteriaTable
+          groups={pageData.dashboard.groups}
+          collapsibleFeedback
+          displayMode="student"
+        />
       </SectionCard>
 
       {pageData.dashboard.finalObservations ? (
