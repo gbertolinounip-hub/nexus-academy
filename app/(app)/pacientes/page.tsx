@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Route } from "next";
+import { InlineInfoPopover } from "@/components/common/inline-info-popover";
 import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
 import { requireRole } from "@/lib/auth/session";
@@ -15,6 +16,37 @@ function getStatusClassName(status: string) {
     default:
       return "status-encerrado";
   }
+}
+
+const HISTORY_TOOLTIP =
+  "Exibe o histórico completo do paciente na base institucional, incluindo registros anteriores já realizados.";
+const ACTIVE_CASE_TOOLTIP =
+  "Abre o caso clínico atualmente em andamento deste paciente, mantendo a continuidade do acompanhamento já existente.";
+const NEW_CASE_TOOLTIP =
+  "Cria um novo caso clínico para o paciente, iniciando um novo ciclo de acompanhamento sem apagar o histórico anterior.";
+
+function PatientActionLinkWithInfo(props: {
+  href: Route;
+  label: string;
+  tooltip: string;
+  tone?: "primary" | "secondary";
+}) {
+  const buttonClassName =
+    props.tone === "secondary"
+      ? "button button-secondary button-small"
+      : "button button-small";
+
+  return (
+    <div className="clinical-case-action-with-info">
+      <InlineInfoPopover
+        label={`Saiba mais sobre ${props.label.toLowerCase()}`}
+        content={props.tooltip}
+      />
+      <Link href={props.href} className={buttonClassName}>
+        {props.label}
+      </Link>
+    </div>
+  );
 }
 
 export default async function ClinicalPatientsBasePage(props: {
@@ -260,19 +292,19 @@ export default async function ClinicalPatientsBasePage(props: {
 
                 {!isSecretaryView ? (
                   <div className="clinical-case-card-actions">
-                    <Link
+                    <PatientActionLinkWithInfo
                       href={`/pacientes/${patientItem.patient.id}` as Route}
-                      className="button button-secondary button-small"
-                    >
-                      Abrir histórico
-                    </Link>
+                      label="Abrir histórico"
+                      tooltip={HISTORY_TOOLTIP}
+                      tone="secondary"
+                    />
                     {patientItem.activeCaseId ? (
-                      <Link
+                      <PatientActionLinkWithInfo
                         href={`/clinica-supervisionada/${patientItem.activeCaseId}` as Route}
-                        className="button button-secondary button-small"
-                      >
-                        Abrir caso ativo
-                      </Link>
+                        label="Abrir caso ativo"
+                        tooltip={ACTIVE_CASE_TOOLTIP}
+                        tone="secondary"
+                      />
                     ) : patientItem.latestCaseId ? (
                       <Link
                         href={`/clinica-supervisionada/${patientItem.latestCaseId}` as Route}
@@ -281,25 +313,23 @@ export default async function ClinicalPatientsBasePage(props: {
                         Abrir último caso
                       </Link>
                     ) : null}
-                    <Link
+                    <PatientActionLinkWithInfo
                       href={
                         `/clinica-supervisionada/novo?patient_id=${encodeURIComponent(patientItem.patient.id)}` as Route
                       }
-                      className="button button-small"
-                    >
-                      Abrir novo caso
-                    </Link>
+                      label="Abrir novo caso"
+                      tooltip={NEW_CASE_TOOLTIP}
+                    />
                   </div>
                 ) : (
                   <div className="clinical-case-card-actions">
-                    <Link
+                    <PatientActionLinkWithInfo
                       href={
                         `/clinica-supervisionada/novo?patient_id=${encodeURIComponent(patientItem.patient.id)}` as Route
                       }
-                      className="button button-small"
-                    >
-                      Abrir novo caso
-                    </Link>
+                      label="Abrir novo caso"
+                      tooltip={NEW_CASE_TOOLTIP}
+                    />
                   </div>
                 )}
               </article>
