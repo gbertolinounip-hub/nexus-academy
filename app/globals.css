@@ -857,6 +857,14 @@ select {
   font-size: 0.94rem;
 }
 
+.student-dashboard .timeline-scrollable {
+  max-height: 24rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  padding-right: 0.35rem;
+}
+
 .table-wrap {
   overflow: auto;
   width: 100%;

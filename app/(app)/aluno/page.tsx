@@ -19,6 +19,8 @@ function renderAreaDashboard(dashboard: StudentDashboardData) {
   const professorNames = dashboard.professors.length
     ? dashboard.professors.map((professor) => professor.name).join(", ")
     : "Professor responsável ainda não vinculado";
+  const timelineItems = [...dashboard.progress].reverse();
+  const isTimelineScrollable = timelineItems.length > 3;
 
   return (
     <>
@@ -68,9 +70,11 @@ function renderAreaDashboard(dashboard: StudentDashboardData) {
           title="Linha do tempo"
           description="Evolução da média a cada lançamento publicado nesta área."
         >
-          {dashboard.progress.length ? (
-            <div className="timeline">
-              {dashboard.progress.map((point) => (
+          {timelineItems.length ? (
+            <div
+              className={`timeline${isTimelineScrollable ? " timeline-scrollable" : ""}`}
+            >
+              {timelineItems.map((point) => (
                 <article
                   key={`${point.evaluationId}-${point.publishedAt}`}
                   className="timeline-item"
