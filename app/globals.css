@@ -5191,31 +5191,38 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.22rem;
-  height: 1.22rem;
+  width: 1.24rem;
+  height: 1.24rem;
   padding: 0;
-  border: 1px solid rgba(var(--accent-rgb), 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 999px;
-  background: rgba(var(--accent-rgb), 0.05);
-  color: var(--brand);
-  font-size: 0.74rem;
-  font-weight: 600;
+  background: linear-gradient(180deg, #8db4ff 0%, #6f97f0 100%);
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 700;
   line-height: 1;
   cursor: pointer;
+  box-shadow:
+    0 6px 14px rgba(89, 128, 221, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34);
   transition:
     background-color 160ms ease,
     border-color 160ms ease,
     color 160ms ease,
-    box-shadow 160ms ease;
+    box-shadow 160ms ease,
+    transform 160ms ease;
 }
 
 .inline-info-popover-trigger:hover,
 .inline-info-popover.is-open .inline-info-popover-trigger,
 .inline-info-popover-trigger:focus-visible {
-  border-color: rgba(var(--accent-rgb), 0.3);
-  background: rgba(var(--accent-rgb), 0.1);
-  color: var(--accent);
-  box-shadow: 0 8px 18px rgba(var(--accent-rgb), 0.1);
+  border-color: rgba(255, 255, 255, 0.38);
+  background: linear-gradient(180deg, #7da9ff 0%, #5f8ae7 100%);
+  color: #ffffff;
+  box-shadow:
+    0 10px 18px rgba(89, 128, 221, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.38);
+  transform: translateY(-1px);
   outline: none;
 }
 
