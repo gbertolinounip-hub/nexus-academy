@@ -28,7 +28,11 @@ export default async function ClassFinalReportPage({
   params,
   searchParams
 }: ClassFinalReportPageProps) {
-  const currentUser = await requireRole(["coordenador", "professor"]);
+  const currentUser = await requireRole([
+    "coordenador",
+    "professor",
+    "coordenador_master"
+  ]);
   const reportBranding =
     await loadInstitutionalReportBrandingForCurrentUser(currentUser);
   const { classId } = await params;
@@ -36,6 +40,8 @@ export default async function ClassFinalReportPage({
   const origin = Array.isArray(resolvedSearchParams.from)
     ? resolvedSearchParams.from[0]
     : resolvedSearchParams.from;
+  const isAuditOrigin = origin === "audit" || origin === "master-audit";
+  const isMasterAuditOrigin = origin === "master-audit";
   const semesterId = Array.isArray(resolvedSearchParams.semestre)
     ? resolvedSearchParams.semestre[0]
     : resolvedSearchParams.semestre;
@@ -44,13 +50,15 @@ export default async function ClassFinalReportPage({
       ? resolvedSearchParams.print[0]
       : resolvedSearchParams.print) === "1";
   const historicalExportQuery =
-    origin === "audit" && semesterId
-      ? `?semestre=${encodeURIComponent(semesterId)}`
+    isAuditOrigin && semesterId
+      ? `?semestre=${encodeURIComponent(semesterId)}${
+          origin ? `&from=${encodeURIComponent(origin)}` : ""
+        }`
       : "";
   const { report, emptyState } = await getAuthenticatedClassFinalReport(
     currentUser,
     classId,
-    origin === "audit" && semesterId
+    isAuditOrigin && semesterId
       ? {
           semesterId,
           includeHistoricalStudents: true
@@ -58,8 +66,10 @@ export default async function ClassFinalReportPage({
       : undefined
   );
   const backHref: Route =
-    origin === "audit" && semesterId
-      ? (`/auditoria/semestres/${semesterId}/areas/${classId}` as Route)
+    isAuditOrigin && semesterId
+      ? (isMasterAuditOrigin
+          ? `/master/auditoria/semestres/${semesterId}/areas/${classId}`
+          : `/auditoria/semestres/${semesterId}/areas/${classId}`) as Route
       : (`/relatorios?semestre=${report?.students[0]?.semesterId ?? ""}` as Route);
 
   return (
@@ -109,7 +119,9 @@ export default async function ClassFinalReportPage({
               <Link href={backHref} className="button button-secondary">
                 {origin === "audit"
                   ? "Voltar à auditoria"
-                  : "Voltar aos relatórios"}
+                  : origin === "master-audit"
+                    ? "Voltar à auditoria global"
+                    : "Voltar aos relatórios"}
               </Link>
             }
           >
@@ -278,8 +290,12 @@ export default async function ClassFinalReportPage({
             "Não foi possível montar o relatório final desta turma."
           }
           actions={
-            <Link href="/relatorios" className="button button-secondary">
-              Voltar aos relatórios
+            <Link href={backHref} className="button button-secondary">
+              {origin === "audit"
+                ? "Voltar à auditoria"
+                : origin === "master-audit"
+                  ? "Voltar à auditoria global"
+                  : "Voltar aos relatórios"}
             </Link>
           }
         >

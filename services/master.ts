@@ -5,6 +5,8 @@ import type { AuditEntry, ProfileCode, SessionUser } from "@/types/domain";
 import type { Database } from "@/types/database";
 import {
   loadUnitAuditFeed,
+  type ClosedSemesterAreaAuditDetail,
+  type ClosedSemesterAuditView,
   type UnitAuditAreaOption,
   type UnitAuditFilterState
 } from "@/services/audit";
@@ -217,6 +219,13 @@ export interface MasterGlobalAuditPageData {
   institutions: MasterInstitutionOption[];
   units: MasterUnitOption[];
   courses: MasterCourseOption[];
+  closedSemesters: Array<{
+    id: string;
+    code: string;
+    name: string;
+  }>;
+  selectedSemesterId: string | null;
+  selectedClosedSemester: ClosedSemesterAuditView | null;
   filters: {
     institutionId: string;
     unitId: string;
@@ -346,6 +355,10 @@ function normalizeAuditDisplayText(value: string | null | undefined) {
   return repairKnownMojibake(value).trim();
 }
 
+function uniqueStringValues(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => Boolean(value?.trim())))];
+}
+
 function buildCourseDisplayName(course: Pick<CourseRow, "codigo" | "nome"> | null | undefined) {
   if (!course) {
     return null;
@@ -410,6 +423,376 @@ function buildAuditSummary(entry: AuditHistoryRow) {
     default:
       return `Movimentação registrada em ${entry.tabela}.`;
   }
+}
+
+function findSemesterClosureEntry(semesterId: string, auditRows: AuditHistoryRow[]) {
+  return auditRows.find((entry) => {
+    if (entry.tabela !== "semestres" || entry.registro_id !== semesterId) {
+      return false;
+    }
+
+    return getAuditString(asAuditRecord(entry.dados_depois), "status") === "encerrado";
+  });
+}
+
+function isSemesterVisibleInMasterAuditScope(input: {
+  semester: Pick<SemesterRow, "id" | "codigo" | "nome" | "unidade_id" | "oferta_curso_unidade_id">;
+  validInstitutionId: string;
+  validUnitId: string;
+  validCourseId: string;
+  offersById: Map<
+    string,
+    Pick<CourseOfferRow, "id" | "instituicao_id" | "unidade_id" | "curso_id">
+  >;
+  unitsById: Map<string, Pick<UnitRow, "id" | "instituicao_id">>;
+}) {
+  const offer = input.semester.oferta_curso_unidade_id
+    ? input.offersById.get(input.semester.oferta_curso_unidade_id) ?? null
+    : null;
+  const resolvedUnitId = offer?.unidade_id ?? input.semester.unidade_id ?? null;
+  const resolvedInstitutionId =
+    offer?.instituicao_id ??
+    (resolvedUnitId
+      ? input.unitsById.get(resolvedUnitId)?.instituicao_id ?? null
+      : null);
+  const resolvedCourseId = offer?.curso_id ?? null;
+
+  if (
+    input.validInstitutionId &&
+    resolvedInstitutionId !== input.validInstitutionId
+  ) {
+    return false;
+  }
+
+  if (input.validUnitId && resolvedUnitId !== input.validUnitId) {
+    return false;
+  }
+
+  if (input.validCourseId && resolvedCourseId !== input.validCourseId) {
+    return false;
+  }
+
+  return true;
+}
+
+async function buildMasterClosedSemesterAuditView(input: {
+  semester: SemesterRow;
+  fallbackAuditRows: AuditHistoryRow[];
+}) {
+  const supabase = createSupabaseAdminClient();
+  const [classRowsResult, closureRowsResult] = await Promise.all([
+    supabase
+      .from("turmas")
+      .select("*")
+      .eq("semestre_id", input.semester.id)
+      .order("nome", { ascending: true }),
+    supabase
+      .from("historico_alteracoes")
+      .select("*")
+      .eq("tabela", "semestres")
+      .eq("registro_id", input.semester.id)
+      .order("created_at", { ascending: false })
+      .limit(20)
+  ]);
+
+  if (classRowsResult.error || closureRowsResult.error) {
+    throw new Error("Não foi possível carregar as áreas arquivadas deste semestre.");
+  }
+
+  const classRows = (classRowsResult.data ?? []) as ClassRow[];
+  const closureRows = (closureRowsResult.data ?? []) as AuditHistoryRow[];
+  const closureEntry =
+    findSemesterClosureEntry(input.semester.id, closureRows) ??
+    findSemesterClosureEntry(input.semester.id, input.fallbackAuditRows) ??
+    closureRows[0] ??
+    null;
+  const archivedAt = closureEntry?.created_at ?? input.semester.updated_at;
+  const archivedById = closureEntry?.usuario_id ?? null;
+  const classIds = classRows.map((classGroup) => classGroup.id);
+  const enrollmentRowsResult = classIds.length
+    ? await supabase.from("matriculas_turma").select("*").in("turma_id", classIds)
+    : { data: [], error: null };
+
+  if (enrollmentRowsResult.error) {
+    throw new Error("Não foi possível carregar as matrículas arquivadas do semestre.");
+  }
+
+  const enrollmentRows = (enrollmentRowsResult.data ?? []) as EnrollmentRow[];
+  const enrollmentIds = enrollmentRows.map((enrollment) => enrollment.id);
+  const [professorLinksResult, areaRowsResult, blockRowsResult, archivedByResult] =
+    await Promise.all([
+      enrollmentIds.length
+        ? supabase
+            .from("vinculos_professor_aluno")
+            .select("*")
+            .in("matricula_turma_id", enrollmentIds)
+        : Promise.resolve({ data: [], error: null }),
+      supabase.from("areas_estagio").select("id, nome, bloco_id"),
+      supabase.from("blocos_estagio").select("id, nome"),
+      archivedById
+        ? supabase
+            .from("usuarios")
+            .select("nome_completo")
+            .eq("id", archivedById)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null })
+    ]);
+
+  if (
+    professorLinksResult.error ||
+    areaRowsResult.error ||
+    blockRowsResult.error ||
+    archivedByResult.error
+  ) {
+    throw new Error("Não foi possível consolidar o histórico das áreas arquivadas.");
+  }
+
+  const professorLinks = (professorLinksResult.data ?? []) as Database["public"]["Tables"]["vinculos_professor_aluno"]["Row"][];
+  const professorIds = uniqueStringValues(professorLinks.map((link) => link.professor_id));
+  const professorUsersResult = professorIds.length
+    ? await supabase
+        .from("usuarios")
+        .select("id, nome_completo")
+        .in("id", professorIds)
+    : { data: [], error: null };
+
+  if (professorUsersResult.error) {
+    throw new Error("Não foi possível carregar os responsáveis pelas áreas arquivadas.");
+  }
+
+  const areaMap = new Map(
+    (
+      ((areaRowsResult.data ?? []) as Array<
+        Pick<Database["public"]["Tables"]["areas_estagio"]["Row"], "id" | "nome" | "bloco_id">
+      >)
+    ).map((area) => [area.id, { nome: area.nome, blocoId: area.bloco_id }])
+  );
+  const blockMap = new Map(
+    (
+      ((blockRowsResult.data ?? []) as Array<
+        Pick<Database["public"]["Tables"]["blocos_estagio"]["Row"], "id" | "nome">
+      >)
+    ).map((block) => [block.id, block.nome])
+  );
+  const professorNameMap = new Map(
+    (
+      ((professorUsersResult.data ?? []) as Array<
+        Pick<UserRow, "id" | "nome_completo">
+      >)
+    ).map((user) => [user.id, user.nome_completo])
+  );
+  const linksByEnrollmentId = new Map<
+    string,
+    Database["public"]["Tables"]["vinculos_professor_aluno"]["Row"][]
+  >();
+
+  for (const link of professorLinks) {
+    const currentLinks = linksByEnrollmentId.get(link.matricula_turma_id) ?? [];
+    currentLinks.push(link);
+    linksByEnrollmentId.set(link.matricula_turma_id, currentLinks);
+  }
+
+  const areas = classRows.map((classGroup) => {
+    const supervisorNames = uniqueStringValues(
+      enrollmentRows
+        .filter((enrollment) => enrollment.turma_id === classGroup.id)
+        .flatMap((enrollment) => linksByEnrollmentId.get(enrollment.id) ?? [])
+        .sort(
+          (left, right) =>
+            Number(right.responsavel_principal) - Number(left.responsavel_principal)
+        )
+        .map((link) => professorNameMap.get(link.professor_id) ?? "")
+    );
+    const areaRecord = classGroup.area_estagio_id
+      ? areaMap.get(classGroup.area_estagio_id) ?? null
+      : null;
+
+    return {
+      classId: classGroup.id,
+      classCode: classGroup.codigo,
+      className: classGroup.nome,
+      areaName: areaRecord?.nome ?? classGroup.area_estagio,
+      blockName:
+        (areaRecord?.blocoId ? blockMap.get(areaRecord.blocoId) : null) ??
+        "Bloco não identificado",
+      archivedAt,
+      responsibleLabel:
+        supervisorNames[0] ??
+        ((archivedByResult.data as Pick<UserRow, "nome_completo"> | null)?.nome_completo ??
+          "Responsável não identificado"),
+      supervisorNames
+    };
+  });
+
+  return {
+    id: input.semester.id,
+    code: input.semester.codigo,
+    name: input.semester.nome,
+    archivedAt,
+    archivedByName:
+      ((archivedByResult.data as Pick<UserRow, "nome_completo"> | null)?.nome_completo ??
+        "Coordenação não identificada"),
+    areas
+  } satisfies ClosedSemesterAuditView;
+}
+
+export async function getMasterClosedSemesterAreaDetail(
+  semesterId: string,
+  classId: string
+): Promise<ClosedSemesterAreaAuditDetail | null> {
+  const supabase = createSupabaseAdminClient();
+  const [semesterResult, classResult, closureRowsResult] = await Promise.all([
+    supabase.from("semestres").select("*").eq("id", semesterId).maybeSingle(),
+    supabase.from("turmas").select("*").eq("id", classId).maybeSingle(),
+    supabase
+      .from("historico_alteracoes")
+      .select("*")
+      .eq("tabela", "semestres")
+      .eq("registro_id", semesterId)
+      .order("created_at", { ascending: false })
+      .limit(20)
+  ]);
+
+  if (semesterResult.error || classResult.error || closureRowsResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Não foi possível carregar os dados históricos desta área encerrada.",
+        semesterResult.error ?? classResult.error ?? closureRowsResult.error
+      )
+    );
+  }
+
+  const semester = (semesterResult.data ?? null) as SemesterRow | null;
+  const classGroup = (classResult.data ?? null) as ClassRow | null;
+
+  if (!semester || !classGroup || classGroup.semestre_id !== semesterId) {
+    return null;
+  }
+
+  if (semester.status !== "encerrado") {
+    return null;
+  }
+
+  const closureRows = (closureRowsResult.data ?? []) as AuditHistoryRow[];
+  const closureEntry = findSemesterClosureEntry(semesterId, closureRows) ?? closureRows[0] ?? null;
+  const archivedAt = closureEntry?.created_at ?? semester.updated_at;
+  const archivedById = closureEntry?.usuario_id ?? null;
+
+  const [areaRowsResult, blockRowsResult, enrollmentRowsResult, archivedByResult] =
+    await Promise.all([
+      supabase.from("areas_estagio").select("id, nome, bloco_id"),
+      supabase.from("blocos_estagio").select("id, nome"),
+      supabase.from("matriculas_turma").select("*").eq("turma_id", classId),
+      archivedById
+        ? supabase
+            .from("usuarios")
+            .select("nome_completo")
+            .eq("id", archivedById)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null })
+    ]);
+
+  if (
+    areaRowsResult.error ||
+    blockRowsResult.error ||
+    enrollmentRowsResult.error ||
+    archivedByResult.error
+  ) {
+    throw new Error("Não foi possível consolidar o contexto da área arquivada.");
+  }
+
+  const enrollmentRows = (enrollmentRowsResult.data ?? []) as EnrollmentRow[];
+  const enrollmentIds = enrollmentRows.map((enrollment) => enrollment.id);
+  const professorLinksResult = enrollmentIds.length
+    ? await supabase
+        .from("vinculos_professor_aluno")
+        .select("*")
+        .in("matricula_turma_id", enrollmentIds)
+    : { data: [], error: null };
+
+  if (professorLinksResult.error) {
+    throw new Error("Não foi possível carregar os supervisores desta área arquivada.");
+  }
+
+  const professorLinks = (professorLinksResult.data ?? []) as Database["public"]["Tables"]["vinculos_professor_aluno"]["Row"][];
+  const professorIds = uniqueStringValues(professorLinks.map((link) => link.professor_id));
+  const professorUsersResult = professorIds.length
+    ? await supabase
+        .from("usuarios")
+        .select("id, nome_completo")
+        .in("id", professorIds)
+    : { data: [], error: null };
+
+  if (professorUsersResult.error) {
+    throw new Error("Não foi possível carregar os responsáveis desta área arquivada.");
+  }
+
+  const areaMap = new Map(
+    (
+      ((areaRowsResult.data ?? []) as Array<
+        Pick<Database["public"]["Tables"]["areas_estagio"]["Row"], "id" | "nome" | "bloco_id">
+      >)
+    ).map((area) => [area.id, { nome: area.nome, blocoId: area.bloco_id }])
+  );
+  const blockMap = new Map(
+    (
+      ((blockRowsResult.data ?? []) as Array<
+        Pick<Database["public"]["Tables"]["blocos_estagio"]["Row"], "id" | "nome">
+      >)
+    ).map((block) => [block.id, block.nome])
+  );
+  const professorNameMap = new Map(
+    (
+      ((professorUsersResult.data ?? []) as Array<
+        Pick<UserRow, "id" | "nome_completo">
+      >)
+    ).map((user) => [user.id, user.nome_completo])
+  );
+  const linksByEnrollmentId = new Map<
+    string,
+    Database["public"]["Tables"]["vinculos_professor_aluno"]["Row"][]
+  >();
+
+  for (const link of professorLinks) {
+    const currentLinks = linksByEnrollmentId.get(link.matricula_turma_id) ?? [];
+    currentLinks.push(link);
+    linksByEnrollmentId.set(link.matricula_turma_id, currentLinks);
+  }
+
+  const supervisorNames = uniqueStringValues(
+    enrollmentRows
+      .flatMap((enrollment) => linksByEnrollmentId.get(enrollment.id) ?? [])
+      .sort(
+        (left, right) =>
+          Number(right.responsavel_principal) - Number(left.responsavel_principal)
+      )
+      .map((link) => professorNameMap.get(link.professor_id) ?? "")
+  );
+  const areaRecord = classGroup.area_estagio_id
+    ? areaMap.get(classGroup.area_estagio_id) ?? null
+    : null;
+
+  return {
+    semester: {
+      id: semester.id,
+      code: semester.codigo,
+      name: semester.nome,
+      archivedAt,
+      archivedByName:
+        ((archivedByResult.data as Pick<UserRow, "nome_completo"> | null)?.nome_completo ??
+          "Coordenação não identificada")
+    },
+    area: {
+      classId: classGroup.id,
+      classCode: classGroup.codigo,
+      className: classGroup.nome,
+      areaName: areaRecord?.nome ?? classGroup.area_estagio,
+      blockName:
+        (areaRecord?.blocoId ? blockMap.get(areaRecord.blocoId) : null) ??
+        "Bloco não identificado",
+      supervisorNames
+    }
+  };
 }
 
 interface MasterGlobalAuditResolutionContext {
@@ -1516,6 +1899,7 @@ export async function getMasterGlobalAuditPageData(input?: {
   institutionId?: string | string[];
   unitId?: string | string[];
   courseId?: string | string[];
+  semesterId?: string | string[];
   role?: string | string[];
   period?: string | string[];
 }): Promise<MasterGlobalAuditPageData> {
@@ -1576,6 +1960,7 @@ export async function getMasterGlobalAuditPageData(input?: {
   const requestedInstitutionId = normalizeFilterValue(input?.institutionId);
   const requestedUnitId = normalizeFilterValue(input?.unitId);
   const requestedCourseId = normalizeFilterValue(input?.courseId);
+  const requestedSemesterId = normalizeFilterValue(input?.semesterId);
   const requestedRole = normalizeFilterValue(input?.role);
   const requestedPeriod = normalizeFilterValue(input?.period);
   const validInstitutionId = institutionsById.has(requestedInstitutionId)
@@ -1600,6 +1985,8 @@ export async function getMasterGlobalAuditPageData(input?: {
       ))
       ? requestedCourseId
       : "";
+  const unitMap = new Map(units.map((unit) => [unit.id, unit]));
+  const offerMap = new Map(offers.map((offer) => [offer.id, offer]));
   const roleFilter: MasterGlobalAuditPageData["filters"]["role"] =
     visibleInstitutionalProfiles.includes(requestedRole as VisibleProfileCode)
       ? (requestedRole as VisibleProfileCode)
@@ -1613,6 +2000,45 @@ export async function getMasterGlobalAuditPageData(input?: {
       : "all";
   const auditRowLimit =
     validUnitId || validInstitutionId || validCourseId ? 1200 : 400;
+  const closedSemestersResult = await supabase
+    .from("semestres")
+    .select("*")
+    .eq("status", "encerrado")
+    .order("data_inicio", { ascending: false });
+
+  if (closedSemestersResult.error) {
+    throw new Error(
+      formatSupabaseErrorMessage(
+        "Não foi possível carregar os semestres encerrados da auditoria global.",
+        closedSemestersResult.error
+      )
+    );
+  }
+
+  const closedSemesterRows = ((closedSemestersResult.data ?? []) as SemesterRow[]).filter(
+    (semester) =>
+      isSemesterVisibleInMasterAuditScope({
+        semester,
+        validInstitutionId,
+        validUnitId,
+        validCourseId,
+        offersById: offerMap,
+        unitsById: unitMap
+      })
+  );
+  const closedSemesters = [...closedSemesterRows]
+    .sort(
+      (left, right) =>
+        new Date(right.data_inicio).getTime() - new Date(left.data_inicio).getTime()
+    )
+    .map((semester) => ({
+      id: semester.id,
+      code: semester.codigo,
+      name: semester.nome
+    }));
+  const selectedSemester =
+    closedSemesterRows.find((semester) => semester.id === requestedSemesterId) ?? null;
+  const selectedSemesterId = selectedSemester?.id ?? null;
 
   let auditQuery = supabase
     .from("historico_alteracoes")
@@ -1818,7 +2244,6 @@ export async function getMasterGlobalAuditPageData(input?: {
     Pick<UserRow, "id" | "nome_completo" | "perfil_id">
   >;
   const actorUserMap = new Map(actorUsers.map((user) => [user.id, user]));
-  const unitMap = new Map(units.map((unit) => [unit.id, unit]));
   const resolutionContext: MasterGlobalAuditResolutionContext = {
     evaluations: new Map(evaluationRows.map((evaluation) => [evaluation.id, evaluation])),
     enrollments: new Map(enrollmentRows.map((enrollment) => [enrollment.id, enrollment])),
@@ -1901,11 +2326,20 @@ export async function getMasterGlobalAuditPageData(input?: {
 
       return true;
     });
+  const selectedClosedSemester = selectedSemester
+    ? await buildMasterClosedSemesterAuditView({
+        semester: selectedSemester,
+        fallbackAuditRows: auditRows
+      })
+    : null;
 
   return {
     institutions: buildInstitutionOptions(institutions),
     units: buildUnitOptions(units, institutionsById),
     courses: buildCourseOptions(courses, offers),
+    closedSemesters,
+    selectedSemesterId,
+    selectedClosedSemester,
     filters: {
       institutionId: validInstitutionId,
       unitId: validUnitId,

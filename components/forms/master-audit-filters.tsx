@@ -1,6 +1,4 @@
 "use client";
-
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type {
   MasterCourseOption,
@@ -15,6 +13,8 @@ interface MasterAuditFiltersProps {
   courses: MasterCourseOption[];
   filters: MasterGlobalAuditPageData["filters"];
   exportHref: string;
+  clearHref?: string;
+  preservedSemesterId?: string | null;
 }
 
 export function MasterAuditFilters({
@@ -22,7 +22,9 @@ export function MasterAuditFilters({
   units,
   courses,
   filters,
-  exportHref
+  exportHref,
+  clearHref = "/master/auditoria",
+  preservedSemesterId
 }: MasterAuditFiltersProps) {
   const [institutionId, setInstitutionId] = useState(filters.institutionId);
   const [unitId, setUnitId] = useState(filters.unitId);
@@ -77,6 +79,10 @@ export function MasterAuditFilters({
       method="get"
       className="master-filter-form master-filter-form-wide master-audit-filter-form"
     >
+      {preservedSemesterId ? (
+        <input type="hidden" name="semestre" value={preservedSemesterId} />
+      ) : null}
+
       <label className="field">
         <span>Instituição / IES</span>
         <select
@@ -153,9 +159,9 @@ export function MasterAuditFilters({
         <button className="button button-secondary" type="submit">
           Aplicar filtros
         </button>
-        <Link href="/master/auditoria" className="button button-secondary">
+        <a href={clearHref} className="button button-secondary">
           Limpar
-        </Link>
+        </a>
         <a href={exportHref} className="button button-secondary">
           Exportar Excel
         </a>

@@ -45,7 +45,11 @@ function statusLabelText(status: "bem" | "atencao" | "critico") {
 export default async function StudentFinalReportPage(
   props: StudentFinalReportPageProps
 ) {
-  const currentUser = await requireRole(["coordenador", "professor"]);
+  const currentUser = await requireRole([
+    "coordenador",
+    "professor",
+    "coordenador_master"
+  ]);
   const reportBranding =
     await loadInstitutionalReportBrandingForCurrentUser(currentUser);
   const { studentId } = await props.params;
@@ -54,12 +58,14 @@ export default async function StudentFinalReportPage(
   const requestedEnrollmentId = readSearchParam(searchParams, "matricula");
   const origin = readSearchParam(searchParams, "from");
   const sourceClassId = readSearchParam(searchParams, "turma");
+  const isAuditOrigin = origin === "audit" || origin === "master-audit";
+  const isMasterAuditOrigin = origin === "master-audit";
   const { report, emptyState } = await getAuthenticatedStudentFinalReport(
     currentUser,
     studentId,
     requestedSemesterId,
     requestedEnrollmentId,
-    origin === "audit"
+    isAuditOrigin
       ? {
           includeHistoricalStudents: true
         }
@@ -67,16 +73,20 @@ export default async function StudentFinalReportPage(
   );
   const isProfessorAreaReport = report?.reportContext.kind === "area";
   const reportBaseHref =
-    origin === "audit" && requestedSemesterId && sourceClassId
-      ? `/auditoria/semestres/${encodeURIComponent(requestedSemesterId)}/areas/${encodeURIComponent(sourceClassId)}/alunos/${encodeURIComponent(studentId)}`
+    isAuditOrigin && requestedSemesterId && sourceClassId
+      ? isMasterAuditOrigin
+        ? `/master/auditoria/semestres/${encodeURIComponent(requestedSemesterId)}/areas/${encodeURIComponent(sourceClassId)}/alunos/${encodeURIComponent(studentId)}`
+        : `/auditoria/semestres/${encodeURIComponent(requestedSemesterId)}/areas/${encodeURIComponent(sourceClassId)}/alunos/${encodeURIComponent(studentId)}`
       : `/relatorios/alunos/${encodeURIComponent(report?.student.id ?? studentId)}`;
   const backHref =
-    origin === "audit" && requestedSemesterId && sourceClassId
-      ? `/auditoria/semestres/${encodeURIComponent(requestedSemesterId)}/areas/${encodeURIComponent(sourceClassId)}`
+    isAuditOrigin && requestedSemesterId && sourceClassId
+      ? isMasterAuditOrigin
+        ? `/master/auditoria/semestres/${encodeURIComponent(requestedSemesterId)}/areas/${encodeURIComponent(sourceClassId)}`
+        : `/auditoria/semestres/${encodeURIComponent(requestedSemesterId)}/areas/${encodeURIComponent(sourceClassId)}`
       : `/relatorios?semestre=${report?.selectedSemester.id ?? requestedSemesterId ?? ""}`;
   const auditQuerySuffix =
-    origin === "audit" && sourceClassId
-      ? `&from=audit&turma=${encodeURIComponent(sourceClassId)}`
+    isAuditOrigin && sourceClassId
+      ? `&from=${encodeURIComponent(origin ?? "audit")}&turma=${encodeURIComponent(sourceClassId)}`
       : "";
   const exportQuerySuffix = report
     ? `?semestre=${report.selectedSemester.id}${
@@ -148,7 +158,9 @@ export default async function StudentFinalReportPage(
                   <a href={backHref} className="button button-secondary">
                     {origin === "audit"
                       ? "Voltar à área arquivada"
-                      : "Voltar aos relatórios"}
+                      : origin === "master-audit"
+                        ? "Voltar à área arquivada do Master"
+                        : "Voltar aos relatórios"}
                   </a>
                 </div>
               }
@@ -434,7 +446,11 @@ export default async function StudentFinalReportPage(
           }
           actions={
             <a href={backHref} className="button button-secondary">
-              {origin === "audit" ? "Voltar à área arquivada" : "Voltar aos relatórios"}
+              {origin === "audit"
+                ? "Voltar à área arquivada"
+                : origin === "master-audit"
+                  ? "Voltar à área arquivada do Master"
+                  : "Voltar aos relatórios"}
             </a>
           }
         >
