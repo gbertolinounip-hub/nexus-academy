@@ -5172,24 +5172,18 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
 }
 
 .clinical-case-action-with-info {
-  display: grid;
-  grid-template-columns: max-content;
-  grid-template-rows: auto auto;
-  justify-items: stretch;
-  align-items: start;
-  gap: 0.18rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
   min-width: fit-content;
-}
-
-.clinical-case-action-with-info .button {
-  grid-row: 2;
 }
 
 .inline-info-popover {
   position: relative;
-  grid-row: 1;
-  justify-self: end;
-  margin-right: 0.32rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
   z-index: 2;
 }
 
@@ -5197,15 +5191,15 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.18rem;
-  height: 1.18rem;
+  width: 1.22rem;
+  height: 1.22rem;
   padding: 0;
-  border: 1px solid rgba(var(--accent-rgb), 0.22);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
   border-radius: 999px;
-  background: rgba(var(--accent-rgb), 0.06);
+  background: rgba(var(--accent-rgb), 0.05);
   color: var(--brand);
   font-size: 0.74rem;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1;
   cursor: pointer;
   transition:
@@ -5218,8 +5212,8 @@ body.clinical-print-mode .page > :not(.clinical-print-page) {
 .inline-info-popover-trigger:hover,
 .inline-info-popover.is-open .inline-info-popover-trigger,
 .inline-info-popover-trigger:focus-visible {
-  border-color: rgba(var(--accent-rgb), 0.34);
-  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-rgb), 0.3);
+  background: rgba(var(--accent-rgb), 0.1);
   color: var(--accent);
   box-shadow: 0 8px 18px rgba(var(--accent-rgb), 0.1);
   outline: none;
