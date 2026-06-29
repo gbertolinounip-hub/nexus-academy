@@ -1,4 +1,5 @@
-﻿import { formatDate, formatPercentage } from "@/lib/utils/format";
+import { Sparkline } from "@/components/charts/sparkline";
+import { formatDate, formatPercentage } from "@/lib/utils/format";
 import type { StudentGroupSnapshot } from "@/types/domain";
 
 interface CriteriaTableProps {
@@ -71,18 +72,22 @@ export function CriteriaTable({
   collapsibleFeedback = false,
   displayMode = "default"
 }: CriteriaTableProps) {
-  const hideRawScore = displayMode === "student";
-  const columnCount = hideRawScore ? 4 : 5;
+  const isStudentMode = displayMode === "student";
+  const hideRawScore = isStudentMode;
+  const columnCount = 5;
 
   return (
     <div className="table-wrap">
-      <table className="table criteria-table">
+      <table
+        className={`table criteria-table${isStudentMode ? " criteria-table-student" : ""}`}
+      >
         <thead>
           <tr>
             <th>Critério</th>
             <th>{hideRawScore ? "% do critério" : "Peso"}</th>
             {hideRawScore ? null : <th>Nota lançada</th>}
             <th>{hideRawScore ? "% atingido" : "Pontuação"}</th>
+            {isStudentMode ? <th>Evolução</th> : null}
             <th>Última atualização</th>
           </tr>
         </thead>
@@ -120,7 +125,20 @@ export function CriteriaTable({
                       </td>
                     )}
                     <td>{formatPercentage(criterion.earnedPercentage)}</td>
-                    <td>{criterion.updatedAt ? formatDate(criterion.updatedAt) : "Sem lançamento"}</td>
+                    {isStudentMode ? (
+                      <td className="criteria-evolution-cell">
+                        <Sparkline
+                          label={criterion.name}
+                          points={criterion.evolution}
+                          maxValue={criterion.weightPercentage}
+                        />
+                      </td>
+                    ) : null}
+                    <td>
+                      {criterion.updatedAt
+                        ? formatDate(criterion.updatedAt)
+                        : "Sem lançamento"}
+                    </td>
                   </tr>
                 ];
 
@@ -148,5 +166,3 @@ export function CriteriaTable({
     </div>
   );
 }
-
-

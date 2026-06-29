@@ -3,6 +3,7 @@ import type {
   AbsenceRecord,
   EvaluationItemInput,
   EvaluationLaunch,
+  StudentCriterionEvolutionPoint,
   ProfessorRecord,
   StudentCriterionSnapshot,
   StudentDashboardData,
@@ -68,6 +69,35 @@ function buildLatestCriterionMap(evaluations: EvaluationLaunch[]) {
   return latestMap;
 }
 
+function buildCriterionEvolutionMap(evaluations: EvaluationLaunch[]) {
+  const evolutionMap = new Map<string, StudentCriterionEvolutionPoint[]>();
+  const sortedEvaluations = [...evaluations].sort(compareEvaluationLaunches);
+
+  for (const evaluation of sortedEvaluations) {
+    for (const item of evaluation.items) {
+      const criterion = rubricCriteriaById.get(item.criterionId);
+
+      if (!criterion) {
+        continue;
+      }
+
+      const currentPoints = evolutionMap.get(item.criterionId) ?? [];
+      currentPoints.push({
+        evaluationId: evaluation.id,
+        evaluatedAt: evaluation.publishedAt,
+        achievedPercentage: calculateWeightedPercentage(
+          item.rawScore,
+          criterion.weightPercentage,
+          criterion.maxScore
+        )
+      });
+      evolutionMap.set(item.criterionId, currentPoints);
+    }
+  }
+
+  return evolutionMap;
+}
+
 function countCompletion(criteriaSnapshots: StudentCriterionSnapshot[]) {
   const completed = criteriaSnapshots.filter(
     (criterion) => criterion.latestRawScore !== null
@@ -80,6 +110,7 @@ function buildGroupSnapshots(
   evaluations: EvaluationLaunch[]
 ): StudentGroupSnapshot[] {
   const latestMap = buildLatestCriterionMap(evaluations);
+  const evolutionMap = buildCriterionEvolutionMap(evaluations);
 
   return rubricGroups.map((group) => {
     const criteria = rubricCriteria
@@ -106,6 +137,7 @@ function buildGroupSnapshots(
           latestRubricOptionDescription:
             latest?.item.rubricOptionDescription ?? null,
           earnedPercentage,
+          evolution: evolutionMap.get(criterion.id) ?? [],
           updatedAt: latest ? latest.publishedAt : null
         };
       });
@@ -176,6 +208,7 @@ function buildProgress(
       name: criterion.name,
       weightPercentage: criterion.weightPercentage,
       latestRawScore: currentMap.get(criterion.id)?.rawScore ?? null,
+      evolution: [],
       earnedPercentage: currentMap.has(criterion.id)
         ? calculateWeightedPercentage(
             currentMap.get(criterion.id)!.rawScore,

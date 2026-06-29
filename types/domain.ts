@@ -554,7 +554,14 @@ export interface StudentCriterionSnapshot {
   latestRubricOptionLabel?: string | null;
   latestRubricOptionDescription?: string | null;
   earnedPercentage: number;
+  evolution: StudentCriterionEvolutionPoint[];
   updatedAt: string | null;
+}
+
+export interface StudentCriterionEvolutionPoint {
+  evaluationId: string;
+  evaluatedAt: string;
+  achievedPercentage: number;
 }
 
 export interface StudentGroupSnapshot {
