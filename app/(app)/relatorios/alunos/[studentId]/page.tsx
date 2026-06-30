@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
 import { ReportBrandLockup } from "@/components/reports/report-brand-lockup";
@@ -56,6 +55,7 @@ export default async function StudentFinalReportPage(
   const searchParams = (await props.searchParams) ?? {};
   const requestedSemesterId = readSearchParam(searchParams, "semestre");
   const requestedEnrollmentId = readSearchParam(searchParams, "matricula");
+  const requestedEvaluationId = readSearchParam(searchParams, "avaliacaoId");
   const origin = readSearchParam(searchParams, "from");
   const sourceClassId = readSearchParam(searchParams, "turma");
   const isAuditOrigin = origin === "audit" || origin === "master-audit";
@@ -67,9 +67,12 @@ export default async function StudentFinalReportPage(
     requestedEnrollmentId,
     isAuditOrigin
       ? {
-          includeHistoricalStudents: true
+          includeHistoricalStudents: true,
+          selectedEvaluationId: requestedEvaluationId
         }
-      : undefined
+      : {
+          selectedEvaluationId: requestedEvaluationId
+        }
   );
   const isProfessorAreaReport = report?.reportContext.kind === "area";
   const reportBaseHref =
@@ -93,7 +96,7 @@ export default async function StudentFinalReportPage(
         report.reportContext.enrollmentId
           ? `&matricula=${report.reportContext.enrollmentId}`
           : ""
-      }${auditQuerySuffix}`
+      }${requestedEvaluationId ? `&avaliacaoId=${requestedEvaluationId}` : ""}${auditQuerySuffix}`
     : "";
 
   return (
@@ -347,10 +350,25 @@ export default async function StudentFinalReportPage(
                             <span>Tipo: {formatLaunchType(launch.launchType)}</span>
                             <span>Itens: {launch.itemCount}</span>
                             <span>Data: {formatDate(launch.publishedAt)}</span>
+                            {launch.professorName ? (
+                              <span>Avaliador: {launch.professorName}</span>
+                            ) : null}
                           </div>
                           {launch.notes ? (
                             <p className="table-helper">{launch.notes}</p>
                           ) : null}
+                          <div className="actions-row">
+                            <a
+                              href={`${reportBaseHref}?semestre=${report.selectedSemester.id}${
+                                report.reportContext.enrollmentId
+                                  ? `&matricula=${report.reportContext.enrollmentId}`
+                                  : ""
+                              }&avaliacaoId=${encodeURIComponent(launch.id)}${auditQuerySuffix}`}
+                              className="button button-secondary"
+                            >
+                              Ver lançamento
+                            </a>
+                          </div>
                         </article>
                       ))}
                     </div>

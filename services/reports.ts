@@ -179,9 +179,20 @@ interface StudentFinalAreaReport {
     isLegacyRecord: boolean;
     launchType: EvaluationRow["tipo_lancamento"];
     publishedAt: string;
+    professorName: string | null;
     notes: string | null;
     itemCount: number;
   }>;
+  selectedLaunch: {
+    id: string;
+    reference: string;
+    isLegacyRecord: boolean;
+    launchType: EvaluationRow["tipo_lancamento"];
+    publishedAt: string;
+    professorName: string | null;
+    notes: string | null;
+    itemCount: number;
+  } | null;
 }
 
 export interface StudentFinalReportData {
@@ -290,6 +301,7 @@ interface AcademicBundle {
   professorUsers: UserRow[];
   evaluations: EvaluationRow[];
   evaluationItems: EvaluationItemRow[];
+  criterionRows: CriterionRow[];
   absences: AbsenceRow[];
   dashboardsByEnrollmentId: Map<string, StudentDashboardData>;
   summariesByEnrollmentId: Map<string, ProfessorStudentSummary>;
@@ -317,6 +329,7 @@ interface ClassFinalReportOptions {
 
 interface StudentFinalReportOptions {
   includeHistoricalStudents?: boolean;
+  selectedEvaluationId?: string | null;
 }
 
 function round(value: number) {
@@ -333,6 +346,37 @@ function average(values: number[]) {
   }
 
   return round(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+function resolvePublishedEvaluationDate(evaluation: EvaluationRow) {
+  const identity = resolveLaunchIdentity({
+    launchType: evaluation.tipo_lancamento,
+    evaluatedAt: evaluation.avaliado_em,
+    reference: evaluation.referencia,
+    createdAt: evaluation.created_at
+  });
+
+  return identity.effectiveDateValue ?? evaluation.created_at ?? evaluation.avaliado_em;
+}
+
+function comparePublishedEvaluations(left: EvaluationRow, right: EvaluationRow) {
+  const publishedDifference = resolvePublishedEvaluationDate(left).localeCompare(
+    resolvePublishedEvaluationDate(right)
+  );
+
+  if (publishedDifference !== 0) {
+    return publishedDifference;
+  }
+
+  const createdDifference = (left.created_at ?? left.avaliado_em).localeCompare(
+    right.created_at ?? right.avaliado_em
+  );
+
+  if (createdDifference !== 0) {
+    return createdDifference;
+  }
+
+  return left.id.localeCompare(right.id);
 }
 
 function sortSemesters(semesters: SemesterRow[]) {
@@ -938,6 +982,7 @@ async function loadAcademicBundle(
     professorUsers,
     evaluations,
     evaluationItems,
+    criterionRows,
     absences,
     dashboardsByEnrollmentId,
     summariesByEnrollmentId,
@@ -1579,6 +1624,115 @@ function buildBlockSummaries(
     .sort((left, right) => left.blockName.localeCompare(right.blockName, "pt-BR"));
 }
 
+function buildLaunchHistoryEntry(
+  evaluation: EvaluationRow,
+  bundle: AcademicBundle
+) {
+  const identity = resolveLaunchIdentity({
+    launchType: evaluation.tipo_lancamento,
+    evaluatedAt: evaluation.avaliado_em,
+    reference: evaluation.referencia,
+    createdAt: evaluation.created_at
+  });
+
+  return {
+    id: evaluation.id,
+    reference: identity.label,
+    isLegacyRecord: identity.isLegacyRecord,
+    launchType: evaluation.tipo_lancamento,
+    publishedAt: resolvePublishedEvaluationDate(evaluation),
+    professorName:
+      bundle.professorUserById.get(evaluation.professor_id)?.nome_completo ?? null,
+    notes: evaluation.observacoes,
+    itemCount: (bundle.evaluationItemsByEvaluationId.get(evaluation.id) ?? []).length
+  };
+}
+
+function resolveHistoricalAreaDashboard(input: {
+  bundle: AcademicBundle;
+  enrollment: EnrollmentRow;
+  classGroup: ClassRow;
+  selectedEvaluationId?: string | null;
+}) {
+  const defaultDashboard = input.bundle.dashboardsByEnrollmentId.get(input.enrollment.id);
+
+  if (!defaultDashboard) {
+    return {
+      dashboard: null,
+      selectedLaunch: null
+    };
+  }
+
+  const evaluations =
+    input.bundle.evaluationsByEnrollmentId.get(input.enrollment.id) ?? [];
+
+  if (!input.selectedEvaluationId) {
+    return {
+      dashboard: defaultDashboard,
+      selectedLaunch: null
+    };
+  }
+
+  const sortedEvaluations = [...evaluations].sort(comparePublishedEvaluations);
+  const selectedEvaluationIndex = sortedEvaluations.findIndex(
+    (evaluation) => evaluation.id === input.selectedEvaluationId
+  );
+
+  if (selectedEvaluationIndex === -1) {
+    return {
+      dashboard: defaultDashboard,
+      selectedLaunch: null
+    };
+  }
+
+  const semester = input.bundle.semesterById.get(input.classGroup.semestre_id);
+  const studentRow = input.bundle.studentById.get(input.enrollment.aluno_id);
+  const studentUser = input.bundle.studentUserById.get(input.enrollment.aluno_id);
+
+  if (!semester || !studentRow || !studentUser) {
+    return {
+      dashboard: defaultDashboard,
+      selectedLaunch: buildLaunchHistoryEntry(
+        sortedEvaluations[selectedEvaluationIndex],
+        input.bundle
+      )
+    };
+  }
+
+  const evaluationSlice = sortedEvaluations.slice(0, selectedEvaluationIndex + 1);
+  const evaluationSliceIds = new Set(evaluationSlice.map((evaluation) => evaluation.id));
+  const professorLinks = input.bundle.linksByEnrollmentId.get(input.enrollment.id) ?? [];
+  const linkedProfessorUsers = professorLinks
+    .map((link) => input.bundle.professorUserById.get(link.professor_id))
+    .filter(Boolean) as UserRow[];
+  const evaluationItemRows = evaluationSlice.flatMap(
+    (evaluation) =>
+      input.bundle.evaluationItemsByEvaluationId.get(evaluation.id) ?? []
+  );
+  const absenceRows = (input.bundle.absencesByEnrollmentId.get(input.enrollment.id) ?? [])
+    .filter((absence) => !evaluationSliceIds.size || absence.matricula_turma_id === input.enrollment.id);
+
+  return {
+    dashboard: buildStudentDashboardFromRows({
+      studentUser,
+      studentRow,
+      enrollment: input.enrollment,
+      semester,
+      classGroup: input.classGroup,
+      professorLinks,
+      linkedProfessorUsers,
+      evaluationRows: evaluationSlice,
+      evaluationItemRows,
+      criterionRows: input.bundle.criterionRows,
+      absenceRows
+    }),
+    selectedLaunch: buildLaunchHistoryEntry(
+      sortedEvaluations[selectedEvaluationIndex],
+      input.bundle
+    )
+  };
+}
+
 function buildHubClassReports(
   classRows: ClassRow[],
   semester: SemesterRow,
@@ -1857,6 +2011,7 @@ export async function getAuthenticatedStudentFinalReport(
   const selectedClasses = visibleClassRows.filter((classGroup) =>
     selectedClassIds.has(classGroup.id)
   );
+  const selectedEvaluationId = options?.selectedEvaluationId?.trim() || null;
   const bundle = await loadAcademicBundle(
     enrollmentRows,
     selectedClasses,
@@ -1901,36 +2056,28 @@ export async function getAuthenticatedStudentFinalReport(
 
   const areaReports = enrollmentRows
     .map((enrollment) => {
-      const dashboard = bundle.dashboardsByEnrollmentId.get(enrollment.id);
       const classGroup = bundle.classById.get(enrollment.turma_id);
 
-      if (!dashboard || !classGroup) {
+      if (!classGroup) {
+        return null;
+      }
+
+      const { dashboard, selectedLaunch } = resolveHistoricalAreaDashboard({
+        bundle,
+        enrollment,
+        classGroup,
+        selectedEvaluationId
+      });
+
+      if (!dashboard) {
         return null;
       }
 
       const summary = bundle.summariesByEnrollmentId.get(enrollment.id);
       const evaluations = bundle.evaluationsByEnrollmentId.get(enrollment.id) ?? [];
-      const evaluationHistory = evaluations.map((evaluation) => {
-        const identity = resolveLaunchIdentity({
-          launchType: evaluation.tipo_lancamento,
-          evaluatedAt: evaluation.avaliado_em,
-          reference: evaluation.referencia,
-          createdAt: evaluation.created_at
-        });
-
-        return {
-          id: evaluation.id,
-          reference: identity.label,
-          isLegacyRecord: identity.isLegacyRecord,
-          launchType: evaluation.tipo_lancamento,
-          publishedAt:
-            identity.effectiveDateValue ?? evaluation.created_at ?? evaluation.avaliado_em,
-          notes: evaluation.observacoes,
-          itemCount: (
-            bundle.evaluationItemsByEvaluationId.get(evaluation.id) ?? []
-          ).length
-        };
-      });
+      const evaluationHistory = [...evaluations]
+        .sort(comparePublishedEvaluations)
+        .map((evaluation) => buildLaunchHistoryEntry(evaluation, bundle));
 
       return {
         enrollmentId: enrollment.id,
@@ -1953,7 +2100,8 @@ export async function getAuthenticatedStudentFinalReport(
         groups: dashboard.groups,
         progress: dashboard.progress,
         absences: dashboard.absences,
-        launchHistory: evaluationHistory
+        launchHistory: evaluationHistory,
+        selectedLaunch
       };
     })
     .filter(Boolean)
