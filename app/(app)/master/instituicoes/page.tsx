@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { toggleInstitutionStatusAction } from "@/app/(app)/master/instituicoes/actions";
 import { MetricCard } from "@/components/common/metric-card";
 import { SectionCard } from "@/components/common/section-card";
@@ -10,48 +11,75 @@ import {
 import { requireRole } from "@/lib/auth/session";
 import { getInstitutionManagementPageData } from "@/services/institution-management";
 
-export default async function MasterInstitutionsPage() {
+interface MasterInstitutionsPageProps {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}
+
+function readSearchParam(
+  searchParams: Record<string, string | string[] | undefined>,
+  key: string
+) {
+  const value = searchParams[key];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function MasterInstitutionsPage(
+  props: MasterInstitutionsPageProps
+) {
   await requireRole(["coordenador_master"]);
+  const searchParams = (await props.searchParams) ?? {};
   const pageData = await getInstitutionManagementPageData();
+  const institutionFilter =
+    readSearchParam(searchParams, "status") === "desativadas"
+      ? "desativadas"
+      : "ativadas";
+  const activeInstitutions = pageData.institutions.filter(
+    (institution) => institution.isActive
+  );
+  const inactiveInstitutions = pageData.institutions.filter(
+    (institution) => !institution.isActive
+  );
+  const visibleInstitutions =
+    institutionFilter === "desativadas" ? inactiveInstitutions : activeInstitutions;
 
   return (
     <div className="stack master-dashboard master-institutions-dashboard">
       <section className="hero-card">
-        <p className="eyebrow">Instituições / IES</p>
-        <h1>Governança da arquitetura multi-institucional</h1>
+        <p className="eyebrow">Instituicoes / IES</p>
+        <h1>Governanca da arquitetura multi-institucional</h1>
         <p>
-          Cadastre, revise e ative instituições de ensino sem alterar
-          automaticamente unidades, cursos e ofertas já existentes.
+          Cadastre, revise e ative instituicoes de ensino sem alterar
+          automaticamente unidades, cursos e ofertas ja existentes.
         </p>
       </section>
 
       <div className="metrics-grid">
         <MetricCard
-          label="Instituições"
+          label="Instituicoes"
           value={String(pageData.summary.totalInstitutions)}
           hint="IES cadastradas na arquitetura nova."
         />
         <MetricCard
           label="Ativas"
           value={String(pageData.summary.totalActiveInstitutions)}
-          hint="Instituições prontas para operação."
+          hint="Instituicoes prontas para operacao."
           tone="positive"
         />
         <MetricCard
           label="Inativas"
           value={String(pageData.summary.totalInactiveInstitutions)}
-          hint="Instituições preservadas sem cascade automático."
+          hint="Instituicoes preservadas sem cascade automatico."
           tone={pageData.summary.totalInactiveInstitutions > 0 ? "alert" : "positive"}
         />
         <MetricCard
           label="Unidades vinculadas"
           value={String(pageData.summary.totalLinkedUnits)}
-          hint="Unidades que já apontam para uma instituição."
+          hint="Unidades que ja apontam para uma instituicao."
         />
         <MetricCard
           label="Cursos"
           value={String(pageData.summary.totalCourses)}
-          hint="Cursos cadastrados por instituição."
+          hint="Cursos cadastrados por instituicao."
         />
         <MetricCard
           label="Ofertas"
@@ -61,8 +89,8 @@ export default async function MasterInstitutionsPage() {
       </div>
 
       <SectionCard
-        title="Cadastrar instituição"
-        description="Crie novas IES com slug único e mantenha o cadastro administrativo sob controle do módulo master."
+        title="Cadastrar instituicao"
+        description="Crie novas IES com slug unico e mantenha o cadastro administrativo sob controle do modulo master."
       >
         <div className="management-block-card">
           <MasterInstitutionCreateForm />
@@ -70,16 +98,36 @@ export default async function MasterInstitutionsPage() {
       </SectionCard>
 
       <SectionCard
-        title="Instituições cadastradas"
-        description="Edite dados básicos da IES e ative ou desative o cadastro sem afetar automaticamente unidades, cursos e ofertas vinculadas."
+        title="Instituicoes cadastradas"
+        description="Edite dados basicos da IES e ative ou desative o cadastro sem afetar automaticamente unidades, cursos e ofertas vinculadas."
+        actions={
+          <div className="actions-row">
+            <Link
+              href={{ pathname: "/master/instituicoes", query: { status: "ativadas" } }}
+              className={`button button-small${
+                institutionFilter === "ativadas" ? "" : " button-secondary"
+              }`}
+            >
+              Ativadas ({activeInstitutions.length})
+            </Link>
+            <Link
+              href={{ pathname: "/master/instituicoes", query: { status: "desativadas" } }}
+              className={`button button-small${
+                institutionFilter === "desativadas" ? "" : " button-secondary"
+              }`}
+            >
+              Desativadas ({inactiveInstitutions.length})
+            </Link>
+          </div>
+        }
       >
         <div className="master-course-management-stack">
           <p className="field-help">
-            Desativar uma instituição nesta etapa não desativa automaticamente
-            unidades, cursos ou ofertas já vinculadas.
+            Desativar uma instituicao nesta etapa nao desativa automaticamente
+            unidades, cursos ou ofertas ja vinculadas.
           </p>
 
-          {pageData.institutions.length ? (
+          {visibleInstitutions.length ? (
             <div className="table-wrap master-contexts-table-wrap">
               <table className="table master-institution-management-table">
                 <thead>
@@ -92,17 +140,17 @@ export default async function MasterInstitutionsPage() {
                     <th>Unidades</th>
                     <th>Cursos</th>
                     <th>Ofertas</th>
-                    <th>Ações</th>
+                    <th>Acoes</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {pageData.institutions.map((institution) => (
+                  {visibleInstitutions.map((institution) => (
                     <tr key={institution.id}>
                       <td>
                         <strong>{institution.name}</strong>
                         {institution.displayName ? (
                           <div className="table-helper">
-                            Exibição interna: {institution.displayName}
+                            Exibicao interna: {institution.displayName}
                           </div>
                         ) : null}
                         {!institution.isActive &&
@@ -144,7 +192,7 @@ export default async function MasterInstitutionsPage() {
                             action={toggleInstitutionStatusAction}
                             confirmationMessage={`Deseja ${
                               institution.isActive ? "desativar" : "ativar"
-                            } a instituição ${institution.name}?`}
+                            } a instituicao ${institution.name}?`}
                             fields={[
                               { name: "institution_id", value: institution.id },
                               { name: "ativo", value: institution.isActive ? "false" : "true" }
@@ -155,7 +203,7 @@ export default async function MasterInstitutionsPage() {
                           </ConfirmActionForm>
 
                           <details className="master-unit-disclosure master-institution-inline-disclosure">
-                            <summary>Editar instituição</summary>
+                            <summary>Editar instituicao</summary>
                             <div className="management-block-card master-institution-inline-card">
                               <MasterInstitutionEditForm institution={institution} />
                             </div>
@@ -168,14 +216,18 @@ export default async function MasterInstitutionsPage() {
               </table>
             </div>
           ) : (
-            <p className="empty-message">Nenhuma instituição cadastrada até o momento.</p>
+            <p className="empty-message">
+              {institutionFilter === "desativadas"
+                ? "Nenhuma instituicao desativada encontrada no momento."
+                : "Nenhuma instituicao ativada encontrada no momento."}
+            </p>
           )}
         </div>
       </SectionCard>
 
       <SectionCard
         title="Identidade Visual da IES"
-        description="Configure nome de exibição e logos da instituição para uso apenas no ambiente autenticado do Nexus Academy."
+        description="Configure nome de exibicao e logos da instituicao para uso apenas no ambiente autenticado do Nexus Academy."
       >
         <MasterInstitutionBrandingForm institutions={pageData.institutions} />
       </SectionCard>
