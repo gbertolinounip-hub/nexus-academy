@@ -3135,11 +3135,20 @@ export async function getClinicalSupervisionPageData(
     try {
       const bundle = await loadClinicalReferenceBundle(caseRows, currentUser);
       const baseCases = mapClinicalCaseSummaries(caseRows, bundle);
-      const [notificationCenter, attendancePendings] = await Promise.all([
-        loadClinicalNotificationCenter(currentUser, baseCases),
+      const operationalCases = baseCases.filter((caseItem) =>
+        isClinicalOperationalCase(caseItem, bundle)
+      );
+      const operationalCaseIdSet = new Set(
+        operationalCases.map((caseItem) => caseItem.id)
+      );
+      const [notificationCenter, rawAttendancePendings] = await Promise.all([
+        loadClinicalNotificationCenter(currentUser, operationalCases),
         loadClinicalPendingEvolutionSummaries(currentUser)
       ]);
-      const cases = baseCases.map((caseItem) => {
+      const attendancePendings = rawAttendancePendings.filter((pendingItem) =>
+        operationalCaseIdSet.has(pendingItem.caseItem.id)
+      );
+      const cases = operationalCases.map((caseItem) => {
         const pendingNotification = notificationCenter.pendingCaseMap.get(caseItem.id);
 
         return {
@@ -4679,6 +4688,25 @@ function isClinicalCaseCareActive(caseItem: ClinicalCaseSummary) {
     caseItem.active &&
     caseItem.status !== "alta" &&
     caseItem.status !== "encerrado"
+  );
+}
+
+function isClinicalCaseInOpenSemester(
+  caseItem: ClinicalCaseSummary,
+  bundle: Pick<ClinicalReferenceBundle, "semestersById">
+) {
+  const semesterStatus = bundle.semestersById.get(caseItem.semesterId)?.status ?? null;
+
+  return semesterStatus !== "encerrado";
+}
+
+function isClinicalOperationalCase(
+  caseItem: ClinicalCaseSummary,
+  bundle: Pick<ClinicalReferenceBundle, "semestersById">
+) {
+  return (
+    isClinicalCaseCareActive(caseItem) &&
+    isClinicalCaseInOpenSemester(caseItem, bundle)
   );
 }
 
